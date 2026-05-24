@@ -2510,3 +2510,254 @@ e9327b1 feat: Phase 12 Steps 1-2 — Per-item trace types + adapter capture
 4. `python -c "from core.pipeline.tracing import StreamingTraceRecord, StreamingTraceWriter; r = StreamingTraceRecord(pipeline_run_id='x', step_name='s', dependency_name='d', item_index=0, item_delta_preview='preview', is_terminal=False, trace_context={'k':'v'}, ts_iso='2026-01-01T00:00:00Z'); print('OK')"` — dataclass 构造正常
 5. `python scripts/analyze_component_candidates.py` — 产出分析报告，3 个 component_candidate keys 已分类
 6. `python -c "from core.observability.sqlite_sink import SQLiteTraceSink; import tempfile, os; tmp = tempfile.mkdtemp(); sink = SQLiteTraceSink(os.path.join(tmp, 'test.db')); keys = sink.query_keys(component_candidate_only=True); assert len(keys) == 3; sink.close(); print('OK')"` — 查询接口正常
+
+---
+
+## Phase 13: 组件平台 — 组件级 Trace 合约 (组件平台)
+
+**完成状态**: ✅ 已完成 (Phase 13)
+
+### 背景
+
+Phase 12 完成了观测闭环：逐项流 trace、SQLiteTraceSink、组件候选实证分析。382 tests、12 guardrails、0 external deps。
+
+Phase 12 分析脚本将 3 个 `component_candidate=True` key 全部标记为 `needs_more_data`——但这是**方法论问题**（跨引擎池化稀释了每引擎出现率），而非数据质量问题。每引擎分析显示所有 3 个 key 100% 出现率、100% 类型匹配。
+
+Phase 13 的核心命题：**定义引擎必须满足的正式 trace 合约**——"任何声称具有 retrieval 能力的引擎必须产出 `retrieval.chunk_id` 和 `retrieval.latency_ms`"。
+
+`trace_registry.py` 的 docstring 明确声明：`component_candidate=True` 标记了"当组件平台构建时应迁移到 `core/contracts/trace_keys.py` 的 key"。Phase 13 兑现了这一承诺。
+
+### 架构定位
+
+```
+组件平台 (core/contracts/)     ← Phase 13: 新增 trace_keys.py
+    ↑ Phase 13: 组件级 trace 合约
+    │
+引擎平台 (core/pipeline/)      ← N=2 (RAG + Planning)
+    ↑
+    │  Phase 11-12: trace_context pipeline + sink ← 已完成
+    │
+观测层 (core/observability/)   ← Phase 13: engine→component mapping
+    │
+    ↓
+编排平台 (core/orchestration/)  ← Phase 14+ (预设计在 Phase 12)
+```
+
+### 关键设计决策
+
+**a) Option C: 数据模型 + 校验（非简单迁移，非 Protocol）**
+
+| 方案 | 描述 | 判断 |
+|------|------|------|
+| A: 简单迁移 | 将 3 个 key 移到新文件，无校验 | ❌ 只是文件搬家，不构成合约。引擎仍无正式目标 |
+| B: Protocol 式 | 每种组件类型定义一个 trace Protocol 类 | ❌ 过度工程。Trace key 是数据而非行为。Protocol 暗示方法，trace key 无方法 |
+| **C: 数据模型 + 校验** | frozen dataclass + 注册表 dict + validator 函数 | ✅ 与 `validation.py` 模式完全一致 |
+
+`ComponentTraceKeyDef` 是 `TraceKeyDef` 的自然对等物——声明 WHAT keys 存在、`COMPONENT_TRACE_KEYS` 按组件类型分组、`validate_component_trace()` 验证 trace_context 满足合约。
+
+**b) Engine→Component 映射在观测层，不在合约层**
+
+`ENGINE_TO_COMPONENT_MAP` 需要同时知道引擎 key 名 (`rag.chunk_id`) 和组件 key 名 (`retrieval.chunk_id`)。如果放在 `core/contracts/trace_keys.py`，合约层将需要导入引擎名——违反平台隔离（合约层应定义 WHAT，不应知道哪些引擎存在）。
+
+观测层 (`core/observability/`) 是 trace 边界——它已有 `TraceKeyDef`（引擎特定 key）。映射放在这里是正确的架构位置。
+
+**c) 单表 Schema 扩展（非双表）**
+
+在现有 `trace_keys` 表新增 `component_type TEXT` 列（NULL = 引擎 key，非 NULL = 组件 key）。避免了：
+- 双表 JOIN 查询复杂度
+- 第二条种子路径及其不一致风险
+- 额外的迁移代码
+
+**d) `component_candidate` flag 保留（非移除）**
+
+4+ 个消费者（guardrails、分析脚本、sink queries、tests）仍引用 `component_candidate`。移除需要跨文件协调变更。标记为 deprecated 但在 Phase 14+ 前保留——安全路径。
+
+**e) `trace_key_registration` WARNING→ERROR**
+
+Phase 11-12 保持 WARNING 因为注册表不成熟，新引擎会自然添加 key。组件平台建成后，两个注册表（引擎 + 组件）覆盖所有已知 key，未注册 key 是真正的缺口。
+
+**f) `component_trace_completeness` 新规则 (WARNING)**
+
+组件平台是全新的——ERROR 会阻塞仍在开发中的引擎。WARNING 提示但不阻塞。Phase 14+ 升级为 ERROR。
+
+### 实现序列
+
+| # | 步骤 | 关键文件 | 行数 |
+|---|------|---------|------|
+| 0 | 推理链 (预设计) | `.ai_reasoning/chains/phase_13_component_trace_contracts.yaml` | ~243 |
+| 1 | 组件 trace key 注册表 | `core/contracts/trace_keys.py` (NEW) | ~193 |
+| 2 | Engine→Component 映射 | `core/observability/trace_registry.py` | ~28 |
+| 3 | Sink Schema v2 | `core/observability/sink_schema.py` | ~4 |
+| 4 | SQLiteSink v2 (迁移+种子+查询) | `core/observability/sqlite_sink.py` | ~121 |
+| 5 | 公开 API 导出 | `core/contracts/__init__.py` + `core/observability/__init__.py` | ~16 |
+| 6 | Guardrails: 升级 + 新规则 | `trace_key_registration.py` + `component_trace_completeness.py` (NEW) + `trace_context_namespace.py` + `__init__.py` + `checker.py` | ~192 |
+| 7 | 修复分析脚本 | `scripts/analyze_component_candidates.py` | ~51 |
+| 8 | 测试 | 3 个新测试文件 + 2 个现有测试更新 | ~581 |
+| 9 | 全量验证 + 链最终化 | — | — |
+
+### 核心交付物
+
+#### `core/contracts/trace_keys.py` — 组件 Trace Key 合约
+
+```python
+@dataclass(frozen=True)
+class ComponentTraceKeyDef:
+    component_type: str   # "retrieval" | "generation" | "scoring"
+    key_suffix: str       # e.g. "chunk_id", "latency_ms"
+    type: type            # int, str, float
+    semantics: str
+    unit: str = ""
+
+    @property
+    def full_key(self) -> str:
+        return f"{self.component_type}.{self.key_suffix}"
+
+COMPONENT_TRACE_KEYS: Dict[str, ComponentTraceKeyDef] = {
+    "retrieval.chunk_id": ComponentTraceKeyDef(
+        component_type="retrieval", key_suffix="chunk_id", type=str,
+        semantics="Unique identifier of the retrieved chunk in the vector store",
+    ),
+    "retrieval.latency_ms": ComponentTraceKeyDef(
+        component_type="retrieval", key_suffix="latency_ms", type=float,
+        semantics="Wall-clock time for the vector store retrieval call, in milliseconds",
+        unit="ms",
+    ),
+    "generation.cumulative_tokens": ComponentTraceKeyDef(
+        component_type="generation", key_suffix="cumulative_tokens", type=int,
+        semantics="Total LLM tokens consumed across all generation steps so far",
+        unit="tokens",
+    ),
+    # scoring: 0 keys 当前——但"scoring"是合法的组件类型
+}
+
+def validate_component_trace(
+    trace_context: Dict[str, Any] | None, component_type: str
+) -> ContractValidationResult: ...
+```
+
+校验 5 层：null context (ERROR)、未知 component_type (ERROR)、缺失 required key (ERROR)、类型不匹配 via isinstance (ERROR)、额外 key (WARNING)。
+
+#### `ENGINE_TO_COMPONENT_MAP` — 引擎→组件解析
+
+```python
+ENGINE_TO_COMPONENT_MAP: Dict[str, str] = {
+    "planning.cumulative_tokens": "generation.cumulative_tokens",
+    "rag.chunk_id": "retrieval.chunk_id",
+    "rag.retrieval_latency_ms": "retrieval.latency_ms",
+}
+```
+
+位于 `trace_registry.py`（观测层/trace 边界），非 `core/contracts/`（平台隔离）。
+
+#### Schema v2
+
+| 变更 | 说明 |
+|------|------|
+| `component_type` 列 (NULLABLE_TEXT) | 新增于 `trace_keys` 表。NULL = 引擎 key，非 NULL = 组件 key |
+| `idx_keys_component_type` | 新索引：按组件类型筛选 |
+| `CURRENT_SCHEMA_VERSION = 2` | 版本号升级 |
+| 迁移：`_migrate_v1_to_v2()` | PRAGMA table_info 检测 + ALTER TABLE ADD COLUMN。幂等 |
+
+### 分析脚本修复
+
+| 修复 | 说明 |
+|------|------|
+| `--per-engine` flag | 每引擎 key 在同引擎 item 范围内分析（非跨引擎池化） |
+| `unique_identifiers` 子分类 | 将 `free_text` 细分为 `unique_identifiers` (<200 chars, 无空格, 每值唯一) 和真正 `free_text` |
+| `CLASSIFICATION_RULES` 字符串→集合 | `value_cardinality_set: {"bounded", "unique_identifiers"}` |
+| `_migration_recommendations()` | 使用 `ENGINE_TO_COMPONENT_MAP` 替代错误的引擎前缀剥离 |
+
+修复后产出确定结果：
+```
+[READY] planning.cumulative_tokens → generation.cumulative_tokens (100% occurrence, bounded)
+[READY] rag.chunk_id → retrieval.chunk_id (100% occurrence, unique_identifiers)
+[READY] rag.retrieval_latency_ms → retrieval.latency_ms (100% occurrence, bounded)
+```
+
+### Guardrails: 12 → 14 条规则
+
+| 规则 | 变更 | 说明 |
+|------|------|------|
+| `trace_key_registration` | WARNING→ERROR | 注册表覆盖已完整 |
+| `trace_key_registration` | 扩展 `_get_registry_keys()` | 联合 TRACE_KEY_REGISTRY + COMPONENT_TRACE_KEYS |
+| `component_trace_completeness` | NEW (WARNING) | AST 扫描 engines/ 目录，引擎产出部分组件 key → 必须产出全部 |
+| `trace_context_namespace` | 扩展 `_KNOWN_ENGINES` | 新增 "retrieval", "generation", "scoring" |
+
+### 边界情况
+
+| 场景 | 行为 |
+|------|------|
+| `trace_context=None` in validate | `passed=False`, error "trace_context is None" |
+| Unknown `component_type` | `passed=False`, error "unknown component_type: X" |
+| Engine 用组件 key 直接产出 (`retrieval.chunk_id`) | 扩展 guardrail 识别（联合注册表） |
+| 已有 v1 数据库打开 | `_migrate_v1_to_v2()` 通过 ALTER TABLE 新增列 |
+| 全新数据库 | CREATE TABLE 含 component_type 列，迁移为 no-op |
+| Schema version 竞态 (v2 已记录) | `_record_schema_version()` 先检查已有版本 |
+| 种子已存在 component key | 逐 key 检查防止重复 INSERT |
+| Engine 无任何 component key | `component_trace_completeness` 不报告违规（无声明 = 无检查） |
+| `scoring` 类型查询 | 返回空列表——0 个 key，但类型合法 |
+
+### 反模式
+
+1. **Mapping in contracts**: 在 `core/contracts/trace_keys.py` 中定义 `ENGINE_TO_COMPONENT_MAP`——合约层需要知道 `rag.chunk_id` 等引擎名，违反平台隔离
+2. **Protocol-based trace keys**: 使用 ABC 或 Protocol——trace key 是数据非行为。frozen dataclass + validator 是既定模式
+3. **移除 component_candidate flag**: 4+ 消费者仍依赖它。Phase 14+ 后再废弃
+4. **独立 component_trace_keys 表**: 增加 JOIN 复杂度。单表 NULL 语义更简洁
+5. **校验逻辑中硬编码 key 名**: 始终引用 `COMPONENT_TRACE_KEYS` 或 `ENGINE_TO_COMPONENT_MAP`
+6. **修改 TraceKeyDef 结构**: 引擎层 key 稳定。迁移在现有类型旁添加新类型，不改变其形态
+7. **跨引擎出现率期望**: 期待 `rag.chunk_id` 在异构引擎混合 item 中出现 95%
+8. **错误的引擎前缀剥离**: 分析脚本用 `key_name.split('.')[1]` + 前缀 "retrieval."——`planning.cumulative_tokens` 应映射到 `generation.*` 而非 `retrieval.*`
+
+### 交付物
+
+| 文件 | 说明 |
+|------|------|
+| `core/contracts/trace_keys.py` (NEW) | ComponentTraceKeyDef + COMPONENT_TRACE_KEYS + validate_component_trace |
+| `core/observability/trace_registry.py` | ENGINE_TO_COMPONENT_MAP (3 entries) |
+| `core/observability/sink_schema.py` | component_type 列 + idx_keys_component_type + CURRENT_SCHEMA_VERSION=2 |
+| `core/observability/sqlite_sink.py` | _migrate_v1_to_v2 + 组件 key 种子 + query_component_keys |
+| `core/contracts/__init__.py` | 导出 ComponentTraceKeyDef, COMPONENT_TRACE_KEYS, validate_component_trace |
+| `core/observability/__init__.py` | 导出 ENGINE_TO_COMPONENT_MAP |
+| `guardrails/rules/component_trace_completeness.py` (NEW) | AST-based 新规则 (WARNING) |
+| `guardrails/rules/trace_key_registration.py` | 严重级升级 + 联合注册表 |
+| `guardrails/rules/trace_context_namespace.py` | 新增 3 个已知前缀 |
+| `guardrails/checker.py` + `guardrails/rules/__init__.py` | 注册新规则 |
+| `scripts/analyze_component_candidates.py` | --per-engine + unique_identifiers + ENGINE_TO_COMPONENT_MAP |
+| `.ai_reasoning/chains/phase_13_component_trace_contracts.yaml` (NEW) | 推理链：5 个替代方案 + 8 个反模式 |
+| `.ai_reasoning/index.yaml` | 更新 index |
+| `tests/conformance/test_component_trace_keys.py` (NEW) | 27 个测试 |
+| `tests/integration/test_component_trace_sink.py` (NEW) | 14 个测试 |
+| `tests/e2e/test_component_trace_e2e.py` (NEW) | 5 个测试 |
+| `tests/e2e/test_sqlite_sink.py` | 期望值更新 (6→9 keys, v1→v2, index count) |
+| `tests/e2e/test_trace_serialization.py` | WARNING→ERROR |
+
+### 架构不变量检查
+
+| # | 不变量 | 结果 |
+|---|--------|------|
+| 1 | 零外部依赖 | ✅ |
+| 2 | `core/contracts/` 不 import 引擎层类型 | ✅ (仅 import validation.py 的 ContractValidationResult) |
+| 3 | Mapping 在观测层，不在合约层 | ✅ (ENGINE_TO_COMPONENT_MAP 在 trace_registry.py) |
+| 4 | 已有 TraceWriter 实现不变 | ✅ |
+| 5 | 382 已有测试仍通过 | ✅ (428 pass = 382 + 46 新增) |
+| 6 | Guardrails: 12→14 规则 PASSED | ✅ |
+| 7 | Schema v1→v2 零数据丢失 | ✅ (ALTER TABLE ADD COLUMN only) |
+| 8 | 单表设计，无 JOIN 复杂度 | ✅ |
+| 9 | 分析脚本产出确定结果 (3/3 READY) | ✅ |
+| 10 | 2 条新推理链 (phase_13 + phase_12_orchestration) | ✅ |
+| 11 | 不变量 #11 "观测先行" 践行 | ✅ (组件合约直接从 Phase 12 实证数据翻译) |
+
+### 提交历史
+
+```
+14c5b08 feat: Phase 13 — Component trace contracts, engine mapping, schema v2, guardrails
+```
+
+### 验证
+
+1. `pytest tests/ -q` — 428 passed, 1 skipped, 0 failures
+2. `python -m guardrails check --all` — 14 rules PASSED
+3. `python -c "from core.contracts import ComponentTraceKeyDef, COMPONENT_TRACE_KEYS, validate_component_trace; print('OK')"` — 导入正常
+4. `python -c "from core.observability import ENGINE_TO_COMPONENT_MAP; assert len(ENGINE_TO_COMPONENT_MAP) == 3; print('OK')"` — 映射加载正常
+5. `python scripts/analyze_component_candidates.py --per-engine` — 3/3 READY, 0 FIX
+6. Ad-hoc: `SQLiteTraceSink.query_component_keys()` — 3 component keys, `query_component_keys('retrieval')` — 2 keys

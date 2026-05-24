@@ -1,7 +1,7 @@
 """Declarative trace key registry: engine-private dialect snapshot.
 
 Phase 11: N=2 engine stubs only. NOT a cross-engine semantic standard.
-Phase 13: component_candidate keys migrated to core/contracts/trace_keys.py.
+Phase 14: orchestration engine keys added (N=3 engines).
 ENGINE_TO_COMPONENT_MAP resolves engine-specific keys to canonical
 component-level keys defined in the component platform.
 """
@@ -76,6 +76,40 @@ TRACE_KEY_REGISTRY: Dict[str, TraceKeyDef] = {
         engine="rag",
         unit="ms",
         component_candidate=True,
+    ),
+
+    # ── Orchestration engine keys (Phase 14) ────────────────────────
+    # All 6 keys projected in Phase 12 pre-design. component_candidate=False
+    # because orchestration describes engine behavior, not component capability.
+    "orchestration.dag_node_id": TraceKeyDef(
+        type=str,
+        semantics="Unique identifier of the DAG node currently executing",
+        engine="orchestration",
+    ),
+    "orchestration.parallel_depth": TraceKeyDef(
+        type=int,
+        semantics="Current depth in the parallel execution tree (0=root)",
+        engine="orchestration",
+    ),
+    "orchestration.merge_ordinal": TraceKeyDef(
+        type=int,
+        semantics="Ordinal position when merging results from parallel branches",
+        engine="orchestration",
+    ),
+    "orchestration.branch_taken": TraceKeyDef(
+        type=str,
+        semantics="Identifier of which branch was selected for conditional branching",
+        engine="orchestration",
+    ),
+    "orchestration.retry_count": TraceKeyDef(
+        type=int,
+        semantics="Number of retries attempted for this node (0=first attempt)",
+        engine="orchestration",
+    ),
+    "orchestration.resource_pool_key": TraceKeyDef(
+        type=str,
+        semantics="Resource pool identifier for capacity tracking",
+        engine="orchestration",
     ),
 }
 

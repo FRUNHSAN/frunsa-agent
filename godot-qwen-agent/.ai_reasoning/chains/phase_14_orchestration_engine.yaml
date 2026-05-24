@@ -1,0 +1,323 @@
+# ── Reasoning Chain ───────────────────────────────────────────────────
+chain_id: phase_14_orchestration_engine
+title: "Orchestration engine: stub + 6 trace keys + completeness guardrail"
+created_at: "2026-05-25T16:00:00Z"
+status: active
+tags: [orchestration, engine, trace_keys, guardrail, stub, ast_scanning]
+related_chains:
+  - phase_12_orchestration_trace_pre_design
+  - phase_13_component_trace_contracts
+
+# ── 1. Context ───────────────────────────────────────────────────────
+
+context: |
+  Phase 13 completed the component platform: 3 PROMOTE keys migrated to
+  core/contracts/trace_keys.py, ENGINE_TO_COMPONENT_MAP established,
+  schema v2 deployed. 428 tests, 14 guardrails, 0 external deps.
+
+  Phase 12 pre-designed 6 projected orchestration.* trace_context keys
+  as documentation-only — explicitly marked "NOT FOR IMPLEMENTATION."
+  Phase 14 materializes them: the orchestration engine stub, formal
+  registration of all 6 keys in TRACE_KEY_REGISTRY, an orchestration
+  trace completeness guardrail, and the deferred _insert_rows() extraction
+  from Phase 12/13 health checks.
+
+  The orchestration engine is the first engine to BRIDGE TWO TRACE LAYERS
+  in a single StreamItem: it consumes component trace keys (retrieval.*)
+  to make orchestration decisions, and produces orchestration trace keys
+  (orchestration.*) describing those decisions. This validates the
+  cross-validation finding that 3 of 6 orchestration keys depend on
+  component trace as input.
+
+# ── 2. Decision ──────────────────────────────────────────────────────
+
+decision: |
+  Phase 14 delivers the orchestration engine in 8 code changes:
+
+  1. **_insert_rows() extraction (sqlite_sink.py)** — Extract the
+     duplicated INSERT pattern (6 lines, 2 call sites) into a helper
+     method. Does NOT call commit() internally — callers control
+     transaction boundaries. This is a pre-feature refactor: extract
+     before adding orchestration seeding to avoid touching the same
+     pattern twice.
+
+  2. **6 TraceKeyDef entries (trace_registry.py)** — Register all 6
+     projected orchestration.* keys with engine="orchestration",
+     component_candidate=False. Follows Phase 12 pre-design exactly.
+
+  3. **Seed orchestration keys (sqlite_sink.py)** — _seed_trace_keys()
+     inserts 6 orchestration rows. Zero schema migration — the TEXT
+     engine column already supports "orchestration". Version stays at 2.
+
+  4. **Orchestration engine stub (engines/orchestration/)** — Stub
+     simulating N=2 parallel retrieval branches → merge. Uses
+     asyncio.gather() (matching PipelineRunner._arun_impl()), emits
+     both component keys (consumed) and orchestration keys (produced)
+     in every StreamItem.trace_context.
+
+  5. **Shared AST utility + orchestration_trace_completeness guardrail** —
+     Extract _collect_trace_keys_from_engine() from
+     component_trace_completeness.py to guardrails/rules/_ast_utils.py.
+     New orchestration_trace_completeness rule: dual check (missing
+     required keys ERROR + unregistered orchestration keys ERROR).
+
+  6. **Namespace + exports** — Add "orchestration" to
+     trace_context_namespace known prefixes. Export new types.
+
+  7. **Tests** — Conformance (18 tests, acceptance gate), E2E (6 tests),
+     integration (5 tests), existing test updates (2 files).
+
+  8. **Full suite verification** — 428+ tests, 15 guardrails (14 + 1).
+
+  Key design: orchestration is an ENGINE (engines/orchestration/), not
+  a component. Its keys go in TRACE_KEY_REGISTRY, not COMPONENT_TRACE_KEYS.
+  No validate_orchestration_trace() peer — single-engine contracts are
+  enforced by guardrails + conformance tests, not cross-engine validators.
+
+# ── 3. Rationale ──────────────────────────────────────────────────────
+
+rationale: |
+  ## Why orchestration is an engine, not a component?
+
+  Orchestration keys describe the orchestration engine's own behavior
+  (DAG node, parallel depth, merge ordinal, branch decision, retry count,
+  resource pool). These are engine-internal concerns, not component
+  capabilities. The Phase 12 pre-design explicitly stated:
+  "No key is marked component_candidate." Components define WHAT
+  (retrieval, generation, scoring); engines define HOW.
+
+  ## Why no validate_orchestration_trace() peer?
+
+  validate_component_trace() exists because component contracts are
+  CROSS-ENGINE — any engine claiming retrieval capability must satisfy
+  retrieval.chunk_id + retrieval.latency_ms. A validator function is
+  the right tool for cross-engine contracts.
+
+  Orchestration is a SINGLE ENGINE. Its contract ("the orchestration
+  stub emits these 6 keys") is enforced by:
+  1. trace_key_registration guardrail (ERROR) — already covers
+     unregistered keys via union of both registries
+  2. orchestration_trace_completeness guardrail (ERROR) — verifies
+     all 6 keys present in stub source code
+  3. Conformance tests — verify runtime output correctness
+
+  Adding a 97-line validator for a single-engine contract would
+  duplicate the pattern without adding enforcement value.
+
+  ## Why _insert_rows() without commit()?
+
+  Transaction boundaries belong to callers. write() may want to batch
+  multiple INSERTs in a single transaction. _insert_per_item_records()
+  may be called in a loop. If _insert_rows() committed internally,
+  callers would lose the ability to batch.
+
+  Future benefit: Phase 15+ could add a bulk_write() method that calls
+  _insert_rows() once for summary + per-item rows in a single transaction.
+
+  ## Why asyncio.gather() in stub?
+
+  PipelineRunner._arun_impl() uses asyncio.gather() for concurrent DAG
+  branch execution. Using the same concurrency primitive in the stub
+  validates that the real orchestration engine can drop in directly.
+  threading.Thread cannot yield StreamItems from within a thread.
+  Sync for-loop doesn't validate the concurrency model.
+
+  ## Why dual check in orchestration_trace_completeness?
+
+  Single "missing keys" check only detects incompleteness. Adding
+  "unregistered keys" check detects pollution — if the orchestration
+  engine accidentally emits a typo'd key (e.g., "orchestration.retry_cnt"
+  instead of "orchestration.retry_count"), the guardrail catches it
+  BEFORE it becomes a data quality issue in production trace archives.
+
+  ## Why orchestration_trace_completeness is ERROR (not WARNING)?
+
+  component_trace_completeness started at WARNING because the component
+  platform was brand new in Phase 13 — real-world use was needed to
+  validate the rule's false-positive rate.
+
+  Orchestration has no exploratory phase. The 6 keys were pre-defined
+  in Phase 12 with full rationale. The stub is the sole producer.
+  Any deviation from the 6-key contract is a real error — either a
+  missing key (incomplete) or an extra key (pollution).
+
+# ── 4. Alternatives ───────────────────────────────────────────────────
+
+alternatives:
+  - option: "A: Skip _insert_rows() extraction — leave duplication"
+    pros: "Zero risk of transaction boundary bugs, one fewer file touched"
+    cons: "Duplicated INSERT pattern persists. sqlite_sink.py already touched for orchestration seeding — this is the right time to extract"
+
+  - option: "B: validate_orchestration_trace() peer to validate_component_trace()"
+    pros: "Symmetric API, familiar pattern for developers"
+    cons: "~97 LOC for a single-engine contract. Guardrails + conformance tests already provide two enforcement layers. Duplicates the validator pattern without adding enforcement value"
+
+  - option: "C: Orchestration keys in COMPONENT_TRACE_KEYS with component_type='orchestration'"
+    pros: "All trace keys in one registry"
+    cons: "Violates the architectural definition: orchestration is not a component capability. Phase 12 pre-design explicitly stated 'No key is marked component_candidate.' Would require modifying validate_component_trace() to handle engine-level keys"
+
+  - option: "D: New component_trace_keys table for orchestration"
+    pros: "Would avoid NULL component_type semantics for orchestration keys"
+    cons: "Schema migration needed. Orchestration keys are engine keys — the existing trace_keys table already supports them. Single-table approach is a Phase 13 design decision"
+
+  - option: "E: orchestration_trace_completeness at WARNING"
+    pros: "Safer — doesn't block commits if the rule has false positives"
+    cons: "The 6-key contract is a Phase 12 pre-design, not an exploratory discovery. Any deviation is a real error. WARNING would allow broken orchestration stubs to be committed"
+
+# ── 5. Evidence ───────────────────────────────────────────────────────
+
+evidence:
+  test_files:
+    - tests/conformance/test_orchestration_trace.py
+    - tests/integration/test_orchestration_sink.py
+    - tests/e2e/test_orchestration_e2e.py
+  test_cases:
+    - TestOrchestrationStubOutput::test_all_six_keys_present
+    - TestOrchestrationStubOutput::test_component_keys_also_present
+    - TestOrchestrationStubOutput::test_trace_context_not_none
+    - TestOrchestrationStubOutput::test_zero_items_no_crash
+    - TestOrchestrationTraceKeyTypes::test_dag_node_id_is_str
+    - TestOrchestrationTraceKeyTypes::test_parallel_depth_is_int
+    - TestOrchestrationTraceKeyTypes::test_merge_ordinal_is_int
+    - TestOrchestrationTraceKeyTypes::test_branch_taken_is_str
+    - TestOrchestrationTraceKeyTypes::test_retry_count_is_int
+    - TestOrchestrationTraceKeyTypes::test_resource_pool_key_is_str
+    - TestOrchestrationKeyRegistration::test_all_six_in_registry
+    - TestOrchestrationKeyRegistration::test_engine_is_orchestration
+    - TestOrchestrationKeyRegistration::test_component_candidate_false
+    - TestOrchestrationNotComponentCandidate::test_not_in_component_keys
+    - TestOrchestrationMergeOrdinal::test_sequential_zero_based
+    - TestOrchestrationMergeOrdinal::test_continuous_across_branches
+  benchmark_results: |
+    468 tests pass (428 Phase 13 + 40 Phase 14), 0 failures, 1 skip.
+    14 guardrails PASSED (13 existing + 1 new: orchestration_trace_completeness).
+    0 external dependencies maintained.
+    Schema version remains at 2 (no DDL migration needed).
+    _insert_rows() extraction: 2 call sites updated, 0 test regressions.
+    40 new tests: 22 conformance + 9 integration + 9 E2E.
+    All ad-hoc verification checks pass (imports, guardrail, sink v2).
+
+# ── 6. Future Guidance ────────────────────────────────────────────────
+#
+#  Architecture-level guidance (Phase 15+ boundary conditions):
+#  Entries marked "priority: critical/high" are inputs to Phase 15 design.
+#  Entries marked "priority: medium" are tension points — record, don't act yet.
+
+future_guidance:
+
+  # ── Operational (Phase 15 immediate) ─────────────────────────────────
+
+  real_orchestration_engine_replaces_stub:
+    summary: "Real orchestration engine MUST emit all 6 orchestration.* keys on every StreamItem"
+    detail: |
+      Same contract as the stub. Replace hardcoded branch simulation with
+      dynamic DAG-based dispatch via PipelineRunner. Internal DAG state
+      becomes richer but trace_context stays simple (str, int values only).
+      Consider orchestration-specific query methods on SQLiteTraceSink
+      (e.g., query_merge_ordinals_by_run). component_trace_completeness
+      already scans orchestration/ directory — no guardrail change needed.
+    priority: high
+    phase_applicable: "Phase 15"
+
+  component_trace_completeness_upgrade_to_error:
+    summary: "Upgrade component_trace_completeness from WARNING to ERROR"
+    detail: |
+      After one phase of real-world use (Phase 14), following the pattern
+      established by orchestration_trace_completeness (ERROR from day one
+      because the 6-key contract was pre-defined).
+    priority: low
+    phase_applicable: "Phase 15+"
+
+  insert_rows_for_bulk_writes:
+    summary: "Phase 15+ could add bulk_write() calling _insert_rows() once per transaction"
+    detail: |
+      Useful when write() and write_streaming() are called together.
+      The extracted _insert_rows() makes this possible without refactoring.
+    priority: low
+    phase_applicable: "Phase 15+"
+
+  scoring_component_trace_keys:
+    summary: "When scoring engine is built, add scoring.* keys to COMPONENT_TRACE_KEYS"
+    detail: |
+      validate_component_trace() and component_trace_completeness guardrail
+      already support scoring (recognized type with 0 required keys since
+      Phase 13) — no code changes needed.
+    priority: low
+    phase_applicable: "Phase 14+"
+
+  # ── Architecture-level (Phase 15+ boundary conditions) ───────────────
+
+  capability_negotiation_requires_observability_arbitration:
+    summary: "能力协商需观测层作为运行时仲裁者"
+    detail: |
+      ENGINE_TO_COMPONENT_MAP 从静态字典演进为运行时能力发现服务时，
+      引擎自声明的能力必须附带 trace 证据（最近 N 次成功调用记录）才可信。
+      无证据的能力声明 → 降级或熔断，不应被编排引擎信任。
+
+      这标志着观测轴与组件轴在运行时首次深度耦合，而非仅设计时静态关联。
+      CapabilityDeclaration + TraceEvidence 构成可信能力发现的双要素。
+    priority: high
+    phase_applicable: "Phase 16+"
+
+  constraints_are_prescriptive_not_descriptive:
+    summary: "约束是规定性的，需独立于 trace key 的类型系统与校验时机"
+    detail: |
+      Trace key 描述"做了什么"（注册表 + commit-time guardrail）。
+      Constraint 规定"不能做什么"（独立类型系统 + DAG-build-time validator）。
+
+      技术实现上可复用 Phase 14 AST 扫描 + 注册表对比模式，但校验时机
+      从 commit-time 变为 DAG-build-time，语义完全不同。
+
+      需新建 core/contracts/constraints.py，定义 Constraint 类型、
+      ConstraintRegistry，以及 ConstraintValidator（DAG-build-time 执行）。
+      不应将 constraint 混入 trace_keys.py —— 它们是不同品类的概念。
+    priority: high
+    phase_applicable: "Phase 15.5"
+
+  constraint_validator_must_provide_remediation_feedback:
+    summary: "约束违反时必须返回结构化修正建议，而非仅报错 — 这是与 guardrail 的本质 API 差异"
+    detail: |
+      Guardrail 违反 = 报错消息（门卫模式：拦住你）。
+      Constraint 违反 = 告知编排引擎"为什么不可构建 + 如何修改才能满足"
+      （导航员模式：告诉你路在哪）。
+
+      这要求 ConstraintViolation 的结构化程度远超 Violation：
+      - violation.why: 为什么违反（人类可读）
+      - violation.remediation: 修正建议列表，每条包含 {parameter, current_value, suggested_range, rationale}
+      - violation.fallback: 如果约束无法满足，是否有降级路径
+
+      若缺失此反馈回路，约束系统将退化为"高级版 lint"，丧失对编排引擎
+      的引导能力。这是 constraint validator 与 guardrail 之间最本质的
+      API 差异，也是 Constraint 系统从"静态检查工具"升维为"编排协作者"
+      的分水岭。
+    priority: critical
+    phase_applicable: "Phase 15.5"
+
+  orchestration_primitives_may_require_fourth_layer:
+    summary: "编排原语组件化可能触发三层分层不变量的受控违反"
+    detail: |
+      RRF/rerank 等编排原语下沉为组件时，core/pipeline/ 需导入
+      core/contracts/，违反 Phase 01 架构不变量 #1（三层严格分层）。
+
+      这不是 bug，是 feature：说明三层模型在编排原语场景下已不够用。
+
+      预留方案（二选一，暂不实现）：
+      (a) 引入 core/orchestration/ 第四层，仅依赖 core/contracts/，
+          编排原语在此层实现，不与 core/pipeline/ 耦合
+      (b) 定义 OrchestrationPrimitive Protocol，与普通 Component 类型隔离，
+          允许 core/pipeline/ 导入此 Protocol 但不导入具体组件类型
+
+      当前不做任何代码变更，仅标记此张力点。待编排原语组件化实际需求
+      成熟时，基于当时的架构上下文重新评估。
+    priority: medium
+    phase_applicable: "Phase 17+"
+
+anti_patterns:
+  - "Registering orchestration keys in COMPONENT_TRACE_KEYS: orchestration is an engine capability, not a component capability. Keys go in TRACE_KEY_REGISTRY with engine='orchestration', component_candidate=False."
+  - "Creating validate_orchestration_trace() peer: single-engine contracts are enforced by guardrails + conformance tests. Cross-engine contracts need validator functions. Don't duplicate the 97-line pattern."
+  - "Calling commit() inside _insert_rows(): transaction boundaries belong to callers. _insert_rows() does one thing — insert rows. The caller controls commit timing."
+  - "Thread-based parallel simulation in stub: threading.Thread cannot yield StreamItems from within a thread. Use asyncio.gather() — matches PipelineRunner._arun_impl()."
+  - "Hardcoding 6 in guardrail logic: reference _load_orchestration_keys() which derives the set from TRACE_KEY_REGISTRY. One registry change = guardrail automatically updated."
+  - "Schema migration for orchestration keys: the trace_keys table already supports engine='orchestration' via TEXT column. No ALTER TABLE needed — just INSERT."
+  - "Marking orchestration keys as component_candidate=True: orchestration keys describe engine behavior, not component capabilities. They would pollute component candidate analysis."
+  - "AST scanner assumes dynamic keys: only static string literals in trace_context dicts are detected. This is an accepted limitation — same constraint as component_trace_completeness."

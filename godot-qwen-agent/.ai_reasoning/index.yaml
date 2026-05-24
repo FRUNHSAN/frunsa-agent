@@ -13,7 +13,7 @@
 # Schema: schemas/reasoning_chain.schema.json
 
 library_version: 1
-last_updated: "2026-05-25T14:00:00Z"
+last_updated: "2026-05-25T16:00:00Z"
 
 # ── Chains by architectural layer ────────────────────────────────────
 
@@ -146,6 +146,14 @@ chains:
     tags: [component_trace, trace_keys, validation, component_platform, engine_mapping]
     status: active
 
+  # ── Orchestration platform ──
+  - chain_id: phase_14_orchestration_engine
+    file: chains/phase_14_orchestration_engine.yaml
+    title: "Orchestration engine: stub, 6 trace keys, completeness guardrail"
+    layer: engine
+    tags: [orchestration, engine, trace_keys, guardrail, stub, ast_scanning]
+    status: active
+
 # ── Tag index for quick lookup ───────────────────────────────────────
 
 tag_index:
@@ -210,10 +218,12 @@ tag_index:
   component_analysis: [phase_12_observability_closed_loop]
   orchestration_pre_design: [phase_12_observability_closed_loop, phase_12_orchestration_trace_pre_design]
   observability_closed_loop: [phase_12_observability_closed_loop, phase_12_orchestration_trace_pre_design]
-  orchestration: [phase_12_orchestration_trace_pre_design]
+  orchestration: [phase_12_orchestration_trace_pre_design, phase_14_orchestration_engine]
   trace_keys: [phase_12_orchestration_trace_pre_design, phase_13_component_trace_contracts]
   pre_design: [phase_12_orchestration_trace_pre_design]
   schema_planning: [phase_12_orchestration_trace_pre_design]
   component_trace: [phase_13_component_trace_contracts]
   component_platform: [phase_13_component_trace_contracts]
   engine_mapping: [phase_13_component_trace_contracts]
+  ast_scanning: [phase_14_orchestration_engine]
+  stub: [phase_14_orchestration_engine]

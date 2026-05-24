@@ -13,6 +13,7 @@ from guardrails.rules import (
     engine_interface_purity,
     frozen_dataclass_integrity,
     internal_stream_only,
+    orchestration_trace_completeness,
     reasoning_chain_coverage,
     sink_schema_consistency,
     trace_context_namespace,
@@ -41,6 +42,7 @@ class GuardrailChecker:
             "trace-context-namespace": trace_context_namespace,
             "trace-key-serializability": trace_key_serializability,
             "component-trace-completeness": component_trace_completeness,
+            "orchestration-trace-completeness": orchestration_trace_completeness,
             "trace-key-registration": trace_key_registration,
             "sink-schema-consistency": sink_schema_consistency,
         }

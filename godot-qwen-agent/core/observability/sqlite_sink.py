@@ -157,12 +157,7 @@ class SQLiteTraceSink:
                     ))
 
         if rows:
-            cols = ", ".join(_NON_PK_COLUMN_NAMES)
-            placeholders = ", ".join("?" * len(_NON_PK_COLUMN_NAMES))
-            self._conn.executemany(
-                f"INSERT INTO {TRACE_RECORDS_TABLE_NAME} ({cols}) VALUES ({placeholders})",
-                rows,
-            )
+            self._insert_rows(rows)
             self._conn.commit()
 
     # ── StreamingTraceWriter (per-item records) ───────────────────────
@@ -246,12 +241,7 @@ class SQLiteTraceSink:
             ))
 
         if rows:
-            cols = ", ".join(_NON_PK_COLUMN_NAMES)
-            placeholders = ", ".join("?" * len(_NON_PK_COLUMN_NAMES))
-            self._conn.executemany(
-                f"INSERT INTO {TRACE_RECORDS_TABLE_NAME} ({cols}) VALUES ({placeholders})",
-                rows,
-            )
+            self._insert_rows(rows)
             self._conn.commit()
 
     def _insert_overflow_sentinel(self, overflow_count: int, total: int) -> None:
@@ -376,6 +366,22 @@ class SQLiteTraceSink:
 
     # ── Schema management ─────────────────────────────────────────────
 
+    def _insert_rows(self, rows: List[tuple]) -> None:
+        """Insert pre-built row tuples into trace_records table.
+
+        Does NOT call commit() — callers control transaction boundaries.
+        Uses _NON_PK_COLUMN_NAMES for column list; rows must be tuples
+        with values in the same order.
+        """
+        if not rows:
+            return
+        cols = ", ".join(_NON_PK_COLUMN_NAMES)
+        placeholders = ", ".join("?" * len(_NON_PK_COLUMN_NAMES))
+        self._conn.executemany(
+            f"INSERT INTO {TRACE_RECORDS_TABLE_NAME} ({cols}) VALUES ({placeholders})",
+            rows,
+        )
+
     def _create_tables(self) -> None:
         """Create all tables from declarative schema definitions."""
         for table_name, columns in [
@@ -484,6 +490,40 @@ class SQLiteTraceSink:
             )
             self._conn.commit()
 
+        # Seed orchestration engine keys (Phase 14)
+        from core.observability.trace_registry import TRACE_KEY_REGISTRY
+
+        orchestration_key_names = {
+            k for k, v in TRACE_KEY_REGISTRY.items() if v.engine == "orchestration"
+        }
+        existing_orch = self._conn.execute(
+            f"SELECT key_name FROM {TRACE_KEYS_TABLE_NAME} WHERE engine = ?",
+            ("orchestration",),
+        ).fetchall()
+        existing_orch_names = {row[0] for row in existing_orch}
+
+        orchestration_rows = []
+        for key_name in sorted(orchestration_key_names):
+            if key_name not in existing_orch_names:
+                defn = TRACE_KEY_REGISTRY[key_name]
+                orchestration_rows.append((
+                    key_name,
+                    defn.engine,
+                    defn.type.__name__,
+                    defn.semantics,
+                    defn.unit or None,
+                    0,  # component_candidate=False
+                ))
+
+        if orchestration_rows:
+            self._conn.executemany(
+                f"""INSERT INTO {TRACE_KEYS_TABLE_NAME}
+                   (key_name, engine, value_type, semantics, unit, component_candidate)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                orchestration_rows,
+            )
+            self._conn.commit()
+
     def _record_schema_version(self) -> None:
         """Record current schema version if not already recorded."""
         existing = self._conn.execute(
@@ -497,7 +537,7 @@ class SQLiteTraceSink:
                 (
                     CURRENT_SCHEMA_VERSION,
                     datetime.now(timezone.utc).isoformat(),
-                    "Phase 13: added component_type column to trace_keys table, seeded COMPONENT_TRACE_KEYS",
+                    "Phase 14: seeded 6 orchestration engine trace keys",
                 ),
             )
             self._conn.commit()

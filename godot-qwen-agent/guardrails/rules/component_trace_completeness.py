@@ -10,12 +10,12 @@ it must also write "rag.retrieval_latency_ms" (maps to retrieval.latency_ms).
 
 from __future__ import annotations
 
-import ast
 from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Set
 
 from guardrails.report import Severity, Violation
+from guardrails.rules._ast_utils import collect_trace_keys_from_engine
 
 
 def _load_component_contracts() -> Dict[str, Set[str]]:
@@ -49,36 +49,6 @@ def _reverse_map(engine_map: Dict[str, str], component_type: str) -> Dict[str, s
     }
 
 
-def _collect_trace_keys_from_engine(engine_dir: Path) -> Set[str]:
-    """AST-scan an engine directory for all trace_context dict keys used."""
-    keys: Set[str] = set()
-
-    for py_file in engine_dir.glob("**/*.py"):
-        rel = str(py_file)
-        if "test" in rel.lower():
-            continue
-        if "interface.py" in rel:
-            continue  # skip Protocol definitions
-
-        tree = _parse(py_file)
-        if tree is None:
-            continue
-
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Call):
-                for kw in getattr(node, "keywords", []):
-                    if kw.arg == "trace_context" and isinstance(kw.value, ast.Dict):
-                        for key_node in kw.value.keys:
-                            if key_node is None:
-                                continue
-                            if isinstance(key_node, ast.Constant) and isinstance(
-                                key_node.value, str
-                            ):
-                                keys.add(key_node.value)
-
-    return keys
-
-
 def component_trace_completeness(root: Path) -> List[Violation]:
     """Verify engines emit complete component trace key sets.
 
@@ -106,7 +76,7 @@ def component_trace_completeness(root: Path) -> List[Violation]:
             continue
         engine_name = engine_dir.name
 
-        engine_keys = _collect_trace_keys_from_engine(engine_dir)
+        engine_keys = collect_trace_keys_from_engine(engine_dir)
         if not engine_keys:
             continue
 
@@ -153,8 +123,4 @@ def component_trace_completeness(root: Path) -> List[Violation]:
     return violations
 
 
-def _parse(path: Path) -> ast.AST | None:
-    try:
-        return ast.parse(path.read_text(encoding="utf-8"))
-    except SyntaxError:
-        return None
+
