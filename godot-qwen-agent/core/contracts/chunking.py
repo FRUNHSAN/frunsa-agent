@@ -87,6 +87,10 @@ class ContentBlock:
         default_factory=lambda: MappingProxyType({})
     )
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.metadata, MappingProxyType):
+            object.__setattr__(self, "metadata", MappingProxyType(deepcopy(dict(self.metadata))))
+
     @classmethod
     def from_dict(
         cls, text: str, source: str, metadata: Dict[str, Any] | None = None
