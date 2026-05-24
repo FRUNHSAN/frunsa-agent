@@ -1,0 +1,120 @@
+# ── Reasoning Chain ───────────────────────────────────────────────────
+chain_id: phase_07_llm_risks
+title: "LLM/Reranker risk pre-analysis: anti-patterns defined before implementation"
+created_at: "2026-05-24T18:00:00Z"
+updated_at: "2026-05-24T18:00:00Z"
+tags: [llm, reranker, generation, scoring, external_io, anti_patterns]
+status: active
+related_chains:
+  - phase_05_external_io
+  - phase_03_adapter_pattern
+  - phase_04_observability
+  - phase_01_data_integrity
+
+# ── 1. Context ───────────────────────────────────────────────────────
+
+context: |
+  Phase 7 introduces the first non-deterministic, high-cost external
+  dependencies: LLM Generator and Reranker. Unlike the vector store
+  (which is deterministic and cheap), these components have unique risks:
+
+  1. Non-deterministic output: same prompt → different text each call
+  2. High latency: seconds to tens of seconds per call
+  3. Token cost: every call has a dollar cost attached
+  4. Format fragility: structured output (JSON mode) may not parse
+  5. Credential risk: API keys must never leak into logs/snapshots
+  6. Rate limiting: providers enforce RPM/TPM quotas
+
+  This chain is written BEFORE implementation begins, per the Phase 6.5
+  mandate: "pre-define anti-patterns, then write code that avoids them."
+
+# ── 2. Alternatives ──────────────────────────────────────────────────
+
+alternatives:
+  - option: "Synchronous blocking HTTP calls with requests library"
+    pros: "Simplest implementation; familiar pattern"
+    cons: "Blocks the event loop; prevents concurrent pipeline execution;
+      no DependencyCallTrace; violates phase_05 pattern"
+
+  - option: "Direct SDK integration (openai package) in the step"
+    pros: "Feature-rich; official support"
+    cons: "Vendor lock-in; SDK dependency leaks into core platform;
+      harder to mock in tests; version conflicts over 5-year timeline"
+
+  - option: "Async adapter wrapping HTTP calls via run_in_executor"
+    pros: "Reuses phase_05 pattern; vendor-neutral; mockable; traces
+      auto-injected; health_probe works identically"
+    cons: "Slightly more boilerplate than direct SDK"
+
+# ── 3. Decision ──────────────────────────────────────────────────────
+
+decision: |
+  Async adapter pattern (reusing phase_05 external I/O template) with
+  vendor-neutral HTTP backend. Credentials via ResourceContainer, never
+  global. Non-deterministic output validated by a lightweight parsing
+  layer before returning to the pipeline.
+
+# ── 4. Rationale ─────────────────────────────────────────────────────
+
+rationale: |
+  - Reusing the VectorStoreAdapter pattern means 80% of the tracing,
+    health check, and timeout code is already designed and tested
+  - Credentials via ResourceContainer.register_managed() ensures they
+    are: (a) not in source code, (b) not in snapshots, (c) released
+    on pipeline shutdown
+  - The parsing layer (validate_generation_output) follows the same
+    contract-validation pattern as validate_chunk_output — it catches
+    format errors early and produces structured ValidationErrors
+  - Non-deterministic output means we must NEVER assert on exact text
+    in tests — only on structure (type, fields present, token counts)
+  - SnapshotPolicy.SUMMARY (default) prevents accidental PII/token leak
+    via trace logs — full prompt text is NEVER stored in production
+
+# ── 5. Evidence ──────────────────────────────────────────────────────
+
+evidence:
+  test_files:
+    - tests/e2e/test_generation_contract.py (contract tests, TDD)
+  test_cases:
+    - "test_frozen_dataclass"
+    - "test_metadata_deepcopy_defense"
+    - "test_token_accessors"
+    - "test_output_must_not_exceed_input_length (scoring)"
+    - "test_results_must_be_sorted_descending (scoring)"
+
+# ── 6. Future Guidance ───────────────────────────────────────────────
+
+future_guidance: |
+  MANDATORY for LLM Generator implementation:
+  1. Adapter MUST be async with sync fallback (run_in_executor pattern)
+  2. API key MUST come from ResourceContainer, never from env vars directly
+     in the adapter (resolve_env is for pipeline config, not for secrets)
+  3. Every generate() call MUST produce a DependencyCallTrace with:
+     - model name, prompt_tokens, completion_tokens, total_tokens
+     - latency_ms, finish_reason, status (success/timeout/error)
+  4. Generation output MUST pass through validate_generation_output()
+     before returning to the engine — catch format errors as warnings
+  5. health_probe() MUST call a lightweight endpoint (e.g., model list
+     or a minimal completion) — never a full generation
+  6. Tests MUST use mock HTTP backends — never call real APIs in CI
+
+  MANDATORY for Reranker implementation:
+  7. Input: List[Chunk] + query → Output: List[RetrievalResult]
+  8. Output length <= input length (never add chunks)
+  9. Ranks are sequential starting at 1, sorted by descending score
+  10. Empty input → empty output (not an error)
+
+  Token cost safety:
+  11. Adapter MUST track cumulative token usage per pipeline run
+  12. Pipeline config SHOULD support max_tokens_per_run budget
+  13. When budget exceeded, return graceful degradation (empty/partial
+      result) rather than crashing
+
+anti_patterns:
+  - "Hardcoding API keys or using os.environ directly in the adapter instead of ResourceContainer.get('llm_credentials')"
+  - "Making synchronous HTTP calls with requests.get() instead of aiohttp/httpx async via run_in_executor — blocks event loop"
+  - "Letting JSON parse errors from LLM output propagate as unhandled exceptions — use validate_generation_output() with level='warning'"
+  - "Calling the real LLM API in unit/integration tests instead of using a mock HTTP backend"
+  - "Storing full prompt text in TraceLog snapshots — SnapshotPolicy.SUMMARY must hash/truncate prompt content to prevent PII leaks"
+  - "Returning fake 'healthy' from health_check() without actually calling the provider's status endpoint"
+  - "Adding more chunks than the input in a reranker (output > input length violates contract)"

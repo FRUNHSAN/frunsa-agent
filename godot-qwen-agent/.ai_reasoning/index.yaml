@@ -13,7 +13,7 @@
 # Schema: schemas/reasoning_chain.schema.json
 
 library_version: 1
-last_updated: "2026-05-24T17:00:00Z"
+last_updated: "2026-05-24T18:00:00Z"
 
 # ── Chains by architectural layer ────────────────────────────────────
 
@@ -65,6 +65,14 @@ chains:
     tags: [external_io, vector_store, async, health_probe, exception_handling]
     status: active
 
+  # ── Generative AI ──
+  - chain_id: phase_07_llm_risks
+    file: chains/phase_07_llm_risks.yaml
+    title: "LLM/Reranker risk pre-analysis: anti-patterns defined before implementation"
+    layer: adapters
+    tags: [llm, reranker, generation, scoring, external_io, anti_patterns]
+    status: active
+
 # ── Tag index for quick lookup ───────────────────────────────────────
 
 tag_index:
@@ -77,6 +85,10 @@ tag_index:
   protocol: [phase_03_adapter_pattern]
   observability: [phase_04_observability]
   health_check: [phase_04_observability, phase_05_external_io]
-  external_io: [phase_05_external_io]
+  external_io: [phase_05_external_io, phase_07_llm_risks]
   async: [phase_05_external_io]
   exception_handling: [phase_05_external_io]
+  llm: [phase_07_llm_risks]
+  reranker: [phase_07_llm_risks]
+  generation: [phase_07_llm_risks]
+  anti_patterns: [phase_07_llm_risks]
