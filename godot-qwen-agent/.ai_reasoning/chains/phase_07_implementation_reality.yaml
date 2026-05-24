@@ -1,0 +1,194 @@
+# ── Reasoning Chain ───────────────────────────────────────────────────
+chain_id: phase_07_implementation_reality
+title: "LLM/Reranker implementation reality: frozen dataclass traps, budget enforcement, graceful degradation"
+created_at: "2026-05-24T19:00:00Z"
+updated_at: "2026-05-24T19:00:00Z"
+tags: [llm, reranker, generation, scoring, frozen_dataclass, budget, graceful_degradation, mock_backend]
+status: active
+related_chains:
+  - phase_07_llm_risks
+  - phase_05_external_io
+  - phase_01_data_integrity
+  - phase_03_adapter_pattern
+  - phase_04_observability
+
+# ── 1. Context ───────────────────────────────────────────────────────
+
+context: |
+  Phase 7.1 implemented GenerationAdapter, ScoringAdapter, GeneratorStep,
+  and RerankerStep following the 7 anti-patterns pre-defined in
+  phase_07_llm_risks. The pre-coding analysis was correct in direction but
+  missed several concrete implementation traps that only surfaced during
+  coding.
+
+  Three categories of discoveries:
+
+  1. Frozen dataclass enforcement hit the ScoringAdapter:
+     RetrievalResult is @dataclass(frozen=True). After re-scoring chunks,
+     the adapter needs to re-assign ranks (1, 2, 3...) and re-sort by
+     descending score. The first implementation tried object.__setattr__
+     to mutate rank in-place — blocked by frozen=True. Fix: create new
+     RetrievalResult instances with corrected rank values. This is
+     exactly the kind of defense phase_01_data_integrity was designed
+     for, but it's the first time a mutating operation (re-rank) actually
+     collided with the frozen guard.
+
+  2. Budget enforcement is a two-layer concern:
+     The adapter tracks cumulative tokens (across all generate() calls in
+     a pipeline run) but the STEP enforces the budget (max_tokens_per_run
+     in GeneratorStep). This split is correct: the adapter is a stateless
+     wrapper, the step holds business logic. But the interaction is subtle:
+     the step must check cumulative tokens BEFORE calling the adapter, and
+     the adapter accumulated tokens must be readable by the step.
+
+  3. Graceful degradation has different shapes for different component types:
+     - Generator: returns GenerationResult(finish_reason="error", text="")
+       so downstream steps always receive a GenerationResult instance
+     - Reranker: returns [] (empty list) so downstream steps always
+       receive a list — iterating over an empty list is safe
+     Each type's "empty safe value" is different but the principle is the
+     same: never return None, never raise from the adapter.
+
+# ── 2. Alternatives ──────────────────────────────────────────────────
+
+alternatives:
+  - option: "Allow adapters to mutate frozen dataclass fields via object.__setattr__"
+    pros: "Faster than creating new instances; works with any frozen class"
+    cons: "Bypasses the immutability contract; defeats __post_init__ guards;
+      future maintainers won't expect mutation on a frozen type; violates
+      phase_01_data_integrity chain explicitly"
+
+  - option: "Make RetrievalResult non-frozen so re-ranking can mutate in-place"
+    pros: "Simplifies re-ranking code; familiar mutable pattern"
+    cons: "Opens the door to accidental mutation elsewhere; breaks consistency
+      with every other data model in the platform; would require updating
+      17 contract conformance tests; violates architectural invariant #3"
+
+  - option: "Put budget enforcement entirely in the adapter"
+    pros: "Single point of control; step doesn't need to know about budget"
+    cons: "Adapter becomes stateful (tracks cumulative tokens); adapter should
+      be a thin wrapper per phase_03_adapter_pattern; mixing business logic
+      into adapter violates platform separation"
+
+  - option: "Make budget enforcement entirely in the step"
+    pros: "Clean separation; adapter stays pure translation layer"
+    cons: "Step needs to read adapter.cumulative_tokens — still couples
+      step to adapter state; the split is inherently necessary"
+
+# ── 3. Decision ──────────────────────────────────────────────────────
+
+decision: |
+  Three decisions:
+  1. Re-ranking creates NEW RetrievalResult instances (never mutate frozen)
+  2. Budget tracking split: adapter tracks cumulative tokens (read-only),
+     step enforces max_tokens_per_run before calling adapter
+  3. Each component type defines its own "safe empty value": GenerationResult
+     with finish_reason="error" for generator, empty list for reranker
+
+# ── 4. Rationale ─────────────────────────────────────────────────────
+
+rationale: |
+  Frozen dataclass enforcement was non-negotiable. Creating new instances
+  for re-ranking is slightly more expensive (N allocations vs 1 mutation)
+  but the cost is negligible (< 1ms for typical N ≤ 100) and the
+  immutability guarantee is worth more for 5-year maintainability.
+
+  Budget enforcement split follows the platform architecture: adapter is
+  translation (it counts tokens, reports cumulative), step is business
+  logic (it decides when to stop, what to return on budget exceeded).
+  This keeps adapters reusable across different step implementations that
+  might have different budget policies.
+
+  Different safe-empty-values per type is not inconsistency — it's
+  respecting the type system. A generator that crashes should still return
+  a GenerationResult so downstream type checks and attribute access don't
+  crash. A reranker that crashes should still return a list so downstream
+  iteration doesn't crash. The principle is uniform even though the
+  concrete type differs.
+
+  All 7 pre-defined anti-patterns from phase_07_llm_risks were successfully
+  avoided:
+  1. API keys → mock backends only (no real keys needed for tests)
+  2. Sync HTTP → async run_in_executor pattern
+  3. JSON parse errors → validate_generation_output catches format issues
+  4. Real API in tests → MockGenerationBackend, MockScoringBackend
+  5. Full prompt in TraceLog → only metadata (model, tokens, elapsed_ms)
+  6. Fake health_check → actual backend probe via health_probe()
+  7. Reranker output > input → contract enforced in ScoringAdapter
+
+# ── 5. Evidence ──────────────────────────────────────────────────────
+
+evidence:
+  test_files:
+    - tests/e2e/test_generator_e2e.py
+    - tests/e2e/test_reranker_e2e.py
+    - tests/e2e/test_generation_contract.py
+    - core/adapters/generator_adapter.py
+    - core/adapters/reranker_adapter.py
+  test_cases:
+    - "TestRerankerContractEnforcement::test_output_never_exceeds_input"
+    - "TestRerankerContractEnforcement::test_ranks_are_sequential_from_one"
+    - "TestRerankerContractEnforcement::test_scores_are_descending"
+    - "TestRerankerContractEnforcement::test_scores_in_valid_range"
+    - "TestGeneratorBudget::test_budget_exceeded_returns_graceful_result"
+    - "TestGeneratorBackendFailures::test_backend_exception_produces_graceful_result"
+    - "TestRerankerBackendFailures::test_backend_exception_produces_empty_results"
+    - "TestGeneratorHealth::test_health_check_healthy_with_mock_backend"
+    - "TestRerankerHealth::test_health_check_healthy_with_mock_backend"
+    - "TestCumulativeTokenTracking::test_cumulative_tokens_increase_across_calls"
+    - "TestGeneratorPipelineE2E::test_full_pipeline_chunker_to_generator"
+    - "TestRerankerPipelineE2E::test_full_pipeline_chunker_to_reranker"
+
+# ── 6. Future Guidance ───────────────────────────────────────────────
+
+future_guidance: |
+  MANDATORY when adding a new LLM provider (OpenAI, Anthropic, local model):
+
+  1. The new backend implements the GenerationBackend Protocol:
+     generate(prompt, context, **params) -> GenerationResult
+     count_tokens(text) -> int
+     The Protocol is the contract — the adapter doesn't care what's behind it.
+
+  2. Budget enforcement pattern (copy from GeneratorStep):
+     - Adapter tracks cumulative_tokens (incremented after each generate() call)
+     - Step checks self._adapter.cumulative_tokens >= self._max_tokens_per_run
+       BEFORE calling the adapter
+     - On budget exceeded: return GenerationResult with finish_reason="error"
+       and model="budget_exceeded" — never raise
+
+  3. Mock backend for testing:
+     - Must be deterministic (same input → same output every time)
+     - Must support latency_ms parameter for timeout testing
+     - Must produce enough metadata (model, tokens, finish_reason) for
+       trace completeness tests
+
+  4. Re-ranking contract enforcement (copy from ScoringAdapter.score()):
+     - After backend.score() returns results, the adapter MUST:
+       a. Sort by score descending
+       b. Re-assign sequential ranks (1, 2, 3...)
+       c. Ensure len(results) <= len(input_chunks)
+       d. Handle the case where backend returned more results than input
+     - ALL of these use NEW RetrievalResult instances — never mutate
+
+  5. Safe empty values per component type (add as new types are created):
+     - Generator: GenerationResult(text="", model="error", finish_reason="error")
+     - Reranker: [] (empty list)
+     - Retriever: [] (empty list)
+     - Chunker: [] (empty list)
+     Rule: return a valid instance of the expected type, empty but structurally
+     sound, so downstream code doesn't crash on type errors.
+
+  6. Natural language normalization assumptions:
+     - Non-list context → [] (empty list, not error)
+     - Missing query → first chunk text as fallback
+     - Empty string query → still call backend (may return empty results)
+     These are deliberately lenient — the pipeline config is the primary
+     source of correctness, not runtime coercion.
+
+anti_patterns:
+  - "Using object.__setattr__ to mutate frozen dataclass fields — the frozen guard exists for a reason; create new instances instead"
+  - "Raising exceptions from adapter.generate() or adapter.score() — catch and return safe empty values; the trace log carries the error"
+  - "Putting budget enforcement logic inside the adapter — adapter is translation layer, business logic belongs in the step"
+  - "Returning None from a failed adapter call — every component type has a safe empty value; use it"
+  - "Skipping the post-backend contract enforcement in ScoringAdapter (sort, re-rank, truncate) — the backend may violate the contract"
+  - "Writing mock backends that are non-deterministic — tests must be reproducible; use fixed seeds or deterministic algorithms"

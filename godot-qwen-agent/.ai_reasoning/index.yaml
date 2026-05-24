@@ -73,6 +73,13 @@ chains:
     tags: [llm, reranker, generation, scoring, external_io, anti_patterns]
     status: active
 
+  - chain_id: phase_07_implementation_reality
+    file: chains/phase_07_implementation_reality.yaml
+    title: "LLM/Reranker implementation reality: frozen dataclass traps, budget enforcement, graceful degradation"
+    layer: adapters
+    tags: [llm, reranker, generation, scoring, frozen_dataclass, budget, graceful_degradation, mock_backend]
+    status: active
+
 # ── Tag index for quick lookup ───────────────────────────────────────
 
 tag_index:
@@ -88,7 +95,11 @@ tag_index:
   external_io: [phase_05_external_io, phase_07_llm_risks]
   async: [phase_05_external_io]
   exception_handling: [phase_05_external_io]
-  llm: [phase_07_llm_risks]
-  reranker: [phase_07_llm_risks]
-  generation: [phase_07_llm_risks]
-  anti_patterns: [phase_07_llm_risks]
+  llm: [phase_07_llm_risks, phase_07_implementation_reality]
+  reranker: [phase_07_llm_risks, phase_07_implementation_reality]
+  generation: [phase_07_llm_risks, phase_07_implementation_reality]
+  anti_patterns: [phase_07_llm_risks, phase_07_implementation_reality]
+  frozen_dataclass: [phase_07_implementation_reality]
+  budget: [phase_07_implementation_reality]
+  graceful_degradation: [phase_07_implementation_reality]
+  mock_backend: [phase_07_implementation_reality]
