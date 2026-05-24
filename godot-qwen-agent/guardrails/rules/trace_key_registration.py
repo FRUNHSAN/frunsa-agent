@@ -1,8 +1,9 @@
-"""Rule: trace_context dict keys must be registered in TRACE_KEY_REGISTRY.
+"""Rule: trace_context dict keys must be registered in TRACE_KEY_REGISTRY
+   or COMPONENT_TRACE_KEYS.
 
-Phase 11: WARNING level. Unregistered keys serialize fine but lack documented
-semantics. New engines in Phase 12+ will naturally add keys — WARNING nudges
-without blocking. Upgrade to ERROR in Phase 13+ after registry coverage matures.
+Phase 11: WARNING level (registry immature).
+Phase 13: ERROR level (registry coverage is now complete — the component
+platform is built and all known keys are documented).
 """
 
 from __future__ import annotations
@@ -15,10 +16,16 @@ from guardrails.report import Severity, Violation
 
 
 def _get_registry_keys() -> frozenset:
-    """Lazy-load TRACE_KEY_REGISTRY keys for guardrail comparison."""
+    """Lazy-load TRACE_KEY_REGISTRY + COMPONENT_TRACE_KEYS for guardrail."""
     try:
+        from core.contracts.trace_keys import COMPONENT_TRACE_KEYS
         from core.observability.trace_registry import TRACE_KEY_REGISTRY
-        return frozenset(TRACE_KEY_REGISTRY.keys())
+
+        engine_keys = frozenset(TRACE_KEY_REGISTRY.keys())
+        component_keys = frozenset(
+            defn.full_key for defn in COMPONENT_TRACE_KEYS.values()
+        )
+        return engine_keys | component_keys
     except ImportError:
         return frozenset()  # registry not yet created — don't block bootstrapping
 
@@ -74,11 +81,12 @@ def _check_dict_keys(
             if key not in registry_keys:
                 violations.append(Violation(
                     rule_id="trace-key-registration-001",
-                    severity=Severity.WARNING,
+                    severity=Severity.ERROR,
                     message=(
-                        f"trace_context key '{key}' is not registered in TRACE_KEY_REGISTRY. "
-                        f"Add a TraceKeyDef(type=..., semantics=\"...\", engine=\"{key.split('.')[0]}\") "
-                        f"entry to core/observability/trace_registry.py."
+                        f"trace_context key '{key}' is not registered in TRACE_KEY_REGISTRY "
+                        f"or COMPONENT_TRACE_KEYS. "
+                        f"Add a TraceKeyDef entry to core/observability/trace_registry.py "
+                        f"or a ComponentTraceKeyDef to core/contracts/trace_keys.py."
                     ),
                     file=rel,
                     line=key_node.lineno,

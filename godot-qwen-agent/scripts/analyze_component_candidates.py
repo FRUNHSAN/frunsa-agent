@@ -52,7 +52,7 @@ CLASSIFICATION_RULES = {
     "confirmed_component": {
         "min_occurrence_rate": 0.95,
         "type_match_rate": 1.0,
-        "value_cardinality": "bounded",
+        "value_cardinality_set": {"bounded", "unique_identifiers"},
     },
     "type_mismatch": {
         "type_match_rate_max": 0.99,  # <100% → type mismatch
@@ -98,6 +98,14 @@ class KeyStats:
             unique = len(set(self.values))
             total = len(self.values)
             if unique == total:
+                # Distinguish unique identifiers (IDs) from free text
+                # Heuristic: IDs are short, alphanumeric, no spaces
+                sample = self.values[: min(10, len(self.values))]
+                if all(
+                    isinstance(v, str) and len(v) < 200 and " " not in v
+                    for v in sample
+                ):
+                    return "unique_identifiers"
                 return "free_text"  # every value unique → not a component signal
             if unique / total < 0.5:
                 return "bounded"
@@ -115,7 +123,7 @@ class KeyStats:
         if (
             self.occurrence_rate >= rules["min_occurrence_rate"]
             and self.type_match_rate >= rules["type_match_rate"]
-            and self.value_cardinality == rules["value_cardinality"]
+            and self.value_cardinality in rules["value_cardinality_set"]
         ):
             return "confirmed_component"
 
@@ -231,19 +239,20 @@ def _migration_recommendations(component_keys: List[KeyStats]) -> List[str]:
     """Generate Phase 13 migration recommendations with stable justification."""
     recommendations: List[str] = []
 
+    from core.observability.trace_registry import ENGINE_TO_COMPONENT_MAP
+
     for ks in component_keys:
         classification = ks.classify()
         if classification == "confirmed_component":
-            # Map engine-specific key to component-level name
-            component_name = ks.key_name.split(".", 1)[1]  # strip engine prefix
+            component_key = ENGINE_TO_COMPONENT_MAP.get(ks.key_name, ks.key_name)
             recommendations.append(
-                f"PROMOTE '{ks.key_name}' → component key 'retrieval.{component_name}': "
+                f"PROMOTE '{ks.key_name}' → component key '{component_key}': "
                 f"{ks.occurrence_rate:.0%} occurrence, {ks.type_match_rate:.0%} type match, "
                 f"cardinality={ks.value_cardinality}. "
                 f"Justification: meets all confirmed_component thresholds "
                 f"(≥{CLASSIFICATION_RULES['confirmed_component']['min_occurrence_rate']:.0%} "
                 f"occurrence, {CLASSIFICATION_RULES['confirmed_component']['type_match_rate']:.0%} type match, "
-                f"{CLASSIFICATION_RULES['confirmed_component']['value_cardinality']} cardinality)."
+                f"cardinality in {CLASSIFICATION_RULES['confirmed_component']['value_cardinality_set']})."
             )
         elif classification == "type_mismatch":
             examples = ", ".join(
@@ -270,10 +279,10 @@ def _migration_recommendations(component_keys: List[KeyStats]) -> List[str]:
                     f"type_match_rate={ks.type_match_rate:.0%} "
                     f"< {rules['type_match_rate']:.0%}"
                 )
-            if ks.value_cardinality != rules["value_cardinality"]:
+            if ks.value_cardinality not in rules["value_cardinality_set"]:
                 shortfall.append(
                     f"cardinality={ks.value_cardinality} "
-                    f"!= {rules['value_cardinality']}"
+                    f"∉ {rules['value_cardinality_set']}"
                 )
             reasons = "; ".join(shortfall) if shortfall else "insufficient data"
             recommendations.append(
@@ -355,7 +364,7 @@ def _format_report(
     lines.append("─" * 72)
     lines.append(f"  confirmed_component.min_occurrence_rate = {CLASSIFICATION_RULES['confirmed_component']['min_occurrence_rate']}")
     lines.append(f"  confirmed_component.type_match_rate      = {CLASSIFICATION_RULES['confirmed_component']['type_match_rate']}")
-    lines.append(f"  confirmed_component.value_cardinality    = '{CLASSIFICATION_RULES['confirmed_component']['value_cardinality']}'")
+    lines.append(f"  confirmed_component.value_cardinality_set = {CLASSIFICATION_RULES['confirmed_component']['value_cardinality_set']}")
     lines.append(f"  type_mismatch.type_match_rate_max        = {CLASSIFICATION_RULES['type_mismatch']['type_match_rate_max']}")
     lines.append("")
 
@@ -407,6 +416,12 @@ async def main() -> None:
         default=None,
         help="Write structured JSON output to this file",
     )
+    parser.add_argument(
+        "--per-engine", "-e",
+        action="store_true",
+        default=False,
+        help="Analyze each engine's keys within its own item scope (not cross-engine pooled)",
+    )
     args = parser.parse_args()
 
     print("Collecting trace_context data from engines...")
@@ -429,9 +444,21 @@ async def main() -> None:
 
     # Compute per-key statistics
     component_keys: List[KeyStats] = []
-    for key_name, key_def in sorted(component_keys_defs.items()):
-        stats = _compute_stats(key_name, key_def, all_contexts)
-        component_keys.append(stats)
+    if args.per_engine:
+        # Per-engine scope: analyze each engine's keys within its own items only
+        for engine_contexts, engine_name in [
+            (planning_contexts, "planning"),
+            (rag_contexts, "rag"),
+        ]:
+            for key_name, key_def in sorted(component_keys_defs.items()):
+                if key_def.engine != engine_name:
+                    continue
+                stats = _compute_stats(key_name, key_def, engine_contexts)
+                component_keys.append(stats)
+    else:
+        for key_name, key_def in sorted(component_keys_defs.items()):
+            stats = _compute_stats(key_name, key_def, all_contexts)
+            component_keys.append(stats)
 
     # Cross-engine analysis
     cross_engine = _analyze_cross_engine(component_keys)

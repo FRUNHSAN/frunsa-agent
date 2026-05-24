@@ -11,6 +11,7 @@ from guardrails.rules.engine_interface_purity import engine_interface_purity
 from guardrails.rules.trace_context_namespace import trace_context_namespace
 from guardrails.rules.trace_key_serializability import trace_key_serializability
 from guardrails.rules.sink_schema_consistency import sink_schema_consistency
+from guardrails.rules.component_trace_completeness import component_trace_completeness
 from guardrails.rules.trace_key_registration import trace_key_registration
 
 __all__ = [
@@ -24,6 +25,7 @@ __all__ = [
     "engine_interface_purity",
     "trace_context_namespace",
     "trace_key_serializability",
+    "component_trace_completeness",
     "trace_key_registration",
     "sink_schema_consistency",
 ]

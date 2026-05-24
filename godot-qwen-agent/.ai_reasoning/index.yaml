@@ -13,7 +13,7 @@
 # Schema: schemas/reasoning_chain.schema.json
 
 library_version: 1
-last_updated: "2026-05-25T12:00:00Z"
+last_updated: "2026-05-25T14:00:00Z"
 
 # ── Chains by architectural layer ────────────────────────────────────
 
@@ -138,6 +138,14 @@ chains:
     tags: [orchestration, trace_keys, pre_design, observability_closed_loop, schema_planning]
     status: active
 
+  # ── Component platform ──
+  - chain_id: phase_13_component_trace_contracts
+    file: chains/phase_13_component_trace_contracts.yaml
+    title: "Component trace contracts: formal key registry, engine mapping, and validation"
+    layer: contracts
+    tags: [component_trace, trace_keys, validation, component_platform, engine_mapping]
+    status: active
+
 # ── Tag index for quick lookup ───────────────────────────────────────
 
 tag_index:
@@ -203,6 +211,9 @@ tag_index:
   orchestration_pre_design: [phase_12_observability_closed_loop, phase_12_orchestration_trace_pre_design]
   observability_closed_loop: [phase_12_observability_closed_loop, phase_12_orchestration_trace_pre_design]
   orchestration: [phase_12_orchestration_trace_pre_design]
-  trace_keys: [phase_12_orchestration_trace_pre_design]
+  trace_keys: [phase_12_orchestration_trace_pre_design, phase_13_component_trace_contracts]
   pre_design: [phase_12_orchestration_trace_pre_design]
   schema_planning: [phase_12_orchestration_trace_pre_design]
+  component_trace: [phase_13_component_trace_contracts]
+  component_platform: [phase_13_component_trace_contracts]
+  engine_mapping: [phase_13_component_trace_contracts]

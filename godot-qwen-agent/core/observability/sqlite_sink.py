@@ -17,6 +17,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List
 
+from core.contracts.trace_keys import COMPONENT_TRACE_KEYS
 from core.observability.sink_schema import (
     CURRENT_SCHEMA_VERSION,
     SCHEMA_VERSION_COLUMNS,
@@ -107,7 +108,9 @@ class SQLiteTraceSink:
         self._max_items_per_call = max_items_per_call
         self._conn = sqlite3.connect(str(self._path))
         self._conn.execute("PRAGMA journal_mode=DELETE")
-        self._create_schema()
+        self._create_tables()
+        self._migrate_v1_to_v2()
+        self._create_indexes()
         self._seed_trace_keys()
         self._record_schema_version()
 
@@ -285,9 +288,26 @@ class SQLiteTraceSink:
         ).fetchall()
         return [dict(zip(_TRACE_RECORDS_COLUMN_NAMES, row)) for row in rows]
 
-    def query_keys(self, component_candidate_only: bool = False) -> List[Dict[str, Any]]:
-        """Return trace key definitions, optionally filtered to component_candidate=True."""
-        if component_candidate_only:
+    def query_keys(
+        self,
+        component_candidate_only: bool = False,
+        component_type: str | None = None,
+    ) -> List[Dict[str, Any]]:
+        """Return trace key definitions.
+
+        Args:
+            component_candidate_only: If True, filter to component_candidate=1.
+            component_type: If set, filter to matching component_type
+                (e.g. "retrieval"). Overrides component_candidate_only.
+        """
+        key_columns = [c["name"] for c in TRACE_KEYS_COLUMNS]
+
+        if component_type is not None:
+            rows = self._conn.execute(
+                f"SELECT * FROM {TRACE_KEYS_TABLE_NAME} WHERE component_type = ?",
+                (component_type,),
+            ).fetchall()
+        elif component_candidate_only:
             rows = self._conn.execute(
                 f"SELECT * FROM {TRACE_KEYS_TABLE_NAME} WHERE component_candidate = 1"
             ).fetchall()
@@ -296,7 +316,29 @@ class SQLiteTraceSink:
                 f"SELECT * FROM {TRACE_KEYS_TABLE_NAME}"
             ).fetchall()
 
+        return [dict(zip(key_columns, row)) for row in rows]
+
+    def query_component_keys(
+        self, component_type: str | None = None
+    ) -> List[Dict[str, Any]]:
+        """Return component trace key definitions, optionally filtered by type.
+
+        This is distinct from query_keys() which returns all keys (engine +
+        component). query_component_keys() returns only keys where
+        component_type IS NOT NULL.
+        """
         key_columns = [c["name"] for c in TRACE_KEYS_COLUMNS]
+
+        if component_type is not None:
+            rows = self._conn.execute(
+                f"SELECT * FROM {TRACE_KEYS_TABLE_NAME} WHERE component_type = ?",
+                (component_type,),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                f"SELECT * FROM {TRACE_KEYS_TABLE_NAME} WHERE component_type IS NOT NULL"
+            ).fetchall()
+
         return [dict(zip(key_columns, row)) for row in rows]
 
     def query_item_counts_by_dependency(self, run_id: str) -> List[Dict[str, Any]]:
@@ -334,19 +376,49 @@ class SQLiteTraceSink:
 
     # ── Schema management ─────────────────────────────────────────────
 
-    def _create_schema(self) -> None:
-        """Create all tables and indexes from declarative schema definitions."""
+    def _create_tables(self) -> None:
+        """Create all tables from declarative schema definitions."""
         for table_name, columns in [
             (TRACE_RECORDS_TABLE_NAME, TRACE_RECORDS_COLUMNS),
             (TRACE_KEYS_TABLE_NAME, TRACE_KEYS_COLUMNS),
             (SCHEMA_VERSION_TABLE_NAME, SCHEMA_VERSION_COLUMNS),
         ]:
             self._conn.execute(_build_create_table_sql(table_name, columns))
+        self._conn.commit()
 
+    def _create_indexes(self) -> None:
+        """Create all indexes from declarative schema definitions.
+
+        Called after _create_tables() and _migrate_v1_to_v2() to ensure
+        all columns (including component_type from migration) exist.
+        """
         for index_def in TRACE_RECORDS_INDEXES + TRACE_KEYS_INDEXES:
             self._conn.execute(_build_create_index_sql(index_def))
-
         self._conn.commit()
+
+    def _migrate_v1_to_v2(self) -> None:
+        """Add component_type column if missing (Phase 13 v1→v2 migration).
+
+        Checks PRAGMA table_info for the trace_keys table. If the
+        component_type column is absent (v1 database), adds it via
+        ALTER TABLE.
+
+        Called after _create_tables() (which ensures trace_keys exists)
+        and before _create_indexes() (which creates the index on the
+        new column). Fresh databases created by _create_tables() already
+        have the column — this is a no-op for new databases.
+        """
+        pragma_rows = self._conn.execute(
+            f"PRAGMA table_info('{TRACE_KEYS_TABLE_NAME}')"
+        ).fetchall()
+        existing_cols = {row[1] for row in pragma_rows}
+
+        if "component_type" not in existing_cols:
+            self._conn.execute(
+                f"ALTER TABLE {TRACE_KEYS_TABLE_NAME} "
+                "ADD COLUMN component_type TEXT"
+            )
+            self._conn.commit()
 
     def _seed_trace_keys(self) -> None:
         """Populate trace_keys table from TRACE_KEY_REGISTRY if empty."""
@@ -379,6 +451,39 @@ class SQLiteTraceSink:
         )
         self._conn.commit()
 
+        # Seed component trace keys (Phase 13)
+        from core.observability.trace_registry import ENGINE_TO_COMPONENT_MAP
+
+        component_key_names = set(ENGINE_TO_COMPONENT_MAP.values())
+        existing_component = self._conn.execute(
+            f"SELECT key_name FROM {TRACE_KEYS_TABLE_NAME} "
+            "WHERE component_type IS NOT NULL"
+        ).fetchall()
+        existing_component_names = {row[0] for row in existing_component}
+
+        component_rows = []
+        for defn in COMPONENT_TRACE_KEYS.values():
+            if defn.full_key not in existing_component_names:
+                component_rows.append((
+                    defn.full_key,
+                    "",  # engine: empty for component keys (engine-agnostic)
+                    defn.type.__name__,
+                    defn.semantics,
+                    defn.unit or None,
+                    1,  # component_candidate=True for backward compatibility
+                    defn.component_type,
+                ))
+
+        if component_rows:
+            self._conn.executemany(
+                f"""INSERT INTO {TRACE_KEYS_TABLE_NAME}
+                   (key_name, engine, value_type, semantics, unit,
+                    component_candidate, component_type)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                component_rows,
+            )
+            self._conn.commit()
+
     def _record_schema_version(self) -> None:
         """Record current schema version if not already recorded."""
         existing = self._conn.execute(
@@ -392,7 +497,7 @@ class SQLiteTraceSink:
                 (
                     CURRENT_SCHEMA_VERSION,
                     datetime.now(timezone.utc).isoformat(),
-                    "Initial Phase 12 schema",
+                    "Phase 13: added component_type column to trace_keys table, seeded COMPONENT_TRACE_KEYS",
                 ),
             )
             self._conn.commit()

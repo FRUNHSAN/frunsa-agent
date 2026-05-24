@@ -467,7 +467,7 @@ StreamItem(
         violations = trace_key_registration(tmp_path)
 
         assert len(violations) >= 1
-        assert violations[0].severity.value == "warning"
+        assert violations[0].severity.value == "error"  # Phase 13: upgraded WARNING→ERROR
         assert "planning.unknown_new_key" in violations[0].message
 
 

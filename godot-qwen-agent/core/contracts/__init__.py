@@ -12,6 +12,11 @@ from .registry import (
 )
 from .retrieval import RetrievalResult, RetrievalStrategy
 from .scoring import ScoringStrategy
+from .trace_keys import (
+    COMPONENT_TRACE_KEYS,
+    ComponentTraceKeyDef,
+    validate_component_trace,
+)
 from .streaming_protocol import (
     PaceConfig,
     SerializationFormat,
@@ -58,4 +63,8 @@ __all__ = [
     "PaceConfig",
     "SerializationFormat",
     "TransportBackend",
+    # Component trace contracts
+    "ComponentTraceKeyDef",
+    "COMPONENT_TRACE_KEYS",
+    "validate_component_trace",
 ]

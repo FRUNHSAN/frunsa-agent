@@ -89,10 +89,12 @@ TRACE_KEYS_COLUMNS: List[ColumnDef] = [
     {"name": "semantics",           "affinity": "TEXT",    "nullable": False, "primary_key": False, "description": "Human-readable semantics"},
     {"name": "unit",                "affinity": "NULLABLE_TEXT", "nullable": True,  "primary_key": False, "description": "Unit of measurement (tokens, ms, empty string)"},
     {"name": "component_candidate", "affinity": "INTEGER", "nullable": False, "primary_key": False, "description": "1 if marked component_candidate=True"},
+    {"name": "component_type",   "affinity": "NULLABLE_TEXT", "nullable": True,  "primary_key": False, "description": "Component type for component-level keys (retrieval/generation/scoring); NULL for engine keys"},
 ]
 
 TRACE_KEYS_INDEXES: List[IndexDef] = [
     {"name": "idx_keys_engine", "table": TRACE_KEYS_TABLE_NAME, "columns": ["engine"], "unique": False, "description": "Keys grouped by engine"},
+    {"name": "idx_keys_component_type", "table": TRACE_KEYS_TABLE_NAME, "columns": ["component_type"], "unique": False, "description": "Filter component keys by type"},
 ]
 
 
@@ -106,7 +108,7 @@ SCHEMA_VERSION_COLUMNS: List[ColumnDef] = [
     {"name": "description", "affinity": "TEXT",    "nullable": False, "primary_key": False, "description": "Human-readable description of schema change"},
 ]
 
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 
 
 # ── Unsupported features (explicit) ─────────────────────────────────

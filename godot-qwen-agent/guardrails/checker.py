@@ -8,6 +8,7 @@ from typing import Callable, Dict, List
 from guardrails.report import CheckReport, Severity, Violation
 from guardrails.rules import (
     component_registration_coverage,
+    component_trace_completeness,
     cross_platform_imports,
     engine_interface_purity,
     frozen_dataclass_integrity,
@@ -39,6 +40,7 @@ class GuardrailChecker:
             "engine-interface-purity": engine_interface_purity,
             "trace-context-namespace": trace_context_namespace,
             "trace-key-serializability": trace_key_serializability,
+            "component-trace-completeness": component_trace_completeness,
             "trace-key-registration": trace_key_registration,
             "sink-schema-consistency": sink_schema_consistency,
         }

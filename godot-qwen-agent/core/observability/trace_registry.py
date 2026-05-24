@@ -1,10 +1,9 @@
 """Declarative trace key registry: engine-private dialect snapshot.
 
 Phase 11: N=2 engine stubs only. NOT a cross-engine semantic standard.
-component_candidate=True flags keys that belong to component semantics
-(retrieval, generation, scoring), not to the engine itself. These should
-migrate to core/contracts/trace_keys.py when the component platform is
-built (Phase 13+).
+Phase 13: component_candidate keys migrated to core/contracts/trace_keys.py.
+ENGINE_TO_COMPONENT_MAP resolves engine-specific keys to canonical
+component-level keys defined in the component platform.
 """
 
 from __future__ import annotations
@@ -33,9 +32,8 @@ class TraceKeyDef:
     component_candidate: bool = False
     # True = this key's semantics belong to a component capability
     # (retrieval, generation, scoring), not to the engine itself.
-    # When the component platform is built, these keys should be
-    # migrated to component-level trace contracts (e.g. "retrieval.*"
-    # instead of "rag.*").
+    # Phase 13: migrated to core/contracts/trace_keys.py.
+    # See ENGINE_TO_COMPONENT_MAP for the engine→component resolution.
 
 
 TRACE_KEY_REGISTRY: Dict[str, TraceKeyDef] = {
@@ -79,4 +77,20 @@ TRACE_KEY_REGISTRY: Dict[str, TraceKeyDef] = {
         unit="ms",
         component_candidate=True,
     ),
+}
+
+# ── Engine-to-Component Key Mapping (Phase 13) ─────────────────────
+# Maps engine-level keys (engine.* prefix) to component-level keys
+# (component.* prefix). Used by sinks and analysis tools to resolve
+# trace_context keys to their canonical component contract defined
+# in core/contracts/trace_keys.py.
+#
+# Lives here (observability layer, the trace border) rather than in
+# core/contracts/ because the mapping requires knowledge of both engine
+# key names and component key names. Contracts must not know about
+# specific engines.
+ENGINE_TO_COMPONENT_MAP: Dict[str, str] = {
+    "planning.cumulative_tokens": "generation.cumulative_tokens",
+    "rag.chunk_id": "retrieval.chunk_id",
+    "rag.retrieval_latency_ms": "retrieval.latency_ms",
 }

@@ -1,0 +1,243 @@
+# ── Reasoning Chain ───────────────────────────────────────────────────
+chain_id: phase_13_component_trace_contracts
+title: "Component trace contracts: formal key registry, engine mapping, and validation"
+created_at: "2026-05-25T12:00:00Z"
+status: active
+tags: [component_trace, trace_keys, validation, component_platform, engine_mapping]
+related_chains:
+  - phase_12_observability_closed_loop
+  - phase_12_orchestration_trace_pre_design
+  - phase_11_trace_contract_verification
+  - phase_10_planning_engine_integration
+
+# ── 1. Context ───────────────────────────────────────────────────────
+
+context: |
+  Phase 12 completed the observability closed loop: per-item streaming trace,
+  SQLiteTraceSink, component candidate empirical analysis. 382 tests, 12 guardrails.
+
+  The trace_registry.py docstring (Phase 11) explicitly stated:
+  "component_candidate=True flags keys that should migrate to
+  core/contracts/trace_keys.py when the component platform is built (Phase 13+)."
+
+  Phase 12's analysis script classified all 3 component_candidate keys as
+  "needs_more_data" — but this was a methodology issue (cross-engine pooling
+  diluted per-engine occurrence rates). Per-engine analysis shows all 3 keys
+  at 100% occurrence, 100% type match. The real Phase 13 deliverable is not
+  re-classifying these keys — it's defining the formal contract that engines
+  target.
+
+  The component platform (core/contracts/) already has strategy Protocols
+  (RetrievalStrategy, GenerationStrategy, ScoringStrategy) and data models
+  (Chunk, RetrievalResult, GenerationResult). What's missing: component-level
+  trace contracts — the formal statement that "any engine claiming to provide
+  retrieval MUST emit retrieval.chunk_id and retrieval.latency_ms."
+
+# ── 2. Decision ──────────────────────────────────────────────────────
+
+decision: |
+  Phase 13 delivers the component trace contract platform in 6 code changes:
+
+  1. **core/contracts/trace_keys.py** (NEW) — ComponentTraceKeyDef frozen
+     dataclass, COMPONENT_TRACE_KEYS registry (3 keys), validate_component_trace()
+     function. Follows existing validation.py pattern exactly: frozen dataclass
+     + registry dict + validator returning ContractValidationResult.
+
+  2. **ENGINE_TO_COMPONENT_MAP** in trace_registry.py — Maps engine-level
+     keys to component-level keys. Lives in observability (trace border),
+     NOT in contracts (contracts must not know engine names).
+
+  3. **Schema v2** — Add component_type column to trace_keys table
+     (single-table approach, NULL for engine keys). Bump schema version
+     to 2. Migration via PRAGMA + ALTER TABLE.
+
+  4. **Guardrail upgrades** — trace_key_registration: WARNING → ERROR
+     (registry coverage complete). New: component_trace_completeness (WARNING)
+     enforces that engines emitting some component keys emit ALL required keys.
+
+  5. **Analysis script fix** — --per-engine flag for within-engine-scope
+     analysis. Sub-classify free_text cardinality (unique_identifiers vs
+     free_text). Use ENGINE_TO_COMPONENT_MAP for migration recommendations.
+
+  6. **Component key seeding in sink** — SQLiteTraceSink seeds
+     COMPONENT_TRACE_KEYS alongside existing TRACE_KEY_REGISTRY keys.
+     New query_component_keys() method. Backward compatible.
+
+  Design choice: Option C (data model + validation) over Option A (simple
+  migration) and Option B (Protocol-based). Rationale below.
+
+# ── 3. Rationale ─────────────────────────────────────────────────────
+
+rationale: |
+  ## Why Option C (data model + validation)?
+
+  Option A (simple migration — just move 3 keys to a new file) is minimal
+  but doesn't create a *contract*. Engines still have no formal target.
+  Phase 13 would be a file move, not an architectural advance.
+
+  Option B (Protocol-based — each component type gets a trace Protocol class)
+  is over-engineered. Trace keys are data, not behavior. A Protocol implies
+  methods; trace keys have no methods. Frozen dataclass + registry + validator
+  follows the exact pattern of validation.py (ContractValidationResult +
+  ValidationError + validate_* functions).
+
+  Option C creates a formal contract: ComponentTraceKeyDef declares WHAT keys
+  exist, COMPONENT_TRACE_KEYS groups them by component type, and
+  validate_component_trace() verifies that a trace_context satisfies the
+  contract. This is the same level of formality as validate_chunk_output()
+  or validate_reranker_output() — data-in, result-out, no side effects.
+
+  ## Why mapping in observability, not contracts?
+
+  ENGINE_TO_COMPONENT_MAP requires knowledge of both engine key names
+  (rag.chunk_id) and component key names (retrieval.chunk_id). If it lived
+  in core/contracts/trace_keys.py, contracts would need to import engine
+  names — a violation of platform isolation (contracts should define WHAT,
+  not which engines exist).
+
+  Observability (core/observability/) is the trace border — it already
+  has TraceKeyDef with engine-specific keys. Adding the mapping here is
+  the correct architectural placement. The adapter layer (core/adapters/)
+  would be another candidate, but trace resolution is an observability
+  concern, not a transport concern.
+
+  ## Why single-table schema extension?
+
+  Adding component_type column to the existing trace_keys table avoids:
+  - JOIN complexity when queries span both engine and component keys
+  - A second seeding path with potential for inconsistency
+  - Extra migration complexity (new table vs new column)
+
+  NULL semantics are explicit and well-understood: engine keys have
+  component_type=NULL, component keys have component_type set.
+
+  ## Why preserve component_candidate flag?
+
+  Existing code (trace_key_registration guardrail, analysis script, sink
+  query_keys filter) references component_candidate. Removing it would
+  require coordinated changes across 4+ files. Marking it as deprecated
+  but preserved is the safe path — remove in Phase 14+ after all consumers
+  have migrated to the new component_type column.
+
+  ## Why trace_key_registration ERROR now?
+
+  Phase 11-12 kept it at WARNING because the registry was immature and
+  new engines would naturally add keys. With the component platform built
+  and both registries (engine + component) covering all known keys, an
+  unregistered key is a real gap — either the key should be registered,
+  or it's a typo. ERROR enforces this.
+
+  ## Why component_trace_completeness at WARNING?
+
+  The component platform is brand new in Phase 13. An ERROR would block
+  commits for engines that are still being developed. WARNING nudges
+  without blocking. Upgrade to ERROR in Phase 14+ after one phase of
+  real-world use and refinement.
+
+# ── 4. Alternatives ───────────────────────────────────────────────────
+
+alternatives:
+  - option: "A: Simple migration — move 3 keys to core/contracts/trace_keys.py with no validation"
+    pros: "Minimal LOC, zero risk of breaking existing tests"
+    cons: "Doesn't create a formal contract — just relocates data. Engines still have no target to validate against. Phase 13 would be a file move, not architectural progress."
+
+  - option: "B: Protocol-based trace contracts — each component type gets a Protocol class"
+    pros: "Type-checkable, IDE support, formal interface"
+    cons: "Trace keys are data, not behavior. A Protocol implies methods; trace keys have none. Over-engineered for key-value pairs. Inconsistent with existing validation.py pattern (functions, not Protocols)."
+
+  - option: "C: Data model + validation — frozen dataclass + registry + validator function (CHOSEN)"
+    pros: "Follows established validation.py pattern exactly. Creates formal contract without over-engineering. ComponentTraceKeyDef is a natural parallel to TraceKeyDef."
+    cons: "~100 LOC for trace_keys.py — more than Option A's ~20 LOC, but the LOC delivers contract formality, not just relocation."
+
+  - option: "D: Separate component_trace_keys table in sink schema"
+    pros: "Clean separation of engine vs component keys at the storage level"
+    cons: "Adds JOIN complexity for queries spanning both key types. Two seeding paths. More migration code. Single-table with NULL semantics is simpler."
+
+  - option: "E: Remove component_candidate flag entirely in Phase 13"
+    pros: "Clean break from temporary mechanism"
+    cons: "Breaks 4+ consumers (guardrails, analysis script, sink queries, tests). Coordinated change across multiple files. Safer to deprecate in Phase 14+ after all consumers migrate to component_type."
+
+# ── 5. Evidence ───────────────────────────────────────────────────────
+
+evidence:
+  test_files:
+    - tests/conformance/test_component_trace_keys.py
+    - tests/integration/test_component_trace_sink.py
+    - tests/e2e/test_component_trace_e2e.py
+  test_cases:
+    - TestComponentTraceKeyDef::test_frozen_integrity
+    - TestComponentTraceKeyDef::test_full_key_composition
+    - TestComponentTraceKeys::test_registry_is_non_empty
+    - TestComponentTraceKeys::test_three_keys_defined
+    - TestValidateComponentTrace::test_valid_retrieval_trace
+    - TestValidateComponentTrace::test_valid_generation_trace
+    - TestValidateComponentTrace::test_missing_required_key
+    - TestValidateComponentTrace::test_type_mismatch
+    - TestValidateComponentTrace::test_null_trace_context
+    - TestValidateComponentTrace::test_unknown_component_type
+    - TestValidateComponentTrace::test_extra_key_warning
+    - TestEngineToComponentMapping::test_three_mappings
+    - TestEngineToComponentMapping::test_all_mapped_keys_exist_in_component_registry
+    - TestSinkComponentKeySeeding::test_component_keys_seeded
+    - TestSinkComponentKeySeeding::test_component_keys_have_component_type
+    - TestSinkComponentKeyQueries::test_query_component_keys_by_type
+    - TestSinkV2Migration::test_v1_to_v2_column_addition
+  benchmark_results: |
+    428 tests pass (382 Phase 12 + 46 Phase 13), 1 skipped, 0 failures.
+    13 guardrails PASSED (12 existing + 1 new: component_trace_completeness).
+    0 external dependencies maintained.
+    Per-engine analysis shows 3/3 confirmed_component (100% occurrence,
+    100% type match) vs 0/3 with cross-engine pooling.
+    Schema v1→v2 migration tested: fresh DB + existing v1 DB upgrade.
+    All ad-hoc verification checks pass (imports, mapping, sink v2).
+
+# ── 6. Future Guidance ───────────────────────────────────────────────
+
+future_guidance: |
+  ## Phase 14+: ComponentTraceKeyDef expansion
+
+  As new engines and component types are added, extend COMPONENT_TRACE_KEYS
+  following this pattern:
+  1. Add ComponentTraceKeyDef entries for the new keys
+  2. Add ENGINE_TO_COMPONENT_MAP entries for engine-specific keys
+  3. If a new component type (beyond retrieval/generation/scoring), add it
+     to the component_type values — no schema change needed (TEXT column)
+  4. Run component_trace_completeness guardrail to verify new engines
+  5. Update analysis script to include the new engine's data
+
+  ## Scoring component type
+
+  scoring has 0 keys in Phase 13 because no engine currently emits scoring
+  trace keys. When a scoring engine is built (Phase 14+), add scoring.*
+  keys to COMPONENT_TRACE_KEYS. The registry and validation function
+  already support this — no code changes needed.
+
+  ## Guardrail upgrade path
+
+  component_trace_completeness is WARNING in Phase 13. Upgrade to ERROR
+  in Phase 14+ after one phase of real-world use proves the rule's
+  false-positive rate is acceptable.
+
+  ## component_candidate deprecation
+
+  Once all consumers (guardrails, analysis script, sink queries) have
+  migrated to the component_type column, remove the component_candidate
+  flag from TraceKeyDef. Target: Phase 14+.
+
+  ## Direct component key usage
+
+  New engines may emit component keys directly (e.g., retrieval.chunk_id
+  instead of rag.chunk_id). The extended trace_key_registration guardrail
+  already recognizes these. The sink stores them with engine="" since
+  component keys are engine-agnostic. This is correct — component keys
+  are the canonical form.
+
+anti_patterns:
+  - "Mapping in contracts: defining ENGINE_TO_COMPONENT_MAP in core/contracts/trace_keys.py. Contracts must not know engine names like 'rag.chunk_id' — platform isolation violation."
+  - "Protocol-based trace keys: using ABC or Protocol for component trace contracts. Trace keys are data, not behavior. Frozen dataclass + validator is the established pattern."
+  - "Removing component_candidate flag in Phase 13: breaks 4+ consumers. Deprecate in Phase 14+ after migration to component_type column."
+  - "Separate component_trace_keys table: adds JOIN complexity. Single-table with NULL component_type is cleaner."
+  - "Hard-coding key names: using string literals like 'retrieval.chunk_id' in validation logic instead of referencing COMPONENT_TRACE_KEYS or ENGINE_TO_COMPONENT_MAP."
+  - "Modifying TraceKeyDef structure: engine-level keys are stable. Phase 13 adds new types alongside existing ones without changing their shape."
+  - "Cross-engine occurrence rate expectations: expecting per-engine keys like 'rag.chunk_id' to appear in 95% of items pooled across heterogeneous engines. Use --per-engine for within-scope analysis."
+  - "Stripping engine prefix for migration: current analysis script strips key_name.split('.')[1] and prepends 'retrieval.' — wrong for planning.cumulative_tokens which maps to generation.*. Use ENGINE_TO_COMPONENT_MAP."

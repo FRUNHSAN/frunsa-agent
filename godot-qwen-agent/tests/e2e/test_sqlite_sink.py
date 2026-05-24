@@ -105,7 +105,8 @@ class TestSQLiteTraceSink:
                 count = sink._conn.execute(
                     f"SELECT COUNT(*) FROM {TRACE_KEYS_TABLE_NAME}"
                 ).fetchone()[0]
-                assert count == len(TRACE_KEY_REGISTRY)
+                # Phase 13: 6 engine + 3 component keys = 9 total
+                assert count == 9
             finally:
                 sink.close()
 
@@ -120,7 +121,8 @@ class TestSQLiteTraceSink:
                 count = sink2._conn.execute(
                     f"SELECT COUNT(*) FROM {TRACE_KEYS_TABLE_NAME}"
                 ).fetchone()[0]
-                assert count == len(TRACE_KEY_REGISTRY)
+                # Phase 13: 6 engine + 3 component keys = 9 total
+                assert count == 9
             finally:
                 sink2.close()
 
@@ -349,13 +351,17 @@ class TestSQLiteTraceSink:
                 all_keys = sink.query_keys(component_candidate_only=False)
                 cc_keys = sink.query_keys(component_candidate_only=True)
 
-                assert len(all_keys) == 6
-                assert len(cc_keys) == 3
+                assert len(all_keys) == 9  # 6 engine + 3 component (Phase 13)
+                assert len(cc_keys) == 6  # 3 engine + 3 component (all component_candidate=1)
                 cc_names = {k["key_name"] for k in cc_keys}
+                # Phase 13: 3 engine component_candidate + 3 component keys
                 assert cc_names == {
                     "planning.cumulative_tokens",
                     "rag.chunk_id",
                     "rag.retrieval_latency_ms",
+                    "retrieval.chunk_id",
+                    "retrieval.latency_ms",
+                    "generation.cumulative_tokens",
                 }
             finally:
                 sink.close()
@@ -409,7 +415,7 @@ class TestSQLiteTraceSink:
             with SQLiteTraceSink(path) as sink:
                 assert sink.max_items_per_call == 100
                 keys = sink.query_keys()
-                assert len(keys) == 6
+                assert len(keys) == 9  # 6 engine + 3 component (Phase 13)
             # After __exit__, connection is closed
             with pytest.raises(Exception):
                 sink.query_keys()
@@ -471,7 +477,7 @@ class TestSinkSchemaGuardrail:
         from core.observability.sink_schema import TRACE_RECORDS_INDEXES, TRACE_KEYS_INDEXES
 
         total_indexes = len(TRACE_RECORDS_INDEXES) + len(TRACE_KEYS_INDEXES)
-        assert total_indexes == 7  # 6 trace_records + 1 trace_keys = 7
+        assert total_indexes == 8  # 6 trace_records + 2 trace_keys (Phase 13: +idx_keys_component_type)
 
         # Verify the guardrail function runs without import errors
         # (index coverage check happens inside the function)

@@ -16,7 +16,7 @@ from guardrails.report import Severity, Violation
 
 # Engines with known prefixes — keys under these top-level names are exempt
 # from the "." check because they ARE the namespace prefix.
-_KNOWN_ENGINES = {"planning", "rag"}
+_KNOWN_ENGINES = {"planning", "rag", "retrieval", "generation", "scoring"}
 
 
 def trace_context_namespace(root: Path) -> List[Violation]:
