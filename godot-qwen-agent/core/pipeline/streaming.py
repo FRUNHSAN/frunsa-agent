@@ -105,3 +105,37 @@ async def merge_streams(
                 yield item  # data item — pass through
     finally:
         await _cancel_all()
+
+
+async def pace_stream(
+    stream: AsyncIterator[StreamItem],
+    item_throughput: Optional[float] = None,
+    burst_size: int = 0,
+    adaptive: bool = False,
+) -> AsyncIterator[StreamItem]:
+    """Apply pace shaping to an AsyncIterator[StreamItem].
+
+    InternalStream only — do NOT use for UserFacing streams.
+    Does NOT modify StreamItem data — only alters timing between yields.
+
+    Convenience wrapper around PaceShapingWrapper. The engine does NOT
+    call this directly — steps/composers use it when assembling pipelines
+    that need throughput control.
+
+    Args:
+        stream: The upstream async iterator to throttle.
+        item_throughput: Max items/sec (None = unlimited passthrough).
+        burst_size: Items to accumulate before sleeping (0 = per-item).
+        adaptive: If True, requires backpressure_signal via PaceShapingWrapper directly.
+    """
+    from core.adapters.stream_adapter import PaceShapingWrapper
+    from core.contracts.streaming_protocol import PaceConfig
+
+    config = PaceConfig(
+        item_throughput=item_throughput,
+        burst_size=burst_size,
+        adaptive=adaptive,
+    )
+    wrapper = PaceShapingWrapper(source=stream, config=config)
+    async for item in wrapper:
+        yield item

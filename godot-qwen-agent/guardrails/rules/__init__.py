@@ -5,6 +5,8 @@ from guardrails.rules.frozen_dataclass import frozen_dataclass_integrity
 from guardrails.rules.component_registry import component_registration_coverage
 from guardrails.rules.chain_coverage import reasoning_chain_coverage
 from guardrails.rules.stream_isolation import user_facing_stream_isolation
+from guardrails.rules.internal_stream_only import internal_stream_only
+from guardrails.rules.transport_adapter_boundary import transport_adapter_boundary
 
 __all__ = [
     "cross_platform_imports",
@@ -12,4 +14,6 @@ __all__ = [
     "component_registration_coverage",
     "reasoning_chain_coverage",
     "user_facing_stream_isolation",
+    "internal_stream_only",
+    "transport_adapter_boundary",
 ]

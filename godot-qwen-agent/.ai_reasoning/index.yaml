@@ -95,6 +95,13 @@ chains:
     tags: [streaming, dag, merge, sentinel, backpressure, error_propagation, internal_stream]
     status: active
 
+  - chain_id: phase_09_multi_engine_architecture_vision
+    file: chains/phase_09_multi_engine_architecture_vision.yaml
+    title: "Multi-engine architecture vision: RAG engine's place and cloud-native adaptation"
+    layer: architecture
+    tags: [cloud_native, transport, streaming, pace_shaping, multi_engine, architecture, wire_format]
+    status: active
+
 # ── Tag index for quick lookup ───────────────────────────────────────
 
 tag_index:
@@ -133,3 +140,8 @@ tag_index:
   user_facing_stream: [phase_08_dag_streaming_semantics]
   auto_merge: [phase_08_dag_streaming_semantics]
   thread_pool: [phase_08_async_native_evolution]
+  cloud_native: [phase_09_multi_engine_architecture_vision]
+  transport: [phase_09_multi_engine_architecture_vision]
+  pace_shaping: [phase_09_multi_engine_architecture_vision]
+  multi_engine: [phase_09_multi_engine_architecture_vision]
+  wire_format: [phase_09_multi_engine_architecture_vision]

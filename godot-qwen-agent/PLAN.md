@@ -1478,3 +1478,272 @@ await task
 4. `grep -rn "asyncio.run(" core/` — 恰好 2 处
 5. 同步：`for item in runner.run_streaming(...):` 逐 token 输出
 6. 异步：`async for item in runner.arun_streaming(...):` 逐 token 输出
+
+---
+
+## Phase 8.2b: DAG 流式汇聚 (多节点流式传播)
+
+**完成状态**: ✅ 已完成
+
+### 关键交付
+- `merge_streams()` in `core/pipeline/streaming.py` — WAIT_ALL 合并，N-Sentinel 收敛 (108 行)
+- `StepOutput.internal_stream` — InternalStream (DAG 内部) vs `.stream` (UserFacing, 仅 generator)
+- `StreamItem.is_terminal` + `StreamItem.error` — 错误承载的终端标记（替代裸 sentinel）
+- 引擎自动合并 — `stream_state` dict 追踪 internal_stream，多上游自动调 `merge_streams()`
+- `guardrails/rules/stream_isolation.py` — AST 级强制：仅 generator 步骤可设置 `StepOutput.stream`
+- `.ai_reasoning/chains/phase_08_dag_streaming_semantics.yaml` — 推理链
+
+### 架构决策
+
+1. **WAIT_ALL 仅此一种 (FIRST_N 推迟到 8.2c)**：所有 N 个上游生产者必须完成后，下游才收到合并终端信号。N 个 sentinel 被计数；第 N 个哨兵到达后才产出。最安全、最简单正确。
+
+2. **N-Sentinel 收敛模型**：每个上游生产者发送数据 StreamItem 后跟恰好一个终端 StreamItem (`is_terminal=True`)。共享 `asyncio.Queue` 累积所有生产者的 item。合并消费者计数终端，count == N 时产出单个合并终端。
+
+3. **错误承载的 StreamItem 替代裸 Sentinel**：错误通过 `StreamItem(delta="", finish_reason="error", is_terminal=True, error="...")` 发送。保持协议统一——一切皆为 StreamItem。收到错误终端时：
+   - a) 立即产出错误终端
+   - b) 通过 `asyncio.Task.cancel()` 取消所有剩余生产者任务
+   - c) 退出合并循环
+
+4. **UserFacingStream vs InternalStream 隔离**：`StepOutput.internal_stream: Optional[AsyncIterator]` 新增（8.2a 已将 `.stream` 改为 AsyncIterator 用于 UserFacing）。仅 `component_type="generator"` 暴露 UserFacingStream；所有其他步骤走 `internal_stream`。引擎保证 internal_stream 数据绝不触碰 SSE/UserFacing 序列化。
+
+### 反模式
+
+- "使用裸 sentinel 对象替代 `StreamItem(is_terminal=True)`。这迫使 `isinstance()` 检查，破坏协议统一性。"
+- "在步骤的 `run()` 方法内合并流。合并逻辑属于引擎或专用 merge helper——步骤消费单个合并流，不是 N 个原始流。"
+- "错误时忘记取消剩余生产者任务。这会泄漏协程并导致 'Task was destroyed but it is pending' 警告。"
+- "硬编码生产者数量 N。merge 函数必须从步骤的 `depends_on` 列表中推导 N。"
+- "internal_stream 数据跨越进入 UserFacing 序列化。Guardrails 必须静态验证此边界。"
+
+### 测试覆盖
+- `tests/e2e/test_dag_stream_merge.py` — 17 个测试 (N-Sentinel 收敛 / 错误传播与取消 / InternalStream 隔离 / 背压 / 契约 / 引擎集成)
+- 265 测试，0 失败，1 skip
+
+---
+
+## Phase 9: 云原生适配层
+
+### 背景
+
+Phase 8 确立了 async-native DAG 流式 (WAIT_ALL 合并、N-Sentinel 收敛、InternalStream 与 UserFacing 隔离)。RAG 引擎在单进程内是正确的。Phase 9 回答：当这个引擎在云原生环境中与未来的引擎类型 (Planning、Reflection、Multi-Agent) 一起运行时，会发生什么？
+
+**战略约束：**
+- RAG 引擎是"领域特定运行时"——不得吸收 Agent 概念（对话历史、用户身份、Agent 状态）
+- DeepSeek-TUI → JSON-RPC 作为云原生内部总线（但 JSON-RPC 是选项之一，不硬编码）
+- Pi → Pace Shaping 作为传输层 QoS（参数化为 `item_throughput`，非 `token_rate`）
+- 去 RAG 特化：全局使用基于行为的命名
+- 传输适配器仅在 `core/adapters/` ——引擎核心保持纯净
+
+### 1. 契约层: `core/contracts/streaming_protocol.py`
+
+两个可插拔 Protocol + 一个配置 dataclass。无中间 `DataStreamMessage`——`StreamItem` 既是内存模型也是网络模型。`SerializationFormat` 直接将 StreamItem ↔ bytes 转换。
+
+```python
+# SerializationFormat — 可插拔序列化格式
+class SerializationFormat(Protocol):
+    def serialize(self, item: StreamItem) -> bytes: ...
+    def deserialize(self, data: bytes) -> StreamItem: ...
+
+# TransportBackend — 可插拔网络传输
+class TransportBackend(Protocol):
+    async def connect(self) -> None: ...
+    async def send(self, data: bytes) -> None: ...
+    async def receive(self) -> AsyncIterator[bytes]: ...
+    async def close(self) -> None: ...
+    def health_check(self) -> bool: ...
+
+# PaceConfig — QoS 参数 (item_throughput 非 token_rate)
+@dataclass(frozen=True)
+class PaceConfig:
+    """流式服务质量参数。
+
+    adaptive=True 时，backpressure_signal 返回值语义：
+      0.0 = 下游完全空闲，可全速发送
+      1.0 = 下游完全饱和，应暂停发送
+      中间值 = 线性插值缩放 item_throughput
+
+    信号采样频率由 PaceShapingWrapper 内部控制（建议每 burst_size
+    个 item 采样一次），避免高频 await 成为性能瓶颈。
+    """
+    item_throughput: Optional[float] = None  # items/sec, None = 不限速
+    burst_size: int = 0
+    adaptive: bool = False
+```
+
+### 2. 适配器层: `core/adapters/stream_adapter.py`
+
+**`JsonRpc20Serializer`** — 实现 `SerializationFormat`。必须覆盖完整 4 种 StreamItem 状态：
+
+| StreamItem 状态 | JSON-RPC method | params 附加字段 | 备注 |
+|---|---|---|---|
+| `is_terminal=False, error=None` | `stream.item` | `data: ...` | 常规数据 |
+| `is_terminal=True, error=None` | `stream.finish` | `{}` | 正常结束 |
+| `is_terminal=True, error="..."` | `stream.error` | `error: {...}` | 错误终端 |
+| `is_terminal=False, error="..."` | N/A | N/A | 非法状态 → `serialize()` 中 `raise ValueError` |
+
+TDD 锚点测试必须在实现前写出——确保 `serialize()` 把状态机校验放在第一行：
+
+```python
+def test_serialize_invalid_state_raises(self):
+    """非法状态 (is_terminal=False, error!=None) 必须在序列化层被拦截"""
+    serializer = JsonRpc20Serializer()
+    invalid_item = StreamItem(
+        delta="some chunk", index=0,
+        is_terminal=False, error="unexpected error"
+    )
+    with pytest.raises(ValueError, match="Non-terminal item cannot carry error"):
+        serializer.serialize(invalid_item)
+```
+
+**`PaceShapingWrapper`** — 用吞吐量控制包装 `AsyncIterator[StreamItem]`：
+- 不修改 StreamItem 数据——仅改变 yield 之间的时序
+- `item_throughput` (items/sec) + `burst_size` + `adaptive` 模式
+- Adaptive 模式：接受可选的 `backpressure_signal: Callable[[], Awaitable[float]]` 返回 0.0-1.0
+- 使用 `asyncio.sleep()`——非阻塞
+- 采样策略：每 `burst_size` 个 item 采样一次 backpressure_signal
+- burst_size > 0 时批量 sleep：累积 burst_size 个 item 后一次性 sleep，减少延迟抖动
+- Docstring 必须标注 "InternalStream only"
+
+虚拟时钟 fixture 消除物理延迟：
+```python
+@pytest.fixture
+def mock_sleep(monkeypatch):
+    sleep_calls = []
+    async def fake_sleep(duration):
+        sleep_calls.append(duration)
+    monkeypatch.setattr("asyncio.sleep", fake_sleep)
+    return sleep_calls
+```
+
+**`AsyncDataStreamAdapter`** — 桥接引擎 ↔ 云传输：
+- 构造函数: `(serializer, transport, dependency_name, default_timeout, pace_config)`
+- `send_stream(stream)`: 序列化 + 通过传输发送
+- `receive_stream()`: 从传输接收 + 反序列化
+- 遵循 VectorStoreAdapter 模式：auto-tracing, `health_probe()`, `last_trace`
+
+### 3. 传输占位: `core/adapters/transports/`
+
+使用 ABC + abstractmethod (非裸 `NotImplementedError`)，让占位符成为 IDE 可感知的接口文档：
+
+```python
+# core/adapters/transports/grpc_transport.py
+from abc import ABC, abstractmethod
+from core.contracts.streaming_protocol import TransportBackend
+
+class GrpcBidiTransport(TransportBackend, ABC):
+    """gRPC Bidirectional Streaming transport.
+
+    生产实现需要:
+    - protobuf schema 定义在 protos/stream.proto
+    - grpc.aio.insecure_channel / secure_channel 配置
+    - Metadata-based dependency_name 路由
+    """
+    @abstractmethod
+    async def connect(self) -> None: ...
+    @abstractmethod
+    async def send(self, data: bytes) -> None: ...
+    @abstractmethod
+    async def receive(self) -> AsyncIterator[bytes]: ...
+    @abstractmethod
+    async def close(self) -> None: ...
+    @abstractmethod
+    def health_check(self) -> bool: ...
+```
+
+### 4. 管道便利函数: `core/pipeline/streaming.py`
+
+在 `merge_streams()` 旁边添加 `pace_stream()`——对 `PaceShapingWrapper` 的薄委托：
+
+```python
+async def pace_stream(
+    stream: AsyncIterator[StreamItem],
+    item_throughput: Optional[float] = None,
+    burst_size: int = 0,
+    adaptive: bool = False,
+) -> AsyncIterator[StreamItem]:
+```
+
+**引擎核心 (engine.py) 零变更。** Pace shaping 由包装流的适配器应用，非引擎。
+
+### 5. Guardrails: 2 条新规则
+
+**共用基础设施**：与 `cross-platform-imports.py` 复用 AST 解析，提取 `_get_import_nodes(tree)` 工具函数。
+
+**`internal_stream_only.py`** — 规则 ID `internal-stream-001` (ERROR)：
+
+| 检测模式 | 易误报场景 | 排除策略 |
+|---|---|---|
+| `StepOutput(stream=...)` 中 stream 参数非 None | 测试文件中 Mock StepOutput | 排除路径含 `test` 的文件 |
+| | `stream=None` 显式传参 | AST 检查 `Constant(value=None)` |
+
+**`transport_adapter_boundary.py`** — 规则 ID `transport-boundary-001` (ERROR)：
+
+| 检测模式 | 易误报场景 | 排除策略 |
+|---|---|---|
+| `import grpc` / `from redis` / `import nats` 等 | `core/adapters/transports/` 内允许 | 检查文件路径是否在 `core/adapters/` 下 |
+| | 注释/docstring 中的提及 | 仅检查 AST `Import`/`ImportFrom` 节点 |
+
+总计: 7 条 guardrails 规则。
+
+### 6. 推理链: `.ai_reasoning/chains/phase_09_multi_engine_architecture_vision.yaml`
+
+记录：
+- RAG 引擎是众多引擎类型之一（非 THE engine）
+- 传输无关架构（AsyncDataStreamAdapter 模式）
+- Pace shaping 作为通用 QoS（item_throughput，非 token_rate）
+- 什么属于 RAG 引擎 vs. 未来 Agent 引擎 vs. 云原生层
+- 反模式：硬编码 token_rate、将传输放入 pipeline/、Agent 状态放入 RAG 引擎
+
+### 7. 导出: `core/adapters/__init__.py`
+
+将全部适配器加入导出（当前仅导出 ChunkerAdapter）。按类别分组，遵循 `contracts/__init__.py` 模式。
+
+### 8. 测试: `tests/e2e/` (~35 新测试)
+
+| 文件 | 类 | 用例 |
+|------|-----|------|
+| `test_stream_serialization.py` | `TestJsonRpcSerializer`, `TestPaceConfig` | 往返 (data/error/terminal)、frozen 完整性、协议一致性、非法状态断言 |
+| `test_pace_shaping.py` | `TestPaceShaping`, `TestAdaptivePace` | 固定速率、burst、不限速=直通、StreamItem 完整性、自适应缩放 |
+| `test_transport_backpressure.py` | `TestTransportBackpressure`, `TestTransportWithMerge` | 慢消费者节流、队列容量、共享背压、merge+transport 集成 |
+
+### 实施顺序
+
+| # | 步骤 | 关键文件 |
+|---|------|---------|
+| 1 | `streaming_protocol.py` | `core/contracts/streaming_protocol.py`, 更新 `__init__.py` |
+| 2 | `stream_adapter.py` | `core/adapters/stream_adapter.py` (3 个类) |
+| 3 | 传输占位 | `core/adapters/transports/` (3 个文件) |
+| 4 | `pace_stream()` | `core/pipeline/streaming.py` (追加) |
+| 5 | Guardrails (2 新规则) | `guardrails/rules/` + `checker.py` |
+| 6 | 推理链 | `.ai_reasoning/chains/phase_09_multi_engine_architecture_vision.yaml` |
+| 7 | 导出 | `core/adapters/__init__.py` |
+| 8 | 测试 (~35) | `tests/e2e/` 3 个新文件 |
+
+### 架构不变量检查清单
+
+| # | 不变量 | 验证 |
+|---|--------|------|
+| 1 | `asyncio.run()` count = 2 | `grep -rn "asyncio.run(" core/` → 仅 engine.py |
+| 2 | 新适配器无同步阻塞 | `stream_adapter.py` 只用 `await`/`async for`/`asyncio.sleep()` |
+| 3 | StreamItem frozen dataclass 不变 | `git diff core/contracts/generation.py` 为空 |
+| 4 | 传输适配器仅在 `adapters/` | guardrails 规则 `transport-adapter-boundary` 通过 |
+| 5 | `item_throughput` 非 `token_rate` | `grep -rn "token_rate" core/` 为空 |
+| 6 | 无 Agent 概念进入 RAG 引擎 | `grep -rn "agent_state" core/` 为空 |
+| 7 | 基于行为的 guardrails 命名 | `internal_stream_only`, `transport_adapter_boundary` |
+| 8 | 265 + ~35 = 300+ 测试全部绿色 | `pytest tests/ -q` |
+
+### 风险矩阵
+
+| 风险 | 概率 | 影响 | 缓解措施 |
+|---|---|---|---|
+| PaceShapingWrapper 在 adaptive 模式下引入额外延迟抖动 | 中 | 体验退化 | 测试中加入 `time.monotonic()` 方差断言；`burst_size > 0` 时批量 sleep |
+| JsonRpcSerializer 与现有 StreamItem frozen 约束冲突 | 低 | 序列化失败 | StreamItem 不变；序列化器只做读取，反序列化时用 `StreamItem(...)` 构造 |
+| 35 个新测试使总测试时间超过阈值 | 低 | CI 变慢 | pace_shaping 测试用虚拟时钟 (`monkeypatch asyncio.sleep`)；transport 测试用内存 Fake |
+| `pace_stream()` 被误用于 UserFacing 流 | 中 | 违反隔离契约 | `internal-stream-001` 规则已覆盖；Docstring 标注 "InternalStream only" |
+
+### 验证
+
+1. `python -m guardrails check` — 7 条规则，全部 PASSED
+2. `pytest tests/e2e/test_stream_serialization.py tests/e2e/test_pace_shaping.py tests/e2e/test_transport_backpressure.py -v` — ~35 新测试通过
+3. `pytest tests/ -q` — 300+ 测试，无回归
+4. `python -c "from core.adapters import AsyncDataStreamAdapter, JsonRpc20Serializer, PaceShapingWrapper"` — 全部可导入
+5. `python -c "from core.contracts import SerializationFormat, TransportBackend, PaceConfig"` — 契约面整洁

@@ -12,6 +12,11 @@ from .registry import (
 )
 from .retrieval import RetrievalResult, RetrievalStrategy
 from .scoring import ScoringStrategy
+from .streaming_protocol import (
+    PaceConfig,
+    SerializationFormat,
+    TransportBackend,
+)
 from .validation import (
     ContractValidationResult,
     ValidationError,
@@ -49,4 +54,8 @@ __all__ = [
     "validate_pipeline_steps",
     # Built-in strategies
     "IdentityChunker",
+    # Cloud-native streaming protocol
+    "PaceConfig",
+    "SerializationFormat",
+    "TransportBackend",
 ]

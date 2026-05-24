@@ -1,0 +1,194 @@
+# ── Reasoning Chain ───────────────────────────────────────────────────
+chain_id: phase_09_multi_engine_architecture_vision
+title: "Multi-engine architecture vision: RAG engine's place and cloud-native adaptation"
+created_at: "2026-05-24T23:30:00Z"
+updated_at: "2026-05-24T23:30:00Z"
+tags: [cloud_native, transport, streaming, pace_shaping, multi_engine, architecture, wire_format]
+status: active
+related_chains:
+  - phase_08_dag_streaming_semantics
+  - phase_08_async_native_evolution
+  - phase_03_adapter_pattern
+  - phase_05_external_io
+
+# ── 1. Context ───────────────────────────────────────────────────────
+
+context: |
+  Phase 8 established async-native DAG streaming with WAIT_ALL merge
+  semantics and InternalStream/UserFacing isolation. The RAG engine
+  operates correctly within a single process.
+
+  Phase 9 asks: what happens when this engine needs to run in a cloud-native
+  environment alongside future engine types (Planning, Reflection, Multi-Agent)?
+
+  The key insight: RAG is ONE engine type among many. The architecture must
+  accommodate other engine types without RAG-specific concepts leaking into
+  the transport layer. This chain documents the boundary between the RAG
+  engine and the cloud-native adaptation layer that will serve ALL engine types.
+
+# ── 2. Decision ──────────────────────────────────────────────────────
+
+decision: |
+  Five interconnected decisions for Phase 9:
+
+  1. AsyncDataStreamAdapter as transport-agnostic bridge:
+     Named AsyncDataStreamAdapter (NOT JsonRpcStreamAdapter) because
+     JSON-RPC is just ONE serialization option. The adapter accepts
+     pluggable SerializationFormat and TransportBackend — JSON-RPC 2.0
+     + gRPC is one combination; msgpack + Redis Streams is another.
+
+  2. Pace shaping parameterized as item_throughput (NOT token_rate):
+     The RAG engine primarily streams text tokens today, but other engine
+     types may stream structured data items, images, or intermediate
+     results. item_throughput is generic across all item types.
+
+  3. Transport adapters ONLY in core/adapters/:
+     The engine core (pipeline/engine.py) remains transport-agnostic.
+     PaceShapingWrapper lives in adapters/ as a transport QoS concern.
+     pace_stream() convenience in pipeline/streaming.py delegates to it.
+
+  4. StreamItem as the single data model for both memory and wire:
+     No intermediate DataStreamMessage type. SerializationFormat converts
+     StreamItem ↔ bytes directly. This keeps the data model surface minimal.
+
+  5. De-RAG-specialization:
+     No "agent state", "conversation history", or "user identity" concepts
+     enter the RAG engine. These belong to a separate Agent engine that
+     would call the RAG engine as a service via AsyncDataStreamAdapter.
+     Guardrails rules are named by behavior (internal_stream_only,
+     transport_adapter_boundary), not by domain.
+
+# ── 3. Rationale ─────────────────────────────────────────────────────
+
+rationale: |
+  Why transport-agnostic:
+  - Hardcoding JSON-RPC into the adapter name bakes a serialization choice
+    into the architecture. If we later need protobuf for performance or
+    msgpack for binary efficiency, the name AsyncDataStreamAdapter stays
+    correct — only the constructor's serializer parameter changes.
+  - Transport backends (gRPC, Redis, Kafka) have different trade-offs
+    (latency vs throughput vs ordering guarantees). The Protocol boundary
+    lets us switch without touching engine code.
+
+  Why item_throughput over token_rate:
+  - RAG text streams measure in tokens, but a future Planning engine might
+    stream structured steps, a Batch engine might stream data chunks, and
+    a Multi-Agent engine might stream inter-agent messages. None of these
+    have "tokens."
+  - Naming the parameter by what it controls (items per second) rather
+    than what the items happen to be (tokens) prevents domain leakage.
+
+  Why pace shaping in adapters/ not pipeline/:
+  - PaceShapingWrapper may need to consult transport-level backpressure
+    signals (K8s Metrics API, consumer lag, queue depth). These are
+    transport-layer concerns. Putting pace shaping in pipeline/ would
+    create an implicit dependency on transport concepts.
+  - The thin pace_stream() in pipeline/streaming.py is pure delegation —
+    it imports from adapters/ only at call time, not module load time.
+
+  Why NOT to introduce Agent concepts into RAG engine:
+  - Each engine type should have clear boundaries. The RAG engine handles
+    retrieval-augmented generation. An Agent engine handles planning,
+    tool orchestration, and conversation state. Blurring these boundaries
+    creates coupling that makes both engines harder to evolve.
+  - The AsyncDataStreamAdapter IS the boundary — Agent engines call RAG
+    as a service through it, with StreamItem as the universal data unit.
+
+# ── 4. Alternatives ──────────────────────────────────────────────────
+
+alternatives:
+  - option: "Name it JsonRpcStreamAdapter"
+    pros: "Self-documenting; clear what wire format is used"
+    cons: "Bakes JSON-RPC into the name; cannot switch to msgpack/protobuf
+      without renaming. Violates transport-agnostic principle."
+
+  - option: "Parameterize as token_rate"
+    pros: "Familiar to LLM developers; maps to tokens-per-second"
+    cons: "RAG/Reranker/Chunker streams may not be token-based. Non-text
+      streams have no 'tokens'. Leaks RAG-domain concepts into generic layer."
+
+  - option: "Put pace shaping in pipeline/streaming.py"
+    pros: "Co-located with merge_streams(); symmetric with stream utilities"
+    cons: "Pace shaping involves transport backpressure signals which are
+      transport-layer concerns. Putting it in pipeline/ creates an implicit
+      dependency on transport concepts."
+
+  - option: "Add Agent state, conversation history to RAG engine"
+    pros: "Unified engine handles both simple RAG and conversational chains"
+    cons: "Bloats the RAG engine with agent-specific semantics. Each engine
+      type should have clear boundaries. Agents call RAG as a service."
+
+  - option: "Create intermediate DataStreamMessage dataclass for wire format"
+    pros: "Clean separation between in-memory and wire representations"
+    cons: "Adds a type that mirrors StreamItem field-for-field. The
+      serialization boundary (bytes) is already a clean separation point.
+      An intermediate type is ceremony without value."
+
+# ── 5. Evidence ──────────────────────────────────────────────────────
+
+evidence:
+  test_files:
+    - tests/e2e/test_stream_serialization.py (new)
+    - tests/e2e/test_pace_shaping.py (new)
+    - tests/e2e/test_transport_backpressure.py (new)
+    - core/contracts/streaming_protocol.py (new)
+    - core/adapters/stream_adapter.py (new)
+    - core/adapters/transports/grpc_transport.py (new)
+    - core/adapters/transports/redis_streams_transport.py (new)
+    - guardrails/rules/internal_stream_only.py (new)
+    - guardrails/rules/transport_adapter_boundary.py (new)
+  test_cases:
+    - "TestJsonRpcSerializer::test_serialize_data_item"
+    - "TestJsonRpcSerializer::test_serialize_error_terminal"
+    - "TestJsonRpcSerializer::test_serialize_normal_terminal"
+    - "TestJsonRpcSerializer::test_serialize_invalid_state_raises"
+    - "TestJsonRpcSerializer::test_round_trip_preserves_all_fields"
+    - "TestPaceConfig::test_frozen_prevents_mutation"
+    - "TestPaceShaping::test_unlimited_throughput_is_passthrough"
+    - "TestPaceShaping::test_burst_batch_sleep"
+    - "TestAdaptivePace::test_backpressure_signal_scales_throughput"
+    - "TestAsyncDataStreamAdapter::test_send_stream_serializes_items"
+    - "TestTransportBackpressure::test_slow_consumer_throttles"
+    - "TestTransportBackpressure::test_shared_backpressure_across_streams"
+
+# ── 6. Anti-Patterns ─────────────────────────────────────────────────
+
+anti_patterns:
+  - "Hardcoding token_rate instead of item_throughput. This bakes LLM text-stream assumptions into a generic streaming protocol."
+  - "Putting transport-specific imports (grpc, redis) in pipeline/engine.py. The engine core must stay transport-agnostic."
+  - "Introducing agent state (conversation_history, user_identity) into RAG engine's StepOutput or state dict."
+  - "Naming adapters by serialization format (JsonRpcAdapter) instead of behavior (AsyncDataStreamAdapter)."
+  - "Making PaceShapingWrapper modify StreamItem data content. Pace shaping only controls timing — the frozen dataclass must stay immutable."
+  - "Creating intermediate data types between StreamItem and bytes. The serialization boundary (bytes) is sufficient separation."
+
+# ── 7. Future Guidance ───────────────────────────────────────────────
+
+future_guidance: |
+  1. When adding a new transport backend:
+     - Implement TransportBackend Protocol in core/adapters/transports/
+     - Must pass the transport backpressure test matrix
+     - Must implement health_check() returning bool
+     - Must NOT import from core/pipeline/
+
+  2. When adding a new engine type (Agent, Batch, Event-driven):
+     - Define its own StepOutput variant or use the existing one
+     - Register its steps via @register_component with a new component_type
+     - Its transport through AsyncDataStreamAdapter should use the SAME
+       SerializationFormat and TransportBackend — no engine-specific wire format
+     - Do NOT add engine-type-specific fields to StreamItem
+
+  3. When extending PaceConfig:
+     - All new fields must have backward-compatible defaults
+     - Frozen dataclass integrity must be preserved
+     - Adaptive backpressure signals must be pluggable (Callable, not hardcoded)
+
+  4. When adding a new serialization format:
+     - Implement SerializationFormat Protocol
+     - Must cover ALL 4 StreamItem state combinations
+     - Must raise ValueError on illegal state (is_terminal=False, error!=None)
+
+  5. Guardrails extensibility:
+     - transport_adapter_boundary's _TRANSPORT_MODULES set should be extended
+       when new cloud-native libraries are adopted
+     - internal_stream_only follows the same AST pattern as stream_isolation —
+       new stream-related rules should reuse _get_import_nodes helper

@@ -10,7 +10,9 @@ from guardrails.rules import (
     component_registration_coverage,
     cross_platform_imports,
     frozen_dataclass_integrity,
+    internal_stream_only,
     reasoning_chain_coverage,
+    transport_adapter_boundary,
     user_facing_stream_isolation,
 )
 
@@ -27,6 +29,8 @@ class GuardrailChecker:
             "component-registration-coverage": component_registration_coverage,
             "reasoning-chain-coverage": reasoning_chain_coverage,
             "user-facing-stream-isolation": user_facing_stream_isolation,
+            "internal-stream-only": internal_stream_only,
+            "transport-adapter-boundary": transport_adapter_boundary,
         }
 
     @staticmethod
