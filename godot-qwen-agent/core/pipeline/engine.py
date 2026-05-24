@@ -76,10 +76,21 @@ class RetryPolicy:
 
 
 @dataclass
+class DependencyHealth:
+    """Health status of a single external dependency (vector DB, LLM API, etc.)."""
+    name: str
+    status: Literal["healthy", "degraded", "unavailable"]
+    latency_ms: Optional[float] = None
+    message: Optional[str] = None
+
+
+@dataclass
 class HealthStatus:
     status: Literal["healthy", "degraded", "unavailable"]
     message: str = ""
     details: Optional[Dict[str, Any]] = None
+    dependencies: List[DependencyHealth] = field(default_factory=list)
+    version: Optional[str] = None  # SemVer string of the component
 
 
 @dataclass

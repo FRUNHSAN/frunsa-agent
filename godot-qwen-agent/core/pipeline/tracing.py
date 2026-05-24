@@ -81,7 +81,28 @@ def _summarize(value: Any, preview_chars: int = 200) -> dict:
     return {"type": type(value).__name__, "repr": repr(value)[:preview_chars]}
 
 
+# ── Span types for distinguishing internal vs external work ─────
+
+
+class SpanType(str, Enum):
+    STEP_EXECUTION = "step"
+    DEPENDENCY_CALL = "dep_call"
+    RESOURCE_ACQUIRE = "resource"
+
+
 # ── Trace data classes ──────────────────────────────────────────
+
+
+@dataclass
+class DependencyCallTrace:
+    """Trace for a single external dependency call (vector store query, LLM API, etc.)."""
+    dependency_name: str
+    span_type: SpanType = SpanType.DEPENDENCY_CALL
+    started_at: float = 0.0
+    finished_at: float = 0.0
+    duration_ms: float = 0.0
+    status: Literal["success", "timeout", "error"] = "success"
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -103,6 +124,7 @@ class StepTrace:
     output_snapshot: Optional[Any] = None
     params: Dict[str, Any] = field(default_factory=dict)
     contract_validation: Optional[Any] = None
+    dependency_calls: List[DependencyCallTrace] = field(default_factory=list)
     error_type: Optional[str] = None
     error_message: Optional[str] = None
     error_traceback: Optional[str] = None

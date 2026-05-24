@@ -2,6 +2,7 @@
 
 from .config_loader import ConfigurationError, dump_pipeline_config, load_pipeline_config, resolve_env
 from .engine import (
+    DependencyHealth,
     HealthStatus,
     PipelineConfig,
     PipelineRunner,
@@ -13,8 +14,10 @@ from .engine import (
 )
 from .resources import ResourceContainer
 from .tracing import (
+    DependencyCallTrace,
     LocalJSONWriter,
     SnapshotPolicy,
+    SpanType,
     StepTrace,
     TraceLog,
     TraceWriter,
@@ -31,6 +34,7 @@ __all__ = [
     "StepConfig",
     "StepOutput",
     "RetryPolicy",
+    "DependencyHealth",
     "HealthStatus",
     # Resources
     "ResourceContainer",
@@ -39,6 +43,8 @@ __all__ = [
     "TraceLog",
     "SnapshotPolicy",
     "TraceWriter",
+    "DependencyCallTrace",
+    "SpanType",
     "LocalJSONWriter",
     "serialize_tracelog",
     "snapshot",

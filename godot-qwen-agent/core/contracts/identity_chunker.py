@@ -34,3 +34,12 @@ class IdentityChunker:
             raise ValueError(
                 f"IdentityChunker takes no config, got: {list(config.keys())}"
             )
+
+    def health_check(self) -> "HealthStatus":
+        from core.pipeline.engine import HealthStatus
+        return HealthStatus(
+            status="healthy",
+            message="IdentityChunker has no external dependencies",
+            dependencies=[],
+            version=str(self.VERSION),
+        )
