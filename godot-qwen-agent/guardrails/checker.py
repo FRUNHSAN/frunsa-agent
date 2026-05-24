@@ -13,6 +13,7 @@ from guardrails.rules import (
     frozen_dataclass_integrity,
     internal_stream_only,
     reasoning_chain_coverage,
+    sink_schema_consistency,
     trace_context_namespace,
     trace_key_serializability,
     trace_key_registration,
@@ -39,6 +40,7 @@ class GuardrailChecker:
             "trace-context-namespace": trace_context_namespace,
             "trace-key-serializability": trace_key_serializability,
             "trace-key-registration": trace_key_registration,
+            "sink-schema-consistency": sink_schema_consistency,
         }
 
     @staticmethod
