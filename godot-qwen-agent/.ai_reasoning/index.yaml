@@ -116,6 +116,14 @@ chains:
     tags: [planning, multi_engine, integration, adapter_validation, trace_context, deadline, jitter]
     status: active
 
+  # ── Observability ──
+  - chain_id: phase_11_trace_contract_verification
+    file: chains/phase_11_trace_contract_verification.yaml
+    title: "Trace contract verification via file exporter: JSON Lines + declarative key registry"
+    layer: observability
+    tags: [observability, trace_context, file_exporter, serialization, json_lines, registry, component_candidate]
+    status: active
+
 # ── Tag index for quick lookup ───────────────────────────────────────
 
 tag_index:
@@ -164,6 +172,11 @@ tag_index:
   adapter_validation: [phase_10_planning_engine_selection]
   contract_testing: [phase_10_planning_engine_selection]
   integration: [phase_10_planning_engine_integration]
-  trace_context: [phase_10_planning_engine_integration]
+  trace_context: [phase_10_planning_engine_integration, phase_11_trace_contract_verification]
   deadline: [phase_10_planning_engine_integration]
   jitter: [phase_10_planning_engine_integration]
+  observability: [phase_04_observability, phase_05_external_io, phase_11_trace_contract_verification]
+  file_exporter: [phase_11_trace_contract_verification]
+  json_lines: [phase_11_trace_contract_verification]
+  registry: [phase_11_trace_contract_verification]
+  component_candidate: [phase_11_trace_contract_verification]

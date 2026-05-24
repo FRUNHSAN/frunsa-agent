@@ -223,19 +223,23 @@ class AsyncDataStreamAdapter:
         effective_timeout = timeout if timeout is not None else self._default_timeout
         t0 = time.perf_counter()
 
-        async def _send_all() -> None:
+        async def _send_all():
             await self._transport.connect()
 
             if self._pace_config is not None:
                 nonlocal stream
                 stream = PaceShapingWrapper(stream, self._pace_config)
 
+            last_ctx = None
             async for item in stream:
+                last_ctx = item.trace_context
                 data = self._serializer.serialize(item)
                 await self._transport.send(data)
 
+            return last_ctx
+
         try:
-            await asyncio.wait_for(_send_all(), timeout=effective_timeout)
+            last_ctx = await asyncio.wait_for(_send_all(), timeout=effective_timeout)
 
             elapsed = time.perf_counter() - t0
             self._last_trace = DependencyCallTrace(
@@ -243,6 +247,7 @@ class AsyncDataStreamAdapter:
                 span_type=SpanType.DEPENDENCY_CALL,
                 duration_ms=elapsed * 1000,
                 status="success",
+                trace_context=last_ctx,
             )
         except asyncio.TimeoutError:
             elapsed = time.perf_counter() - t0
@@ -252,6 +257,7 @@ class AsyncDataStreamAdapter:
                 duration_ms=elapsed * 1000,
                 status="timeout",
                 metadata={"timeout_s": effective_timeout},
+                trace_context=None,
             )
             raise
         except Exception as exc:
@@ -262,6 +268,7 @@ class AsyncDataStreamAdapter:
                 duration_ms=elapsed * 1000,
                 status="error",
                 metadata={"error": str(exc)},
+                trace_context=None,
             )
             raise
         finally:
@@ -284,9 +291,11 @@ class AsyncDataStreamAdapter:
         try:
             await self._transport.connect()
 
+            last_ctx = None
             async with asyncio.timeout_at(deadline):
                 async for data in self._transport.receive():
                     item = self._serializer.deserialize(data)
+                    last_ctx = item.trace_context
                     yield item
 
             elapsed = time.perf_counter() - t0
@@ -295,6 +304,7 @@ class AsyncDataStreamAdapter:
                 span_type=SpanType.DEPENDENCY_CALL,
                 duration_ms=elapsed * 1000,
                 status="success",
+                trace_context=last_ctx,
             )
         except asyncio.TimeoutError:
             elapsed = time.perf_counter() - t0
@@ -304,6 +314,7 @@ class AsyncDataStreamAdapter:
                 duration_ms=elapsed * 1000,
                 status="timeout",
                 metadata={"timeout_s": effective_timeout},
+                trace_context=None,
             )
             raise
         except Exception as exc:
@@ -314,6 +325,7 @@ class AsyncDataStreamAdapter:
                 duration_ms=elapsed * 1000,
                 status="error",
                 metadata={"error": str(exc)},
+                trace_context=None,
             )
             raise
         finally:

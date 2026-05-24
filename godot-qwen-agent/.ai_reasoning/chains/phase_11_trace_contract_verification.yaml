@@ -1,0 +1,216 @@
+# ── Reasoning Chain ───────────────────────────────────────────────────
+chain_id: phase_11_trace_contract_verification
+title: "Trace contract verification via file exporter: JSON Lines + declarative key registry"
+created_at: "2026-05-25T10:00:00Z"
+updated_at: "2026-05-25T10:00:00Z"
+tags: [observability, trace_context, file_exporter, serialization, json_lines, registry, component_candidate]
+status: active
+related_chains:
+  - phase_10_planning_engine_integration
+  - phase_10_planning_engine_selection
+  - phase_05_external_io
+  - phase_04_observability
+
+# ── 1. Context ───────────────────────────────────────────────────────
+
+context: |
+  Phase 10 proved trace_context passes through the adapter pipe losslessly.
+  Planning's planning.* keys and RAG's rag.* keys coexist in a single
+  StreamItem, survive JSON-RPC round-trip, and never collide. But this
+  verification is "in-flight" — trace_context is serialized, sent over the
+  wire, deserialized, and then DISCARDED by AsyncDataStreamAdapter.
+
+  DependencyCallTrace (the adapter's trace record) has no trace_context
+  field. No downstream consumer has ever read these traces back.
+
+  Phase 11 builds the first "at-rest" consumer: a file exporter that writes
+  trace_context as structured JSON Lines, directly verifiable with cat | jq.
+
+  Strategic constraint: the component platform (core/contracts/) is NOT
+  yet built. The Trace Key Registry is therefore an engine private dialect
+  snapshot, NOT a cross-engine semantic standard. Its primary value is:
+  1. Prevent engine-private semantics from hardening before the component
+     platform can define component-level trace contracts
+  2. Mark component_candidate keys that should later migrate to
+     component-level trace keys (e.g. retrieval.* instead of rag.*)
+  3. Accumulate empirical data (JSON Lines samples) as design input
+     for the component platform v0 interface
+
+# ── 2. Decision ──────────────────────────────────────────────────────
+
+decision: |
+  Phase 11 adds 4 changes (~442 LOC total, zero external dependencies):
+
+  1. DependencyCallTrace + trace_context: Optional[Dict[str, Any]] (1 field)
+  2. AsyncDataStreamAdapter captures last StreamItem's trace_context
+     during send_stream() and receive_stream()
+  3. Trace Key Registry (TraceKeyDef + TRACE_KEY_REGISTRY) —
+     6 keys documented, 3 marked component_candidate=True
+  4. FileTraceExporter implementing TraceWriter protocol —
+     JSON Lines output with _registered_keys / _unregistered_keys split
+  5. 2 new guardrails:
+     - trace_key_serializability (split severity: ERROR for Call/Attribute/
+       Set/Tuple/BinOp/UnaryOp, WARNING for Name via REVIEW_REQUIRED)
+     - trace_key_registration (WARNING for unregistered keys)
+
+  The file exporter outputs one JSON line per DependencyCallTrace record.
+  Each line is self-contained: run_id, step, dependency, status, duration_ms,
+  engine (inferred from registry), trace_context (raw dict), and
+  _registered_keys / _unregistered_keys for registry coverage visibility.
+
+  Last-item semantics: DependencyCallTrace.trace_context captures context
+  from the LAST StreamItem in the dependency call. For Planning (per-step
+  context), only the terminal step's context is retained. Per-item
+  streaming trace is deferred to Phase 12+.
+
+# ── 3. Rationale ─────────────────────────────────────────────────────
+
+rationale: |
+  1. Zero-dependency C→B path: stdout/file exporter first (C), custom
+     lightweight sink later (B). OTel/Jaeger (A) rejected for this stage:
+     - Abstraction leak risk: OTel SDK would force trace_context to align
+       with OTel Span/Attribute model
+     - Debug black-box: 5-link failure chain (code → SDK → exporter →
+       network → Jaeger), only layer 1 is ours
+     - Premature standardization: we don't yet know what a Planning
+       engine's real step latency distribution looks like
+
+  2. JSON Lines over JSON Array:
+     - tail -f for real-time observation
+     - jq '.trace_context | keys' for instant namespace isolation check
+     - grep "planning\." vs grep "rag\." → zero collision
+     - Append-only, no in-memory accumulation
+
+  3. component_candidate flagging (user-raised):
+     - rag.chunk_id and rag.retrieval_latency_ms are retrieval COMPONENT
+       properties, not RAG engine properties
+     - planning.cumulative_tokens is an LLM generation COMPONENT property,
+       not a Planning engine property
+     - Flagging them NOW prevents semantic hardening before the component
+       platform can define proper component-level trace contracts
+     - These 3 keys will migrate to core/contracts/trace_keys.py in Phase 13+
+
+  4. Split severity for trace_key_serializability:
+     - AST cannot track variable types at compile time
+     - Blocking ast.Name with ERROR would force all trace_context values
+       to be inline literals — worse for readability
+     - WARNING (REVIEW_REQUIRED) preserves visibility without penalizing
+       legitimate patterns like trace_context={"key": local_var}
+
+  5. Sample rate from day one:
+     - Parameter exists (sample_rate=1.0 default), declares the exporter
+       is not an infinite-bandwidth pipe
+     - All Phase 11 tests use sample_rate=1.0 (no sampling)
+     - Guardrail does NOT constrain this — it's runtime configuration
+
+  6. Write atomicity: batched lines into single f.write() syscall.
+     Prevents line interleaving if multiple PipelineRunners share
+     the same file path (future concern, addressed now).
+
+  7. O(1) engine prefix lookup via lru_cache + registry-derived map.
+     No hardcoded engine names. New engine registration automatically
+     updates the prefix map.
+
+# ── 4. Alternatives ──────────────────────────────────────────────────
+
+alternatives:
+  - option: "OpenTelemetry + Jaeger/Tempo (Option A)"
+    pros: "Cloud-native standard, broad ecosystem, Grafana/Datadog compatible"
+    cons: "Abstraction leak (OTel Span model vs our trace_context), 5-link
+      debug chain, premature standardization before we understand our data.
+      Rejected per user directive: '生态广好像跟我这个平台没有太多红利'"
+
+  - option: "Skip file exporter, build SQLite sink directly (Option B shortcut)"
+    pros: "Queryable from day one, no migration from file → DB later"
+    cons: "Adds aiosqlite dependency, pre-optimizes query patterns before
+      seeing real data shape. The file exporter's JSON Lines output IS the
+      design input for the SQLite schema. Skipping it skips the discovery phase."
+
+  - option: "Make trace_key_registration ERROR instead of WARNING"
+    pros: "Stronger enforcement, no unregistered keys slip through"
+    cons: "Stifles evolution. New engines in Phase 12+ will naturally add
+      keys during development. ERROR would block experimental key additions.
+      WARNING nudges without blocking. Upgrade to ERROR in Phase 13+
+      after registry coverage reaches maturity."
+
+  - option: "Make all trace_context values ERROR for ast.Name"
+    pros: "Maximum safety — no type uncertainty"
+    cons: "Would force all values to be inline literals. Common pattern
+      trace_context={key: local_var} would break. AST has fundamental
+      limits — penalizing legitimate code for tool limitations is wrong."
+
+  - option: "Hardcode engine names in _infer_engine() prefix map"
+    pros: "Simpler code, no registry dependency"
+    cons: "O(N*M) lookup, hardcoded engine list, breaks when new engines
+      register. lru_cache + registry-derived map is both simpler and
+      more correct."
+
+# ── 5. Evidence ──────────────────────────────────────────────────────
+
+evidence:
+  test_files:
+    - tests/e2e/test_trace_serialization.py (15 tests)
+  contract_changes:
+    - core/pipeline/tracing.py: DependencyCallTrace + trace_context field
+  adapter_changes:
+    - core/adapters/stream_adapter.py: ~4 lines (last_ctx capture)
+  new_modules:
+    - core/observability/__init__.py
+    - core/observability/file_exporter.py (~75 LOC)
+    - core/observability/trace_registry.py (~45 LOC)
+  guardrails:
+    - guardrails/rules/trace_key_serializability.py (split severity)
+    - guardrails/rules/trace_key_registration.py (WARNING)
+  rag_changes:
+    - (none)
+  engine_changes:
+    - (none)
+
+# ── 6. Anti-Patterns ─────────────────────────────────────────────────
+
+anti_patterns:
+  - "Designing component-level trace contracts (tool.*, memory.*, skill.*) before the component platform exists. The registry contains ONLY keys produced by N=2 engine stubs."
+  - "Premature OTel/Jaeger integration before understanding your own trace data shape through JSON Lines samples."
+  - "Adding speculative trace keys to the registry. Every key MUST have a producing code path in an existing stub or step."
+  - "Making trace_key_registration ERROR instead of WARNING. WARNING nudges without blocking evolution. Upgrade to ERROR in Phase 13+."
+  - "Treating engine-level trace keys as permanent when they belong to components. Use component_candidate=True to flag migration targets."
+  - "Hardcoding engine names in prefix inference. Use registry-derived cache. New engines auto-register."
+  - "Writing JSON Lines one syscall per line. Batch into a single write for atomicity."
+
+# ── 7. Future Guidance ───────────────────────────────────────────────
+
+future_guidance: |
+  1. For Phase 12 (Multi-Engine Orchestration):
+     - JSON Lines output from Phase 11 IS the design input for the
+       SQLite/lightweight sink schema
+     - _registered_keys vs _unregistered_keys split reveals which trace
+       data has known semantics and which is uncharted
+     - Per-item streaming trace: the last-item limitation documented
+       here should inform a StreamingTraceRecord abstraction
+
+  2. For Phase 13+ (Component Platform):
+     - component_candidate=True keys (cumulative_tokens, chunk_id,
+       retrieval_latency_ms) should migrate to component-level trace
+       contracts: retrieval.*, generation.*, scoring.*
+     - The 3 engine-internal keys stay at engine level permanently
+     - Upgrade trace_key_registration from WARNING to ERROR after
+       registry coverage reaches maturity
+
+  3. For trace_key_serializability:
+     - Monitor REVIEW_REQUIRED warnings from ast.Name patterns
+     - If false positives are rare, keep split severity
+     - If too many false positives, consider adding type annotation
+       inspection (PEP 526) to resolve ast.Name references
+
+  4. When engines/ directory grows beyond ~5 types:
+     - Each engine's interface.py should call _register_trace_keys()
+       to self-register its trace keys into the central registry
+     - The registry stays physically in core/observability/ (single
+       source of truth) but is logically owned by each engine
+
+  5. For sample_rate:
+     - Phase 11: always 1.0 (verification mode)
+     - Phase 12+: production configurable. Start at 0.1 for Planning
+       engines that produce hundreds of steps per run.
+     - The exporter should emit a stats line (every N writes) with
+       dropped_count / written_count for monitoring.

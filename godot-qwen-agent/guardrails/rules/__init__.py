@@ -9,6 +9,8 @@ from guardrails.rules.internal_stream_only import internal_stream_only
 from guardrails.rules.transport_adapter_boundary import transport_adapter_boundary
 from guardrails.rules.engine_interface_purity import engine_interface_purity
 from guardrails.rules.trace_context_namespace import trace_context_namespace
+from guardrails.rules.trace_key_serializability import trace_key_serializability
+from guardrails.rules.trace_key_registration import trace_key_registration
 
 __all__ = [
     "cross_platform_imports",
@@ -20,4 +22,6 @@ __all__ = [
     "transport_adapter_boundary",
     "engine_interface_purity",
     "trace_context_namespace",
+    "trace_key_serializability",
+    "trace_key_registration",
 ]

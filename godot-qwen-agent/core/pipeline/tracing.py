@@ -103,6 +103,10 @@ class DependencyCallTrace:
     duration_ms: float = 0.0
     status: Literal["success", "timeout", "error"] = "success"
     metadata: Dict[str, Any] = field(default_factory=dict)
+    trace_context: Optional[Dict[str, Any]] = None
+    # Captures trace_context from the LAST StreamItem in this dependency call.
+    # For engines emitting per-step context (e.g., Planning), only the terminal
+    # step's context is retained here. Per-item streaming trace → Phase 12+.
 
 
 @dataclass

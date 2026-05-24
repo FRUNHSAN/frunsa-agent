@@ -14,6 +14,8 @@ from guardrails.rules import (
     internal_stream_only,
     reasoning_chain_coverage,
     trace_context_namespace,
+    trace_key_serializability,
+    trace_key_registration,
     transport_adapter_boundary,
     user_facing_stream_isolation,
 )
@@ -35,6 +37,8 @@ class GuardrailChecker:
             "transport-adapter-boundary": transport_adapter_boundary,
             "engine-interface-purity": engine_interface_purity,
             "trace-context-namespace": trace_context_namespace,
+            "trace-key-serializability": trace_key_serializability,
+            "trace-key-registration": trace_key_registration,
         }
 
     @staticmethod
