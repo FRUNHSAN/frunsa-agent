@@ -1,0 +1,123 @@
+# ── Reasoning Chain ───────────────────────────────────────────────────
+chain_id: phase_05_external_io
+title: "External I/O pattern: async adapter, trace inspection, health probe defense"
+created_at: "2026-05-24T17:00:00Z"
+updated_at: "2026-05-24T17:00:00Z"
+tags: [external_io, vector_store, async, health_probe, exception_handling]
+status: active
+related_chains:
+  - phase_03_adapter_pattern
+  - phase_04_observability
+
+# ── 1. Context ───────────────────────────────────────────────────────
+
+context: |
+  Phase 5 introduced the first external I/O component: RetrieverStep
+  wrapping a vector store backend (FAISS, Qdrant, etc.). This was the
+  first real test of the three-platform architecture against an external
+  dependency.
+
+  Two critical bugs were discovered during Phase 5.3 negative testing:
+
+  Bug 1 — Event loop crash in sync context:
+    health_check() called asyncio.get_event_loop() which raises
+    RuntimeError in Python 3.10+ when no loop is running. This crashed
+    health checks in pytest (sync) and would crash in any non-async
+    deployment.
+
+  Bug 2 — Swallowed exceptions in health probe:
+    VectorStoreAdapter.search() gracefully catches backend exceptions
+    and returns [] (so the pipeline doesn't crash). But health_probe()
+    only checked `if results:` — seeing [] from a backend crash, it
+    reported "degraded" (empty index) instead of "unavailable" (crash).
+    The exception was silently swallowed by the adapter's defensive
+    error handling.
+
+# ── 2. Alternatives ──────────────────────────────────────────────────
+
+alternatives:
+  - option: "Let backend exceptions propagate through adapter"
+    pros: "health_probe naturally sees them; simpler code"
+    cons: "Pipeline crashes on transient backend errors; every caller
+      must wrap in try/except; violates graceful degradation contract"
+
+  - option: "Add a separate probe() method that bypasses the adapter"
+    pros: "Clean separation of concerns"
+    cons: "Duplicates search logic; backend-specific probe code leaks
+      into the step; two code paths to maintain and test"
+
+  - option: "Inspect last_trace.status after adapter.search()"
+    pros: "Reuses existing TraceLog infrastructure; single code path;
+      adapter stays defensive while probe stays accurate"
+    cons: "Adds a requirement that search() always sets last_trace"
+
+# ── 3. Decision ──────────────────────────────────────────────────────
+
+decision: |
+  Two-part fix:
+  1. health_check() uses get_running_loop() (not get_event_loop()) and
+     falls back to asyncio.run() when no loop is running
+  2. health_probe() inspects self.last_trace.status after search() —
+     if status=="error", report "unavailable" with the trace's error
+     message; otherwise use results to decide healthy vs degraded
+
+# ── 4. Rationale ─────────────────────────────────────────────────────
+
+rationale: |
+  - get_running_loop() is the correct API for Python 3.10+; it raises
+    RuntimeError when no loop runs (not when no loop EXISTS), letting us
+    fall back to asyncio.run() which creates a fresh loop
+  - asyncio.run() is safe for one-shot health probes; it creates and
+    cleans up its own loop each time
+  - Reading last_trace.status turns the adapter's defensive error handling
+    from a liability (information loss) into an asset (structured error
+    metadata) — the trace was there all along, we just weren't reading it
+  - This pattern is reusable: any future adapter that catches exceptions
+    internally MUST expose them via last_trace for health probe inspection
+
+  This incident validated Phase 4.5's approach: "负面测试左移" (shift-left
+  on negative testing). The bugs were caught before a single real vector
+  database was connected, purely through contract-level negative tests.
+
+# ── 5. Evidence ──────────────────────────────────────────────────────
+
+evidence:
+  test_files:
+    - tests/e2e/test_retriever_negative.py
+    - tests/e2e/test_retriever_e2e.py
+  test_cases:
+    - "test_health_check_unavailable_when_backend_raises (FailingBackend → unavailable)"
+    - "test_health_check_reports_vector_db_dependency_name"
+    - "test_sync_context_health_check (no event loop → still works)"
+    - "test_empty_backend_is_reachable_but_empty (degraded, not unavailable)"
+
+# ── 6. Future Guidance ───────────────────────────────────────────────
+
+future_guidance: |
+  MANDATORY for ALL future external I/O adapters (LLM, Reranker, Web Search):
+  1. Adapter.search()/call()/generate() MUST catch external exceptions
+     internally and return graceful defaults (empty list, None, etc.)
+  2. Adapter MUST set self._last_trace with the error status and message
+  3. health_probe() MUST inspect last_trace.status before interpreting
+     empty results as "no data found"
+  4. The step's health_check() MUST handle both sync and async contexts:
+     use get_running_loop() + asyncio.run() fallback pattern
+  5. Every new I/O adapter MUST have negative tests covering:
+     - Backend crash (exception during call)
+     - Timeout (call exceeds deadline)
+     - Empty result (backend reachable but no data)
+     - Health check in sync context (no running event loop)
+
+  Template for a new I/O adapter health_probe():
+    1. Call self.call(...)  (which catches exceptions internally)
+    2. Check self.last_trace.status
+    3. If "error" → unavailable (with error message)
+    4. If results present → healthy
+    5. If no results → degraded (reachable but empty)
+
+anti_patterns:
+  - "Letting external exceptions propagate out of the adapter"
+  - "Health probe that doesn't check last_trace (blind to swallowed errors)"
+  - "Using get_event_loop() instead of get_running_loop()"
+  - "Calling asyncio.run() from inside a running event loop (nested loop error)"
+  - "Health probe that returns 'healthy' without actually probing the backend"

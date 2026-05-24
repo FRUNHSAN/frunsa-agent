@@ -1,0 +1,98 @@
+# ── Reasoning Chain ───────────────────────────────────────────────────
+chain_id: phase_02_skip_propagation
+title: "Empty-result skip semantics: _SKIP_SENTINEL and graceful degradation"
+created_at: "2026-05-24T17:00:00Z"
+updated_at: "2026-05-24T17:00:00Z"
+tags: [pipeline, skip, sentinel, empty_result, propagation]
+status: active
+related_chains:
+  - phase_04_observability
+
+# ── 1. Context ───────────────────────────────────────────────────────
+
+context: |
+  In a pipeline, a chunker may produce zero chunks (empty document,
+  unsupported format). The question: what should the downstream retriever
+  do?
+
+  Option A: Treat empty as an error → abort the pipeline
+  Option B: Treat empty as valid → skip downstream steps that depend on it
+
+  Real-world scenario: a batch pipeline processes 100 documents. 3 of them
+  are empty images with no extractable text. The system should NOT crash;
+  it should skip those 3 and continue processing the other 97.
+
+  The challenge: how does a step "skip" without the engine knowing
+  anything about the domain semantics of "empty"?
+
+# ── 2. Alternatives ──────────────────────────────────────────────────
+
+alternatives:
+  - option: "Return None and have engine check is None"
+    pros: "Simple; Pythonic"
+    cons: "None is a valid result for some steps; ambiguity between
+      'no result' and 'result is None'; engine needs domain knowledge"
+
+  - option: "Raise a specific SkipException"
+    pros: "Explicit; can carry metadata about why"
+    cons: "Exceptions for control flow are expensive; mixes error handling
+      with normal operation; linters flag it"
+
+  - option: "Engine-level configuration: skip_if_empty list"
+    pros: "No sentinel needed; declarative"
+    cons: "Engine now needs to know what 'empty' means per output type;
+      violates the platform separation principle"
+
+# ── 3. Decision ──────────────────────────────────────────────────────
+
+decision: |
+  Use a module-private _SKIP_SENTINEL singleton. When a step writes this
+  sentinel as its output, downstream steps that depend on it are
+  automatically skipped by the engine.
+
+# ── 4. Rationale ─────────────────────────────────────────────────────
+
+rationale: |
+  - The sentinel is a unique object (identity check via `is`), so it can
+    NEVER collide with a legitimate result value (unlike None, 0, "", [])
+  - The engine's skip logic is purely mechanical: "if any dependency is
+    the sentinel, mark this step as skipped and propagate" — zero domain
+    knowledge required
+  - Steps don't need to catch or re-raise anything; they just check
+    `if not chunks: return StepOutput(result=[])` and the engine handles
+    the rest (empty list ≠ sentinel, so the step ran successfully)
+  - The `on_failure: skip` strategy uses the SAME sentinel, unifying
+    "intentional empty" and "graceful degradation" into one code path
+  - TraceLog records skipped steps with status="skipped", distinct from
+    "failed" or "cancelled" — operations can alert on failures but not skips
+
+# ── 5. Evidence ──────────────────────────────────────────────────────
+
+evidence:
+  test_files:
+    - tests/integration/test_negative_cases.py
+  test_cases:
+    - "test_empty_chunks_triggers_skip (empty list = success, not skip)"
+    - "test_failing_step_skip_propagates (on_failure=skip uses sentinel)"
+    - "test_skip_propagates_to_multi_dep_step (transitive skip)"
+
+# ── 6. Future Guidance ───────────────────────────────────────────────
+
+future_guidance: |
+  MANDATORY for all new step types:
+  1. Empty results (no data found) = return StepOutput(result=[]) — this
+     is a SUCCESS, not a skip
+  2. Use on_failure="skip" in StepConfig only when the step itself fails
+     (exception) but the pipeline should continue
+  3. NEVER return the sentinel directly — it's engine-internal
+  4. Downstream steps that CAN operate without a dependency should use
+     on_failure="default" with a sensible default_value
+
+  When adding a new on_failure strategy:
+  - It must integrate with the sentinel propagation
+  - Add a corresponding test in test_negative_cases.py
+
+anti_patterns:
+  - "Returning _SKIP_SENTINEL from a step's run() method"
+  - "Checking `if not result:` in the engine to decide skip (too broad)"
+  - "Relying on None as a skip signal (collision risk)"

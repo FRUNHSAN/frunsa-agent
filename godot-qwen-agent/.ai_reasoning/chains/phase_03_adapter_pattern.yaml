@@ -1,0 +1,107 @@
+# ── Reasoning Chain ───────────────────────────────────────────────────
+chain_id: phase_03_adapter_pattern
+title: "Strict adapter pattern: AdapterTypeError, Protocol-based strategies, factory caching"
+created_at: "2026-05-24T17:00:00Z"
+updated_at: "2026-05-24T17:00:00Z"
+tags: [adapter, translation, protocol, factory, caching, type_safety]
+status: active
+related_chains:
+  - phase_01_three_platform
+  - phase_01_data_integrity
+  - phase_05_external_io
+
+# ── 1. Context ───────────────────────────────────────────────────────
+
+context: |
+  The adapter layer is the ONLY coupling point between the contracts
+  platform and the pipeline platform. Its job is to:
+
+  1. Adapt domain-specific strategies (ChunkingStrategy, RetrievalStrategy)
+     into the engine's uniform PipelineStep Protocol
+  2. Enforce strict type contracts — if the upstream step produces a
+     ContentBlock but the adapter receives a str, it must FAIL LOUDLY,
+     not guess
+  3. Validate outputs against contracts (e.g., validate_chunk_output)
+
+  The guiding principle: "转译层连通" — the translation layer connects
+  but does not merge. It respects both platforms' autonomy.
+
+  Key challenge: how to handle type mismatches without coupling the
+  adapter to every possible upstream type?
+
+# ── 2. Alternatives ──────────────────────────────────────────────────
+
+alternatives:
+  - option: "Implicit coercion (str → ContentBlock, dict → Chunk)"
+    pros: "Convenient; fewer errors during development"
+    cons: "Silent data corruption; a str 'hello' chunked as len=5 is
+      semantically different from ContentBlock(text='hello', source='http');
+      debugging becomes nightmare at scale"
+
+  - option: "Duck typing: try to call .chunk() and catch AttributeError"
+    pros: "Maximum flexibility; Pythonic"
+    cons: "Error message 'str has no attribute chunk' at runtime is
+      useless for debugging; user has no idea what they did wrong"
+
+  - option: "Pydantic validation at adapter boundary"
+    pros: "Rich error messages; auto-generated docs"
+    cons: "Adds dependency; Pydantic models create coupling between
+      contracts and adapters; overkill for a type check"
+
+# ── 3. Decision ──────────────────────────────────────────────────────
+
+decision: |
+  Strict isinstance() check with AdapterTypeError: if the input is not
+  the expected type, raise immediately with a message showing the expected
+  type, actual type, and a truncated repr of the value.
+
+# ── 4. Rationale ─────────────────────────────────────────────────────
+
+rationale: |
+  - isinstance() is instantaneous, dependency-free, and unambiguous
+  - AdapterTypeError is a distinct exception type — it can be caught
+    specifically in tests and monitoring without confusing it with
+    ValueError or TypeError from other sources
+  - The error message includes: expected type name, actual type name,
+    and first 200 chars of the value — enough to diagnose without
+    leaking sensitive data
+  - The adapter uses a content_key parameter to extract the right field
+    from the engine's input dict; missing key → AdapterTypeError with
+    available keys listed
+  - Factory caching (core/adapters/factory.py) uses safe tuple-based
+    cache keys: (component_type, strategy_name, tuple(sorted(params)))
+    — NO eval()/exec() anywhere
+  - _UncacheableError for stateful strategies with cacheable=False flag
+
+# ── 5. Evidence ──────────────────────────────────────────────────────
+
+evidence:
+  test_files:
+    - tests/integration/test_negative_cases.py
+  test_cases:
+    - "test_wrong_type_raises_adapter_error (str instead of ContentBlock)"
+    - "test_missing_specific_key_raises (content_key not in inputs)"
+    - "test_adapter_error_in_pipeline_traces_correctly"
+
+# ── 6. Future Guidance ───────────────────────────────────────────────
+
+future_guidance: |
+  MANDATORY for all new adapters (RerankerAdapter, LLMAdapter, etc.):
+  1. Raise AdapterTypeError (or a subclass) on type mismatch — NEVER coerce
+  2. The error message MUST include: expected type, actual type, truncated value
+  3. Output MUST be validated against the domain contract before returning
+     (e.g., validate_chunk_output for chunkers)
+  4. Use content_key to extract from engine inputs; None = take first value
+  5. Do NOT import from core/pipeline/engine beyond PipelineStep, StepOutput,
+     ResourceContainer — never import PipelineRunner or internal helpers
+
+  Factory rules:
+  6. Cache keys = (component_type, strategy_name, tuple(sorted(params.items())))
+  7. Stateful strategies that can't be cached must set cacheable=False
+  8. NEVER use eval()/exec()/getattr() on user-provided strings for factory dispatch
+
+anti_patterns:
+  - "try: obj.chunk(content) except AttributeError: obj.chunk(ContentBlock(content))"
+  - "Adding a new dependency to the adapter beyond PipelineStep protocol types"
+  - "Caching a stateful strategy (connection pools, counters) without cacheable=False"
+  - "Using repr(value) without truncation in error messages (could leak PII)"

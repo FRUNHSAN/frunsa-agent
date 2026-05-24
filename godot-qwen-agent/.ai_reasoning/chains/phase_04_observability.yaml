@@ -1,0 +1,118 @@
+# ── Reasoning Chain ───────────────────────────────────────────────────
+chain_id: phase_04_observability
+title: "Observability contracts: TraceLog, DependencyHealth, SnapshotPolicy, three-level errors"
+created_at: "2026-05-24T17:00:00Z"
+updated_at: "2026-05-24T17:00:00Z"
+tags: [observability, tracing, health_check, snapshot, error_severity]
+status: active
+related_chains:
+  - phase_02_skip_propagation
+  - phase_05_external_io
+
+# ── 1. Context ───────────────────────────────────────────────────────
+
+context: |
+  After Phase 1-4 established the core pipeline, we faced a critical gap:
+  how do we KNOW what happened inside a pipeline run?
+
+  - Without tracing: a production failure at step 7 of 12 leaves zero
+    evidence about what steps 1-6 did
+  - Without health checks: the pipeline starts, reaches an external
+    dependency (vector DB, LLM), and crashes — no early warning
+  - Without snapshots: debugging requires reproducing the exact input
+    state, which may be non-deterministic (time, random seed)
+
+  Phase 4.5 was explicitly prioritized as "先做 Phase 4.5" (do Phase 4.5
+  first) — hardening observability BEFORE adding more external I/O.
+
+# ── 2. Alternatives ──────────────────────────────────────────────────
+
+alternatives:
+  - option: "Structured logging (structlog/python-json-logger)"
+    pros: "Industry standard; many sinks (Kibana, Datadog)"
+    cons: "Logs are line-oriented; hard to reconstruct a pipeline DAG
+      execution tree; no built-in snapshot diffing"
+
+  - option: "OpenTelemetry spans"
+    pros: "Vendor-neutral; distributed tracing"
+    cons: "Heavy dependency; designed for microservices, not single-process
+      pipelines; excessive for a local agent"
+
+  - option: "Custom TraceLog dataclass with pluggable writers"
+    pros: "Exactly fits our DAG model; zero external deps; SnapshotPolicy
+      is a first-class concept; blake2b fingerprinting"
+    cons: "Not interoperable with existing observability platforms without
+      an export adapter"
+
+# ── 3. Decision ──────────────────────────────────────────────────────
+
+decision: |
+  Custom TraceLog + StepTrace dataclasses with pluggable TraceWriter
+  Protocol. SnapshotPolicy (FULL/SUMMARY/NONE) controls data retention.
+  DependencyHealth reports per-dependency status. Three-level error
+  severity (error/warning/info) in ValidationError.
+
+# ── 4. Rationale ─────────────────────────────────────────────────────
+
+rationale: |
+  TraceLog design:
+  - pipeline_run_id (UUID) ties all steps to one execution
+  - StepTrace records: input snapshot, output snapshot, duration, status,
+    error info, component_type, strategy, contract_validation
+  - SnapshotPolicy.SUMMARY: blake2b hash + structural fingerprint
+    (list count, dict keys) — proves state integrity without storing data
+  - SnapshotPolicy.FULL: complete serialization (for debugging)
+  - SnapshotPolicy.NONE: no data retained (for PII-sensitive pipelines)
+  - TraceWriter is a Protocol — ship DefaultLocalJSONWriter now, swap
+    for Kafka/S3 later without changing the engine
+
+  DependencyHealth design:
+  - Each external dependency (vector_db, llm_api, etc.) reports:
+    name, status (healthy/degraded/unavailable), latency_ms, message
+  - HealthStatus aggregates multiple DependencyHealth entries
+  - health_check() is on the PipelineStep Protocol — engine can probe
+    all steps at startup and refuse to run if critical deps are unavailable
+
+  Three-level error severity:
+  - error: blocks the pipeline (on_failure determines how)
+  - warning: logged to TraceLog, pipeline continues
+  - info: audit-only, not surfaced to operators
+
+# ── 5. Evidence ──────────────────────────────────────────────────────
+
+evidence:
+  test_files:
+    - tests/ops/test_resource_container_external.py
+    - tests/integration/test_e2e_pipeline.py
+  test_cases:
+    - "test_dependency_call_trace_fields"
+    - "test_step_trace_includes_dependency_calls"
+    - "test_tracelog_to_dict_includes_dependency_calls"
+    - "test_health_status_includes_dependencies_and_version"
+    - "test_trace_writer_local_json"
+    - "test_snapshot_summary_does_not_leak_full_data"
+
+# ── 6. Future Guidance ───────────────────────────────────────────────
+
+future_guidance: |
+  MANDATORY for all new external I/O steps:
+  1. health_check() MUST return a HealthStatus with at least one
+     DependencyHealth entry for each external dependency
+  2. Every external call (HTTP, gRPC, DB query) MUST produce a
+     DependencyCallTrace and attach it to the StepTrace
+  3. SnapshotPolicy.SUMMARY is the default — only use FULL in dev/test
+
+  When adding a new TraceWriter:
+  4. Implement the TraceWriter Protocol (write(tracelogs: List[TraceLog]))
+  5. Register it via the engine's trace_writer parameter
+  6. Add serialization round-trip tests
+
+  When adding a new error severity level:
+  7. It must be a Literal type — no arbitrary strings
+  8. All existing catch blocks must be audited for the new level
+
+anti_patterns:
+  - "Writing to stdout/stderr directly instead of using TraceWriter"
+  - "Health check returns hardcoded 'healthy' without probing the dep"
+  - "Using SnapshotPolicy.FULL in production (PII leak vector)"
+  - "Adding a dependency without a corresponding DependencyHealth entry"

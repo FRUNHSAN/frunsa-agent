@@ -1,0 +1,97 @@
+# ── Reasoning Chain ───────────────────────────────────────────────────
+chain_id: phase_01_data_integrity
+title: "Immutable data models: frozen dataclasses, MappingProxyType, deepcopy defense"
+created_at: "2026-05-24T17:00:00Z"
+updated_at: "2026-05-24T17:00:00Z"
+tags: [data_model, immutability, frozen, mappingproxytype, deepcopy]
+status: active
+related_chains:
+  - phase_01_three_platform
+  - phase_03_adapter_pattern
+
+# ── 1. Context ───────────────────────────────────────────────────────
+
+context: |
+  In a long-running agent pipeline, data models (ContentBlock, Chunk,
+  RetrievalResult) pass through multiple steps. Without immutability:
+
+  - Step B could mutate data that Step A produced, causing Step C to see
+    inconsistent state
+  - A caller passing a dict as metadata could later modify it, violating
+    the component's assumptions
+  - Concurrent access (future async pipeline) would require locks
+
+  The competition-era codebase used plain dicts and mutable objects,
+  leading to heisenbugs where metadata changed between pipeline stages.
+
+  The fix: freeze everything at the data model level, making mutation
+  impossible rather than relying on developer discipline.
+
+# ── 2. Alternatives ──────────────────────────────────────────────────
+
+alternatives:
+  - option: "Mutable dataclasses with convention-based immutability ('don't mutate')"
+    pros: "Simpler code; standard Python"
+    cons: "Convention is unenforceable; one forgotten .copy() causes
+      cross-step contamination; impossible to debug"
+
+  - option: "Pydantic BaseModel with frozen=True"
+    pros: "Built-in validation; JSON Schema generation"
+    cons: "Heavy dependency for a contracts layer; pydantic v1/v2 migration
+      risk over a 5-year timeline; slower instantiation"
+
+  - option: "NamedTuple with immutable fields"
+    pros: "Truly immutable; lightweight"
+    cons: "No MappingProxyType for nested metadata; awkward with_metadata()
+      pattern; less readable for nested structures"
+
+# ── 3. Decision ──────────────────────────────────────────────────────
+
+decision: |
+  @dataclass(frozen=True) + MappingProxyType for metadata, with
+  __post_init__ auto-coercion of plain dicts and deepcopy defense.
+
+# ── 4. Rationale ─────────────────────────────────────────────────────
+
+rationale: |
+  - frozen=True is a language-level guarantee, not a convention
+  - MappingProxyType makes metadata read-only at the C level (TypeError
+    on mutation, not a silent ignore)
+  - __post_init__ auto-coercion means callers can pass plain dicts for
+    convenience, but the stored value is always a deep-copied MappingProxyType
+  - deepcopy in __post_init__ prevents the "modify-after-construction"
+    attack: if a caller passes a dict and later mutates it, our copy is safe
+  - with_metadata() creates a NEW frozen instance (never mutates in place)
+  - Zero external dependencies — pure stdlib, stable for 5+ years
+
+# ── 5. Evidence ──────────────────────────────────────────────────────
+
+evidence:
+  test_files:
+    - tests/conformance/test_contracts.py
+  test_cases:
+    - "test_metadata_deepcopy_protection (caller mutates original dict, block unchanged)"
+    - "test_metadata_is_readonly (TypeError on mutation attempt)"
+    - "test_frozen_dataclass_prevents_assignment (AttributeError on field assign)"
+    - "test_with_metadata_creates_new_instance (original unchanged)"
+    - "test_mappingproxy_coercion_in_post_init (plain dict auto-converted)"
+
+# ── 6. Future Guidance ───────────────────────────────────────────────
+
+future_guidance: |
+  MANDATORY for all new data models in core/contracts/:
+  1. Use @dataclass(frozen=True)
+  2. Any dict field MUST be stored as MappingProxyType via __post_init__
+  3. __post_init__ MUST deepcopy incoming dict values before wrapping
+  4. Provide a with_X() factory method for "modifications" (returns new instance)
+  5. NEVER add a setter or use object.__setattr__ outside of __post_init__
+
+  When adding a field to an existing frozen dataclass:
+  - If it's a collection (dict, list, set), it MUST follow the same
+    deepcopy + MappingProxyType pattern
+  - Add a corresponding conformance test
+
+anti_patterns:
+  - "Using a plain dict field without MappingProxyType because 'this one is internal'"
+  - "Calling object.__setattr__ in business logic to bypass frozen"
+  - "Returning the internal dict reference instead of a copy"
