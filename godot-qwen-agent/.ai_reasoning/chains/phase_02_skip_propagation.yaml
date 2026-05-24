@@ -95,4 +95,4 @@ future_guidance: |
 anti_patterns:
   - "Returning _SKIP_SENTINEL from a step's run() method"
   - "Checking `if not result:` in the engine to decide skip (too broad)"
-  - "Relying on None as a skip signal (collision risk)"
+  - "Relying on None as a skip signal instead of _SKIP_SENTINEL (collision risk with valid None results)"

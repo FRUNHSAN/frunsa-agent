@@ -116,8 +116,9 @@ future_guidance: |
     5. If no results → degraded (reachable but empty)
 
 anti_patterns:
-  - "Letting external exceptions propagate out of the adapter"
-  - "Health probe that doesn't check last_trace (blind to swallowed errors)"
-  - "Using get_event_loop() instead of get_running_loop()"
+  - "Letting external exceptions propagate out of the adapter (bypasses graceful degradation)"
+  - "Health probe that doesn't check last_trace.status (blind to swallowed errors)"
+  - "Using get_event_loop() instead of get_running_loop() (crashes in sync contexts)"
   - "Calling asyncio.run() from inside a running event loop (nested loop error)"
   - "Health probe that returns 'healthy' without actually probing the backend"
+  - "Using a module-level global variable for connection pools instead of ResourceContainer.register_managed()"

@@ -94,4 +94,4 @@ future_guidance: |
 anti_patterns:
   - "Using a plain dict field without MappingProxyType because 'this one is internal'"
   - "Calling object.__setattr__ in business logic to bypass frozen"
-  - "Returning the internal dict reference instead of a copy"
+  - "Returning the internal MappingProxyType / dict reference via return self._metadata instead of return deepcopy(self._metadata)"
