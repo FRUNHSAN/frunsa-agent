@@ -9,7 +9,7 @@ contracts (is_terminal, finish_reason, error).
 from __future__ import annotations
 
 import asyncio
-from typing import AsyncIterator, List, Optional
+from typing import AsyncIterator, Awaitable, Callable, List, Optional
 
 from core.contracts import StreamItem
 
@@ -112,6 +112,7 @@ async def pace_stream(
     item_throughput: Optional[float] = None,
     burst_size: int = 0,
     adaptive: bool = False,
+    backpressure_signal: Optional[Callable[[], Awaitable[float]]] = None,
 ) -> AsyncIterator[StreamItem]:
     """Apply pace shaping to an AsyncIterator[StreamItem].
 
@@ -126,7 +127,9 @@ async def pace_stream(
         stream: The upstream async iterator to throttle.
         item_throughput: Max items/sec (None = unlimited passthrough).
         burst_size: Items to accumulate before sleeping (0 = per-item).
-        adaptive: If True, requires backpressure_signal via PaceShapingWrapper directly.
+        adaptive: If True, samples backpressure_signal to scale throughput.
+        backpressure_signal: Optional callable returning 0.0-1.0 pressure.
+            Required for adaptive mode to function; ignored otherwise.
     """
     from core.adapters.stream_adapter import PaceShapingWrapper
     from core.contracts.streaming_protocol import PaceConfig
@@ -136,6 +139,10 @@ async def pace_stream(
         burst_size=burst_size,
         adaptive=adaptive,
     )
-    wrapper = PaceShapingWrapper(source=stream, config=config)
+    wrapper = PaceShapingWrapper(
+        source=stream,
+        config=config,
+        backpressure_signal=backpressure_signal,
+    )
     async for item in wrapper:
         yield item

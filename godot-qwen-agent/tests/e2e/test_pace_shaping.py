@@ -290,3 +290,72 @@ class TestPaceShapingStreamItemIntegrity:
             assert result.error == original.error
 
         asyncio.run(_test())
+
+    def test_trace_context_preserved(self):
+        """trace_context opaque bag is passed through unmodified (Phase 9.1)."""
+        ctx = {"chunk_id": "abc", "retrieval_latency_ms": 42}
+        original = StreamItem(
+            delta="data", index=0, model="test/rag", trace_context=ctx,
+        )
+
+        async def _source():
+            yield original
+
+        async def _test():
+            config = PaceConfig(item_throughput=100.0, burst_size=1)
+            wrapper = PaceShapingWrapper(_source(), config)
+            items = await _collect(wrapper)
+
+            assert items[0].trace_context == ctx
+
+        asyncio.run(_test())
+
+
+# ── TestPaceStreamConvenience ─────────────────────────────────────────
+
+
+class TestPaceStreamConvenience:
+    """pace_stream() pipeline convenience — with backpressure_signal (Phase 9.1)."""
+
+    def test_pace_stream_with_backpressure_signal(self, mock_sleep):
+        """pace_stream passes backpressure_signal through to PaceShapingWrapper."""
+        from core.pipeline.streaming import pace_stream
+
+        async def pressure_signal() -> float:
+            return 0.5
+
+        async def _gen():
+            for i in range(10):
+                yield StreamItem(delta=f"x{i}", index=i, model="test")
+
+        async def _test():
+            wrapper = pace_stream(
+                _gen(),
+                item_throughput=10.0,
+                burst_size=5,
+                adaptive=True,
+                backpressure_signal=pressure_signal,
+            )
+            items = await _collect(wrapper)
+            assert len(items) == 10
+            # With pressure=0.5, effective rate = 5 items/sec, burst=5 → sleep ~1.0s
+            assert len(mock_sleep) == 2
+            assert all(d >= 0.9 for d in mock_sleep)
+
+        asyncio.run(_test())
+
+    def test_pace_stream_without_signal_still_works(self, mock_sleep):
+        """pace_stream without backpressure_signal uses default rate."""
+        from core.pipeline.streaming import pace_stream
+
+        async def _gen():
+            for i in range(6):
+                yield StreamItem(delta=f"x{i}", index=i, model="test")
+
+        async def _test():
+            wrapper = pace_stream(_gen(), item_throughput=10.0, burst_size=3)
+            items = await _collect(wrapper)
+            assert len(items) == 6
+            assert len(mock_sleep) == 2
+
+        asyncio.run(_test())

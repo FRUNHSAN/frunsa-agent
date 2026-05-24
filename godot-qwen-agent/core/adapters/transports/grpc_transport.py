@@ -32,6 +32,16 @@ class GrpcBidiTransport(TransportBackend, ABC):
         ...
 
     @abstractmethod
+    async def send_with_deadline(self, data: bytes, deadline: float) -> None:
+        """Write with operation-level deadline (monotonic seconds).
+
+        gRPC natively supports per-RPC deadlines via grpc.aio.metadata
+        with timeout. This maps to the underlying gRPC deadline mechanism
+        rather than a Python-level asyncio.wait_for.
+        """
+        ...
+
+    @abstractmethod
     async def receive(self) -> AsyncIterator[bytes]:
         """Read serialized bytes from the gRPC stream."""
         ...

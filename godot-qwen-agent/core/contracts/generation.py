@@ -98,6 +98,11 @@ class StreamItem:
     metadata: MappingProxyType[str, Any] = field(
         default_factory=lambda: MappingProxyType({})
     )
+    # Phase 9.1: opaque context bag for engine-specific tracing.
+    # RAG: {"chunk_id": "...", "retrieval_latency_ms": ...}
+    # Planning: {"step_index": 3, "reasoning_depth": 2}
+    # Adapters pass through without inspection — each engine defines its own schema.
+    trace_context: Optional[Dict[str, Any]] = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.metadata, MappingProxyType):
@@ -105,4 +110,10 @@ class StreamItem:
 
             object.__setattr__(
                 self, "metadata", MappingProxyType(deepcopy(dict(self.metadata)))
+            )
+        if self.trace_context is not None:
+            from copy import deepcopy
+
+            object.__setattr__(
+                self, "trace_context", deepcopy(dict(self.trace_context))
             )

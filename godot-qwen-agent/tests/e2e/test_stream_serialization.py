@@ -115,6 +115,24 @@ class TestJsonRpcSerializer:
         assert deserialized.finish_reason == "error"
         assert deserialized.error == "k8s_oom_killed"
 
+    def test_round_trip_with_trace_context(self):
+        """trace_context opaque bag survives round-trip (Phase 9.1)."""
+        serializer = JsonRpc20Serializer()
+        ctx = {"step_index": 3, "reasoning_depth": 2, "parent_step_id": "abc123"}
+        original = StreamItem(
+            delta="reasoning result", index=1, model="test/planning",
+            trace_context=ctx,
+        )
+        deserialized = serializer.deserialize(serializer.serialize(original))
+        assert deserialized.trace_context == ctx
+
+    def test_round_trip_no_trace_context(self):
+        """trace_context=None round-trips correctly (backward compat)."""
+        serializer = JsonRpc20Serializer()
+        original = _data_item("hello", 0)
+        deserialized = serializer.deserialize(serializer.serialize(original))
+        assert deserialized.trace_context is None
+
     def test_round_trip_empty_delta(self):
         """Empty delta round-trip works (used for terminal items)."""
         serializer = JsonRpc20Serializer()
@@ -150,6 +168,7 @@ class TestPaceConfig:
         assert config.item_throughput is None
         assert config.burst_size == 0
         assert config.adaptive is False
+        assert config.adaptive_strategy is None
 
     def test_frozen_prevents_mutation(self):
         config = PaceConfig(item_throughput=10.0)
@@ -169,6 +188,18 @@ class TestPaceConfig:
         assert config.item_throughput == 50.0
         assert config.burst_size == 10
         assert config.adaptive is True
+
+    def test_adaptive_strategy_extension_point(self):
+        """adaptive_strategy is an open extension point — any string is valid."""
+        config = PaceConfig(
+            item_throughput=10.0, adaptive=True, adaptive_strategy="jitter"
+        )
+        assert config.adaptive_strategy == "jitter"
+
+    def test_adaptive_strategy_default_none(self):
+        """Default adaptive_strategy is None (linear scaling)."""
+        config = PaceConfig(adaptive=True)
+        assert config.adaptive_strategy is None
 
 
 # ── TestProtocolConformance ──────────────────────────────────────────

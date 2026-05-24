@@ -80,6 +80,9 @@ class JsonRpc20Serializer:
         if item.finish_reason is not None:
             msg["params"]["finish_reason"] = item.finish_reason
 
+        if item.trace_context is not None:
+            msg["params"]["trace_context"] = item.trace_context
+
         msg["id"] = "terminal" if item.is_terminal else str(item.index)
 
         return json.dumps(msg, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
@@ -96,6 +99,7 @@ class JsonRpc20Serializer:
             model=params.get("model", ""),
             is_terminal=params.get("is_terminal", False),
             error=params.get("error"),
+            trace_context=params.get("trace_context"),
         )
 
 
@@ -202,18 +206,28 @@ class AsyncDataStreamAdapter:
         stream: AsyncIterator[StreamItem],
         timeout: Optional[float] = None,
     ) -> None:
-        """Serialize and send an entire stream through the transport."""
+        """Serialize and send an entire stream through the transport.
+
+        timeout: transport-level cap on the full send operation.
+            Defaults to self._default_timeout. Use asyncio.wait_for
+            internally so TimeoutError surfaces to the caller.
+        """
+        effective_timeout = timeout if timeout is not None else self._default_timeout
         t0 = time.perf_counter()
 
-        try:
+        async def _send_all() -> None:
             await self._transport.connect()
 
             if self._pace_config is not None:
+                nonlocal stream
                 stream = PaceShapingWrapper(stream, self._pace_config)
 
             async for item in stream:
                 data = self._serializer.serialize(item)
                 await self._transport.send(data)
+
+        try:
+            await asyncio.wait_for(_send_all(), timeout=effective_timeout)
 
             elapsed = time.perf_counter() - t0
             self._last_trace = DependencyCallTrace(
@@ -222,6 +236,16 @@ class AsyncDataStreamAdapter:
                 duration_ms=elapsed * 1000,
                 status="success",
             )
+        except asyncio.TimeoutError:
+            elapsed = time.perf_counter() - t0
+            self._last_trace = DependencyCallTrace(
+                dependency_name=self._dependency_name,
+                span_type=SpanType.DEPENDENCY_CALL,
+                duration_ms=elapsed * 1000,
+                status="timeout",
+                metadata={"timeout_s": effective_timeout},
+            )
+            raise
         except Exception as exc:
             elapsed = time.perf_counter() - t0
             self._last_trace = DependencyCallTrace(
@@ -239,15 +263,23 @@ class AsyncDataStreamAdapter:
         self,
         timeout: Optional[float] = None,
     ) -> AsyncIterator[StreamItem]:
-        """Receive and deserialize a stream from the transport."""
+        """Receive and deserialize a stream from the transport.
+
+        timeout: max seconds to wait for the full receive stream.
+            Defaults to self._default_timeout. Each individual receive
+            call is capped by the remaining time budget.
+        """
+        effective_timeout = timeout if timeout is not None else self._default_timeout
         t0 = time.perf_counter()
+        deadline = t0 + effective_timeout
 
         try:
             await self._transport.connect()
 
-            async for data in self._transport.receive():
-                item = self._serializer.deserialize(data)
-                yield item
+            async with asyncio.timeout_at(deadline):
+                async for data in self._transport.receive():
+                    item = self._serializer.deserialize(data)
+                    yield item
 
             elapsed = time.perf_counter() - t0
             self._last_trace = DependencyCallTrace(
@@ -256,6 +288,16 @@ class AsyncDataStreamAdapter:
                 duration_ms=elapsed * 1000,
                 status="success",
             )
+        except asyncio.TimeoutError:
+            elapsed = time.perf_counter() - t0
+            self._last_trace = DependencyCallTrace(
+                dependency_name=self._dependency_name,
+                span_type=SpanType.DEPENDENCY_CALL,
+                duration_ms=elapsed * 1000,
+                status="timeout",
+                metadata={"timeout_s": effective_timeout},
+            )
+            raise
         except Exception as exc:
             elapsed = time.perf_counter() - t0
             self._last_trace = DependencyCallTrace(

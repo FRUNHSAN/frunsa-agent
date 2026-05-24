@@ -32,6 +32,15 @@ class RedisStreamsTransport(TransportBackend, ABC):
         ...
 
     @abstractmethod
+    async def send_with_deadline(self, data: bytes, deadline: float) -> None:
+        """XADD with deadline (monotonic seconds).
+
+        Redis Streams don't have native deadline semantics, so this
+        should be implemented via asyncio.wait_for around XADD.
+        """
+        ...
+
+    @abstractmethod
     async def receive(self) -> AsyncIterator[bytes]:
         """XREAD from the stream, yielding deserialized items."""
         ...

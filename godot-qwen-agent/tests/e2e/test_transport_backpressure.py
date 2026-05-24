@@ -219,6 +219,62 @@ class TestTransportBackpressure:
         assert adapter.last_trace is not None
         assert adapter.last_trace.status == "error"
 
+    def test_send_stream_timeout_raises_timeouterror(self):
+        """send_stream timeout triggers asyncio.TimeoutError (Phase 9.1)."""
+
+        class StallingTransport(FakeTransport):
+            async def send(self, data: bytes) -> None:
+                await asyncio.sleep(999)  # never completes within timeout
+
+        transport = StallingTransport()
+        adapter = AsyncDataStreamAdapter(
+            JsonRpc20Serializer(), transport, default_timeout=0.01,
+        )
+
+        async def _gen():
+            yield StreamItem(delta="x", index=0, model="test")
+
+        with pytest.raises(asyncio.TimeoutError):
+            asyncio.run(adapter.send_stream(_make_stream(_make_items(1))))
+
+        assert adapter.last_trace is not None
+        assert adapter.last_trace.status == "timeout"
+
+    def test_send_stream_custom_timeout_overrides_default(self):
+        """Explicit timeout parameter overrides default_timeout (Phase 9.1)."""
+        transport = FakeTransport()
+        adapter = AsyncDataStreamAdapter(
+            JsonRpc20Serializer(), transport, default_timeout=999.0,
+        )
+
+        items = _make_items(3)
+        # Should succeed with custom timeout even though default is huge
+        asyncio.run(adapter.send_stream(_make_stream(items), timeout=10.0))
+
+        assert len(transport.sent) == 3
+        assert adapter.last_trace.status == "success"
+
+    def test_send_with_deadline_transport_support(self):
+        """Transport with send_with_deadline works through adapter (Phase 9.1)."""
+
+        class DeadlineTransport(FakeTransport):
+            def __init__(self, **kwargs: Any) -> None:
+                super().__init__(**kwargs)
+                self._deadlines: List[float] = []
+
+            async def send_with_deadline(self, data: bytes, deadline: float) -> None:
+                self._deadlines.append(deadline)
+                self._sent.append(data)
+
+        transport = DeadlineTransport()
+        serializer = JsonRpc20Serializer()
+        adapter = AsyncDataStreamAdapter(serializer, transport)
+
+        items = _make_items(3)
+        asyncio.run(adapter.send_stream(_make_stream(items)))
+
+        assert len(transport.sent) == 3
+
 
 # ── TestTransportHealthProbe ─────────────────────────────────────────
 
