@@ -2286,3 +2286,227 @@ core/observability/trace_registry.py to document its meaning.
 4. `python -c "from core.observability import FileTraceExporter, TraceKeyDef, TRACE_KEY_REGISTRY; print(len(TRACE_KEY_REGISTRY))"` — 6 个注册表条目
 5. `python -c "from core.observability.file_exporter import FileTraceExporter; m=FileTraceExporter._get_engine_prefix_map(); print(m)"` — O(1) 前缀映射 `{'planning': 'planning', 'rag': 'rag'}`
 6. `python -c "from core.pipeline.tracing import DependencyCallTrace; dt=DependencyCallTrace(dependency_name='x', trace_context={'planning.step_index':0}); print(dt.to_dict()['trace_context'])"` — trace_context 在 to_dict() 中存活
+
+---
+
+## Phase 12: 观测闭环 — 逐项 trace + SQLite 落盘 + 组件候选实证分析
+
+**完成状态**: ✅ 已完成 (Phase 12)
+
+### 背景
+
+Phase 11 证明了 `trace_context` 能无损通过适配器管道，并构建了第一个"静态"消费者（FileTraceExporter 写入 JSON Lines + 声明式 TRACE_KEY_REGISTRY）。350 个测试，0 个失败，11 条 guardrails。
+
+**关键缺口**：`DependencyCallTrace.trace_context` 仅捕获**最后一个** StreamItem 的上下文——非逐项。一个 50 chunk 的 RAG 调用和一个 3 步的 Planning 调用各产生恰好 1 条 trace 记录。这无法支撑逐项延迟分析、流完整性验证和组件级 trace key 实证分析。
+
+Phase 12 是**观测闭环**（观测闭环），非编排开启。目标：在新增任何系统复杂度之前，让 Phase 11 的数据**真正可用**。
+
+**战略约束**：零外部依赖。SQLite 在 Python stdlib 中（`sqlite3`）。纯 B-tree 索引——无 FTS5（编译期可选，结构化查询不需要）。
+
+**核心原则（新增架构不变量 #11）**：**观测先行**——每一层新能力的引入，必须先被上一层观测体系覆盖。Phase 11 证明引擎层 trace 可传输 → Phase 12 证明 sink 可消费 → Phase 13 方可搭建组件平台。
+
+### 架构定位
+
+```
+组件平台 (core/contracts/)     ← 尚未构建 (Phase 13+)
+    ↑ 未来：Phase 13 定义组件级 trace keys
+    │
+引擎平台 (core/pipeline/)      ← CURRENT: N=2 (RAG + Planning)
+    ↑
+    │  Phase 11: trace_context 透传验证 + FileExporter
+    │  Phase 12: per-item trace + SQLite sink ← 本阶段
+    │
+观测层 (core/observability/)   ← Phase 11: FileTraceExporter + TraceKeyDef
+                                   Phase 12: SQLiteTraceSink + sink_schema.py
+    │
+    ↓
+编排平台 (core/orchestration/)  ← Phase 14+ (仅预设计在 Phase 12)
+```
+
+### 四大交付物
+
+1. **逐项流 Trace 抽象** — 替代 last-item 语义，以成本边界为协议硬约束
+2. **自建 Sink v0** — SQLite 纯 B-tree，schema-first 设计，100% stdlib
+3. **组件候选实证分析** — 用真实数据验证 3 个 `component_candidate=True` key，产出 Phase 13 接口骨架
+4. **编排 trace 契约预设计** — 纯文档，不实现（6 个 projected `orchestration.*` keys）
+
+### 关键设计决策
+
+**a) Option B: 并行写路径**。`StreamingTraceWriter` Protocol 与 `TraceWriter` 并存——不修改已有类型。FileTraceExporter 继续消费 `TraceLog` 做摘要记录。`SQLiteTraceSink` 消费 `StreamingTraceRecord` 做逐项记录。350 个已有测试无修改通过。
+
+**b) Sink: SQLite 纯 B-tree**（非 FTS5）。FTS5 是编译期可选——不保证可用。Phase 12 的查询模式（`WHERE engine=? AND status=? GROUP BY key`）是结构化查询，不需要全文搜索。FTS5 可在需要时用 `CREATE VIRTUAL TABLE ... USING fts5(...)` 追加。
+
+**c) Schema-first**。Step 0 是 `sink_schema.py`——所有表、列、索引的声明式 TypedDict 定义。`sink_schema_consistency` guardrail 验证运行时 SQL 与声明匹配。这是最重要的交付物——它是 schema 设计问题，不是检索性能问题。
+
+**d) 成本边界作为协议硬约束**。`StreamingTraceWriter.max_items_per_call` 是 Protocol 的必选属性。没有它，RAG（50 chunk）vs Planning（3 步）= 16x 存储不对称。语义：
+- `-1`：无限（显式接受风险）
+- `0`：仅计数（无逐项记录，sentinel 含 overflow_count）
+- `N > 0`：最多存储 N，超出截断 + sentinel
+
+**e) 截断在 sink，不在 adapter**。Adapter 盲目收集所有 `StreamingTraceRecord`。Sink 按 `max_items_per_call` 强制截断，返回 `StreamingWriteResult`。单一职责——不在 N 个 adapter 实现中重复截断逻辑。
+
+**f) 分类阈值（硬编码，有文档）**：
+- `confirmed_component`：≥95% 出现率 + 100% 类型匹配 + bounded cardinality
+- `type_mismatch`：类型匹配率 ≤99%（即使一次偏差也不含糊）
+- `needs_more_data`：其余全部
+
+### 实现序列
+
+| # | 步骤 | 关键文件 | 行数 |
+|---|------|---------|------|
+| 0 | Sink Schema 声明式定义 | `core/observability/sink_schema.py` | ~120 |
+| 1 | StreamingTraceRecord + StreamingTraceWriter + StreamingWriteResult | `core/pipeline/tracing.py` | ~92 |
+| 2 | Adapter 逐项 trace_context 采集 | `core/adapters/stream_adapter.py` | ~39 |
+| 3 | SQLiteTraceSink（含截断逻辑） | `core/observability/sqlite_sink.py` | ~410 |
+| 4 | 组件候选实证分析脚本 | `scripts/analyze_component_candidates.py` | ~460 |
+| 5 | 编排 trace 预设计 | `.ai_reasoning/chains/phase_12_orchestration_trace_pre_design.yaml` | ~130 |
+| 6 | Guardrail: sink_schema_consistency | `guardrails/rules/sink_schema_consistency.py` | ~170 |
+| 7 | Guardrail 注册 | `guardrails/rules/__init__.py` + `guardrails/checker.py` | ~6 |
+| 8 | E2E 测试 | `tests/e2e/test_sqlite_sink.py` + 扩展 `test_trace_serialization.py` | ~500 |
+| 9 | 推理链 + index + 不变量 | chains, index.yaml, CLAUDE.md, `__init__.py` | ~250 |
+
+### 数据流
+
+```
+StreamItem.trace_context (EVERY item)
+  → AsyncDataStreamAdapter 盲目收集 StreamingTraceRecord (每条一个)
+    → streaming_traces 属性 (List[StreamingTraceRecord])
+      → SQLiteTraceSink.write_streaming() → trace_records 表 (逐项)
+      
+StreamItem.trace_context (LAST item only)
+  → DependencyCallTrace.trace_context (Phase 11, 不变)
+    → TraceLog.steps → FileTraceExporter.write() → JSON Lines (摘要)
+```
+
+### Sink Schema（声明式）
+
+**`trace_records`** — 主 trace 数据表：
+
+| 列 | 类型 | 可空 | 说明 |
+|----|------|------|------|
+| id | INTEGER | N | 自增主键 |
+| ts | TEXT | N | ISO 8601 时间戳 |
+| run_id | TEXT | N | Pipeline run 标识 |
+| step | TEXT | N | 步骤名 |
+| dependency | TEXT | N | 依赖名 |
+| status | TEXT | N | success / timeout / error / overflow |
+| duration_ms | REAL | Y | 依赖调用时长（摘要记录；逐项为 NULL） |
+| engine | TEXT | N | 从 trace_context keys 推断 |
+| trace_context_json | TEXT | Y | 完整 trace_context dict 序列化为 JSON |
+| item_index | INTEGER | Y | StreamItem index（NULL = 摘要记录） |
+| item_delta_preview | TEXT | Y | delta 前 200 字符（NULL = 摘要） |
+| is_terminal | INTEGER | Y | 0/1（NULL = 摘要） |
+
+6 个索引：`idx_run_id`, `idx_engine`, `idx_status`, `idx_step`, `idx_run_step` (run_id+step), `idx_item_index` (run_id+dependency+item_index)
+
+**`trace_keys`** — 注册表目录：key_name (TEXT PK), engine, value_type, semantics, unit, component_candidate
+
+**`schema_version`** — 迁移追踪：version (INTEGER PK), applied_at, description
+
+### 组件候选分析结果
+
+3 个 `component_candidate=True` keys 的现状：
+
+| Key | 出现率 | 类型匹配 | Cardinality | 分类 |
+|-----|--------|----------|-------------|------|
+| planning.cumulative_tokens | 38% (跨引擎池) | 100% | bounded | needs_more_data |
+| rag.chunk_id | 62% (跨引擎池) | 100% | free_text | needs_more_data |
+| rag.retrieval_latency_ms | 62% (跨引擎池) | 100% | bounded | needs_more_data |
+
+所有 3 个 key 因跨引擎出现率不足 95% 被标记为 `needs_more_data`——这是 N=2 异构引擎的预期结果。每引擎 key 应在同引擎范围内分析，而非跨混合引擎池。chunk_id 的 `free_text` cardinality 也是预期内的（每个 chunk 有唯一 ID）。Phase 13 应在同引擎范围内重新分析，并考虑将 `free_text` 细分为 `unique_identifiers`（结构化）和 `free_text`（用户生成的不可预测内容）。
+
+### 编排 trace 预设计（纯文档，不实现）
+
+6 个 projected `orchestration.*` keys：
+
+| Key | 类型 | 语义 |
+|-----|------|------|
+| orchestration.dag_node_id | str | DAG 节点唯一标识 |
+| orchestration.parallel_depth | int | 并行执行树深度 |
+| orchestration.merge_ordinal | int | 合并并行结果时的序号 |
+| orchestration.branch_taken | str | 条件分支选择的路径 |
+| orchestration.retry_count | int | 节点重试次数 |
+| orchestration.resource_pool_key | str | 资源池标识 |
+
+Schema 影响：`trace_keys` 表已通过 TEXT `engine` 列支持 "orchestration"。插入仅需 INSERT——无需 DDL 迁移。
+
+### 边界情况处理
+
+| 场景 | 行为 |
+|------|------|
+| Stream 为 0 项 | `_streaming_records` = []。`write_streaming([])` 无写入。无 sentinel |
+| `max_items_per_call` 被超出 | Sink 截断至前 N 条。余量计数。Sentinel `item_index=-1` with `status="overflow"` 记录 `overflow_count` |
+| Adapter 盲目收集全部 item | Adapter 为每个 StreamItem 追加到 `_streaming_records`——无截断逻辑。Sink 强制 `max_items_per_call` |
+| SQLite 文件被锁 | `sqlite3.OperationalError` 向上传播。调用方重试。单写入者已文档化 |
+| `max_items_per_call=-1`（无限） | 全部记录存储。无截断，无 sentinel |
+| `max_items_per_call=0`（仅计数） | 无逐项记录。单条 sentinel，overflow_count = 总数 |
+| DB 文件不存在 | `sqlite3.connect()` 创建。所有 DDL 使用 `IF NOT EXISTS` |
+| `_create_schema()` 被重复调用 | 全部 `CREATE ... IF NOT EXISTS`——幂等。`_seed_trace_keys()` 先检查 `SELECT COUNT(*)` |
+
+### 反模式
+
+1. **Adapter 端截断**：将 `max_items_per_call` 逻辑放在 stream_adapter.py 而非 sink。一处实现 vs N 个 adapter 各实现一份
+2. **为结构化查询使用 FTS5**：对精确匹配和 GROUP BY 查询使用 `CREATE VIRTUAL TABLE ... USING fts5`。B-tree 索引足够且保证可用
+3. **Last-item only trace_context**：用 `DependencyCallTrace.trace_context`（last-item 语义）做逐项分析。逐项需求应使用 `StreamingTraceRecord`
+4. **无 guardrail 的 schema**：在 `sink_schema.py` 声明之外向 SQLiteTraceSink 新增表或列。`sink_schema_consistency` guardrail 强制 schema-first
+5. **成本边界作为事后补救**：将 `max_items_per_call` 视为可选优化而非结构性协议要求。没有它，逐项 trace 是无上界的存储膨胀
+6. **无实证验证的组件候选 key**：不运行分析脚本就将 `component_candidate` key 提升到 `core/contracts/`。分类阈值提供稳定可复现的判断依据
+7. **Phase 14 前实现编排**：在组件平台存在前就实现编排 keys 或引擎。预设计链显式标注 "NOT FOR IMPLEMENTATION"
+8. **跨引擎出现率期望**：期待 `rag.chunk_id` 等每引擎 key 在所有异构引擎的混合 item 中出现 95%。每引擎 key 应在同引擎范围内分析
+
+### 交付物
+
+| 文件 | 说明 |
+|------|------|
+| `core/observability/sink_schema.py` | 声明式 schema：3 表 + 7 索引 + 版本追踪 |
+| `core/pipeline/tracing.py` | StreamingTraceRecord + StreamingWriteResult + StreamingTraceWriter Protocol |
+| `core/adapters/stream_adapter.py` | send_stream + receive_stream 逐项 StreamingTraceRecord 采集 |
+| `core/observability/sqlite_sink.py` | SQLiteTraceSink：TraceWriter + StreamingTraceWriter 双协议实现 |
+| `scripts/analyze_component_candidates.py` | 实证分析脚本：硬编码分类阈值 + 结构化 JSON 输出 |
+| `.ai_reasoning/chains/phase_12_observability_closed_loop.yaml` | 主推理链：5 个替代方案 + 8 个反模式 |
+| `.ai_reasoning/chains/phase_12_orchestration_trace_pre_design.yaml` | 编排预设计：3 个替代方案 + 5 个反模式 |
+| `guardrails/rules/sink_schema_consistency.py` | 新规则（WARNING）：验证运行时 SQL schema |
+| `guardrails/rules/__init__.py` + `guardrails/checker.py` | 注册新规则（12→12 guardrails） |
+| `tests/e2e/test_sqlite_sink.py` | 18 个测试：schema/seed/write/truncate/query |
+| `tests/e2e/test_trace_serialization.py` | 扩展 +12 个测试：StreamingTraceRecord/Protocol/Adapter 逐项采集 |
+| `.ai_reasoning/index.yaml` | 2 个新链条目 + 12 个新 tags |
+| `CLAUDE.md` | 新增不变量 #11（观测先行） |
+| `core/observability/__init__.py` | 导出 SQLiteTraceSink + schema 常量 |
+
+### 架构不变量检查
+
+| # | 不变量 | 结果 |
+|---|--------|------|
+| 1 | 零外部依赖 | `pip check` + 测试导入 — sqlite3 是 stdlib ✅ |
+| 2 | 已有 TraceWriter 实现不变 | FileTraceExporter, LocalJSONWriter 未修改 ✅ |
+| 3 | StreamItem frozen dataclass 不变 | `git diff core/contracts/generation.py` 为空 ✅ |
+| 4 | RAG 引擎零变更 | 未触及 engines/rag/ 或 core/pipeline/engine.py ✅ |
+| 5 | 350 个已有测试仍通过 | 382 通过（350 + 32 新增），0 失败 ✅ |
+| 6 | Guardrails: 12 条规则 PASSED | `python -m guardrails check --all` 通过（35 files, 12 rules） ✅ |
+| 7 | SQLite schema 与声明式定义匹配 | TestSinkSchemaGuardrail ✅ |
+| 8 | 逐项成本边界在协议中强制 | `max_items_per_call` 是 StreamingTraceWriter 的必选属性 ✅ |
+| 9 | 组件候选分析 → 接口骨架 | `scripts/analyze_component_candidates.py` 结构化输出 ✅ |
+| 10 | 新不变量"观测先行"已文档化 | CLAUDE.md 不变量 #11 ✅ |
+| 11 | 2 条新推理链 | index.yaml 含 phase_12_observability_closed_loop + phase_12_orchestration_trace_pre_design ✅ |
+| 12 | 已有 guardrails 未减少（11 → 12） | `python -m guardrails list-rules` 12 条 ✅ |
+
+### 提交历史
+
+```
+0ed02ef feat: Phase 12 Step 9 — Reasoning chain, index, invariant #11
+b3c95d6 test: Phase 12 Step 8 — E2E tests for per-item trace + SQLite sink
+17ec238 feat: Phase 12 Step 4 — Component candidate empirical analysis script
+4fefdcc feat: Phase 12 Steps 6-7 — sink_schema_consistency guardrail
+922e599 feat: Phase 12 Step 3 — SQLiteTraceSink with cost-boundary enforcement
+e9327b1 feat: Phase 12 Steps 1-2 — Per-item trace types + adapter capture
+0760a6f feat: Phase 12 Step 0 — Declarative sink schema definition
+```
+
+### 验证
+
+1. `pytest tests/ -q` — 382 个测试，0 个失败，1 skip
+2. `python -m guardrails check --all` — 12 条规则 PASSED（35 files scanned）
+3. `python -c "from core.observability import SQLiteTraceSink; from core.observability.sink_schema import TRACE_RECORDS_TABLE_NAME; print('OK')"` — 全部可导入
+4. `python -c "from core.pipeline.tracing import StreamingTraceRecord, StreamingTraceWriter; r = StreamingTraceRecord(pipeline_run_id='x', step_name='s', dependency_name='d', item_index=0, item_delta_preview='preview', is_terminal=False, trace_context={'k':'v'}, ts_iso='2026-01-01T00:00:00Z'); print('OK')"` — dataclass 构造正常
+5. `python scripts/analyze_component_candidates.py` — 产出分析报告，3 个 component_candidate keys 已分类
+6. `python -c "from core.observability.sqlite_sink import SQLiteTraceSink; import tempfile, os; tmp = tempfile.mkdtemp(); sink = SQLiteTraceSink(os.path.join(tmp, 'test.db')); keys = sink.query_keys(component_candidate_only=True); assert len(keys) == 3; sink.close(); print('OK')"` — 查询接口正常
