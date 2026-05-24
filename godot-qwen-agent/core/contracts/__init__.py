@@ -9,6 +9,7 @@ from .registry import (
     register_component,
     validate_pipeline_steps,
 )
+from .retrieval import RetrievalResult, RetrievalStrategy
 from .validation import ContractValidationResult, ValidationError, validate_chunk_output
 
 __all__ = [
@@ -16,8 +17,10 @@ __all__ = [
     "Chunk",
     "ContentBlock",
     "SemVer",
-    # Strategy protocol
+    "RetrievalResult",
+    # Strategy protocols
     "ChunkingStrategy",
+    "RetrievalStrategy",
     # Validation
     "ContractValidationResult",
     "ValidationError",
