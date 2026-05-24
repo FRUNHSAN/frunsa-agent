@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional
 
 from core.contracts.generation import StreamItem
@@ -21,7 +22,7 @@ from core.contracts.streaming_protocol import (
     SerializationFormat,
     TransportBackend,
 )
-from core.pipeline.tracing import DependencyCallTrace, SpanType
+from core.pipeline.tracing import DependencyCallTrace, SpanType, StreamingTraceRecord
 
 
 # ── JsonRpc20Serializer ──────────────────────────────────────────────
@@ -197,6 +198,8 @@ class AsyncDataStreamAdapter:
         dependency_name: str = "cloud_transport",
         default_timeout: float = 120.0,
         pace_config: Optional[PaceConfig] = None,
+        stream_trace_step_name: str = "",
+        stream_trace_run_id: str = "",
     ) -> None:
         self._serializer = serializer
         self._transport = transport
@@ -204,10 +207,22 @@ class AsyncDataStreamAdapter:
         self._default_timeout = default_timeout
         self._pace_config = pace_config
         self._last_trace: Optional[DependencyCallTrace] = None
+        self._streaming_records: List[StreamingTraceRecord] = []
+        self._stream_trace_step_name = stream_trace_step_name
+        self._stream_trace_run_id = stream_trace_run_id
 
     @property
     def last_trace(self) -> Optional[DependencyCallTrace]:
         return self._last_trace
+
+    @property
+    def streaming_traces(self) -> List[StreamingTraceRecord]:
+        """Per-item streaming trace records collected during the last call.
+
+        Returns a shallow copy to prevent external mutation.
+        Adapter collects ALL records blindly — truncation is the sink's job.
+        """
+        return list(self._streaming_records)
 
     async def send_stream(
         self,
@@ -230,9 +245,20 @@ class AsyncDataStreamAdapter:
                 nonlocal stream
                 stream = PaceShapingWrapper(stream, self._pace_config)
 
+            self._streaming_records = []  # clear from previous call
             last_ctx = None
             async for item in stream:
                 last_ctx = item.trace_context
+                self._streaming_records.append(StreamingTraceRecord(
+                    pipeline_run_id=self._stream_trace_run_id,
+                    step_name=self._stream_trace_step_name,
+                    dependency_name=self._dependency_name,
+                    item_index=item.index,
+                    item_delta_preview=item.delta[:200],
+                    is_terminal=item.is_terminal,
+                    trace_context=item.trace_context,
+                    ts_iso=datetime.now(timezone.utc).isoformat(),
+                ))
                 data = self._serializer.serialize(item)
                 await self._transport.send(data)
 
@@ -291,11 +317,22 @@ class AsyncDataStreamAdapter:
         try:
             await self._transport.connect()
 
+            self._streaming_records = []
             last_ctx = None
             async with asyncio.timeout_at(deadline):
                 async for data in self._transport.receive():
                     item = self._serializer.deserialize(data)
                     last_ctx = item.trace_context
+                    self._streaming_records.append(StreamingTraceRecord(
+                        pipeline_run_id=self._stream_trace_run_id,
+                        step_name=self._stream_trace_step_name,
+                        dependency_name=self._dependency_name,
+                        item_index=item.index,
+                        item_delta_preview=item.delta[:200],
+                        is_terminal=item.is_terminal,
+                        trace_context=item.trace_context,
+                        ts_iso=datetime.now(timezone.utc).isoformat(),
+                    ))
                     yield item
 
             elapsed = time.perf_counter() - t0

@@ -197,3 +197,95 @@ def serialize_tracelog(trace_log: TraceLog, fmt: str = "json") -> str | bytes:
         return msgpack.dumps(data, default=_default, use_bin_type=True)
 
     raise ValueError(f"Unknown format: '{fmt}'. Use 'json' or 'msgpack'.")
+
+
+# ── Per-item streaming trace (Phase 12) ──────────────────────────────
+
+
+@dataclass(frozen=True)
+class StreamingTraceRecord:
+    """Per-StreamItem trace record for per-item observability.
+
+    Unlike DependencyCallTrace (which captures only the LAST item's
+    trace_context), StreamingTraceRecord captures context from EVERY
+    StreamItem in a dependency call. This enables per-item latency
+    analysis, streaming completeness verification, and component-level
+    trace key empirical analysis.
+
+    Cost boundary: the StreamingTraceWriter protocol enforces
+    max_items_per_call to prevent unbounded storage inflation.
+    A RAG call with 50 chunks would otherwise produce 50 records
+    vs Planning's 3 — 16x asymmetry.
+    """
+
+    pipeline_run_id: str
+    step_name: str
+    dependency_name: str
+    item_index: int
+    item_delta_preview: str     # first 200 chars of StreamItem.delta
+    is_terminal: bool
+    trace_context: Optional[Dict[str, Any]]
+    ts_iso: str                 # ISO 8601 timestamp captured at item yield time
+    engine: str = ""            # inferred from trace_context keys (lazy, filled by sink)
+
+
+@dataclass(frozen=True)
+class StreamingWriteResult:
+    """Feedback from sink about what was actually stored.
+
+    Adapters collect ALL StreamingTraceRecords blindly — no truncation logic.
+    The sink enforces max_items_per_call and reports back what happened.
+    This removes duplicate truncation/counting logic from every adapter
+    implementation and makes cost boundary enforcement type-enforced
+    rather than convention-based.
+    """
+
+    accepted_count: int        # actually written per-item records
+    overflow_count: int        # truncated count (0 = no truncation)
+    sentinel_written: bool     # whether an overflow sentinel was appended
+
+
+class StreamingTraceWriter(Protocol):
+    """Pluggable per-item trace writer with cost boundary enforcement.
+
+    DISTINCT from TraceWriter (which writes summary TraceLog records).
+    StreamingTraceWriter writes individual StreamItem trace records
+    for granular per-item observability.
+
+    Cost boundary enforcement lives in the SINK, not the adapter. Adapters
+    blindly collect ALL StreamingTraceRecords and pass them to
+    write_streaming(). The sink truncates to max_items_per_call, appends
+    overflow sentinel, and returns StreamingWriteResult. Single
+    responsibility — no duplicate truncation logic across N adapter
+    implementations.
+
+    The max_items_per_call property is NOT an optimization — it is a
+    structural requirement. Without it, a dependency call producing 50
+    items vs one producing 3 would create 16x storage inflation with
+    no upper bound. Every implementation MUST declare this cap.
+    """
+
+    @property
+    def max_items_per_call(self) -> int:
+        """Hard cap on per-item records stored per dependency call.
+
+        Semantics:
+          -1 = unlimited (opt-in to unbounded storage risk)
+           0 = count-only (no per-item records; sentinel records total count)
+          >0 = store at most N per-item records; overflow counted in sentinel
+        """
+        ...
+
+    def write_streaming(
+        self, records: List[StreamingTraceRecord]
+    ) -> StreamingWriteResult:
+        """Write per-item streaming trace records.
+
+        The implementation MUST enforce max_items_per_call:
+          - If max_items_per_call == 0: no per-item records, sentinel only.
+          - If max_items_per_call > 0 and len(records) > cap: truncate + sentinel.
+          - If max_items_per_call == -1: unlimited, no truncation.
+
+        Returns StreamingWriteResult with accepted/overflow/sentinel counts.
+        """
+        ...
