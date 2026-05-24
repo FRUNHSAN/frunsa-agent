@@ -1,0 +1,20 @@
+# Phase 8.0: Machine-enforced architectural guardrails
+#
+# These hooks run before every commit. They are NOT optional.
+# Reasoning chain library is no longer "human discipline" — it is machine-enforced.
+#
+# To bypass in emergencies:  SKIP=guardrails git commit -m "..."
+# (bypass must be explicit — no accidental skips)
+
+repos:
+  - repo: local
+    hooks:
+      - id: guardrails-check
+        name: Architectural invariant check
+        description: AST-based enforcement of cross-platform imports, frozen dataclass integrity, component registration, and reasoning chain coverage
+        entry: python -m guardrails check
+        language: system
+        files: ^core/.*\.py$
+        pass_filenames: false
+        always_run: true
+        verbose: true

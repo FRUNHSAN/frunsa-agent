@@ -66,6 +66,20 @@ These are non-negotiable. Violating any of them will break the platform contract
 | 9 | `DependencyHealth` declared for every external dependency | phase_04_observability |
 | 10 | `DependencyCallTrace` injected for every external call | phase_04_observability |
 
+## Machine Enforcement (Phase 8.0)
+
+Architectural invariants are **machine-enforced**, not just documented. Before every commit, `python -m guardrails check` runs AST-based rules. Violations of severity ERROR block the commit.
+
+To run guardrails manually:
+- `python -m guardrails check` — error-level only
+- `python -m guardrails check --all` — include warnings
+- `python -m guardrails list-rules` — see all enforced rules
+
+Pre-commit hook: `.pre-commit-config.yaml` — install with `pre-commit install`.
+Pytest integration: `pytest tests/ --guardrails` — runs before test suite.
+
+If you add a new file to `core/contracts/` or `core/adapters/`, the chain coverage rule will flag it unless a reasoning chain references the module name. This is BY DESIGN — new core modules require architectural documentation.
+
 ## Quick Reference: Key Files
 
 ```
