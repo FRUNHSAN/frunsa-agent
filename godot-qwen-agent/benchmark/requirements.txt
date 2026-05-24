@@ -1,0 +1,22 @@
+# 核心机器学习与嵌入模型
+torch>=1.13.0
+transformers>=4.30.0
+sentence-transformers>=2.5.0
+
+# Hugging Face 工具
+huggingface-hub>=0.16.0
+
+# 数据处理
+numpy>=1.21.0
+pandas>=1.3.0
+scipy>=1.7.0          # seaborn/matplotlib 可能间接依赖，显式声明更安全
+
+# 可视化
+matplotlib>=3.5.0
+seaborn>=0.11.0
+
+# 文本与网页解析
+beautifulsoup4>=4.10.0
+
+# 命令行与工具
+tqdm>=4.60.0          # 虽未显式 import，但 benchmark 通常会用（建议保留）

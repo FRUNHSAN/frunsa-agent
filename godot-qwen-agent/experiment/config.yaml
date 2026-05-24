@@ -1,0 +1,43 @@
+# experiment/config.yaml
+# 实验配置文件
+---
+# 查询集配置
+queries:
+  file: "queries.csv"        # 查询集文件路径（相对于实验目录）
+  column: "query"            # 查询列名
+  sample_size: 5             # 测试样本数（设为 None 则使用全部）
+
+# 数据配置
+data:
+  mapping_file: "benchmark/model_chunk_embed_mapping.json"  # 映射文件路径（相对于项目根目录）
+  chunk_key: "godot_en__level1__a5770051"                 # 分块缓存键
+  embed_model: "BAAI/bge-m3"                              # 嵌入模型名称
+
+# LLM 配置
+llm:
+  # provider: "qwen"           # LLM 提供商: qwen, openai, ollama, claude
+  # model: "qwen-turbo"          # 模型名称
+  # api_key: "${QWEN_API_KEY}" # API Key，使用环境变量
+  # temperature: 0.3           # 温度参数
+  # timeout: 30                # 请求超时时间（秒）
+
+llm:
+  provider: "llama_cpp"
+  model_path: "D:/tuili/qwen2-7b-instruct-q5_k_m.gguf"  # ← 改成你的实际路径！
+  temperature: 0.3
+  timeout: 60  # 本地推理可能稍慢
+  n_ctx: 8192              # 根据模型最大上下文长度调整
+  n_threads: 8   # 根据 CPU 核心数调整（逻辑核心数）
+  verbose: false
+
+# 评估配置
+evaluation:
+  output_dir: "results"      # 输出目录（相对于实验目录）
+  batch_size: 1              # 批处理大小（暂时单条处理）
+  metrics:                   # 要计算的指标
+    - "accuracy"
+    - "latency"
+    - "relevance"
+
+# RAG 配置（可选覆盖）
+prompt_config: "../prompt/config.yaml"  # RAG 策略配置路径（相对于实验目录）

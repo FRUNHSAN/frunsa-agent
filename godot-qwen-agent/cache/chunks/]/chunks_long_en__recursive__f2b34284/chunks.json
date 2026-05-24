@@ -1,0 +1,14 @@
+[
+  "Class HTTPRequest — Godot Engine Documentation",
+  "HTTPRequest\nInherits: Node → Object\nDescription\nThe HTTPRequest node is used to perform HTTP requests to download or upload data from/to a web server. It supports GET, POST, PUT, DELETE and other HTTP methods. This node automatically handles redirects and can store cookies if needed.\nTutorial\nTo use HTTPRequest, add it to your scene tree or create it via script. Connect the request_completed signal to receive responses:\nfunc _ready():\n    $HTTPRequest.request(\"https://api.example.com/data\")\n    \nfunc _on_HTTPRequest_request_completed(result, response_code, headers, body):\n    if result == HTTPRequest.RESULT_SUCCESS and response_code == 200:\n        var json = parse_json(body.get_string_from_utf8())\n        print(json)",
+  "Important Notes",
+  "Always set the Content-Type header when sending JSON data. For example: [\"Content-Type: application/json\"]. Without it, servers like FastAPI may return 422 Unprocessable Entity.\nUse JSON.stringify(data) to serialize your payload. Note: it returns null if you pass non-serializable objects (e.g., Nodes, RIDs).\nThe body parameter in request() must be a String, not a PackedByteArray. If you have binary data, encode it properly (e.g., base64).\nFor large downloads, consider using chunked processing to avoid memory issues.",
+  "Method List",
+  "cancel_request()\nCancels the current request.\nrequest(url, custom_headers=[], method=HTTPClient.METHOD_GET, request_data=\"\")\nStarts an HTTP request.",
+  "url: The target URL (must include protocol, e.g., \"https://...\").\ncustom_headers: Array of strings like \"Header-Name: value\".\nmethod: One of HTTPClient.METHOD_*. Default is GET.\nrequest_data: Body for POST/PUT. Must be a String.",
+  "set_use_threads(use_thread)\nIf true, the request runs on a separate thread (default). Set to false for debugging.",
+  "Signals",
+  "request_completed(result, response_code, headers, body)\nEmitted when the request finishes.",
+  "result: One of RESULT_SUCCESS, RESULT_CANT_CONNECT, etc.\nresponse_code: HTTP status code (e.g., 200, 404, 422).\nheaders: Array of response headers.\nbody: Response body as PackedByteArray.",
+  "Troubleshooting\nWhy do I get 422 errors with FastAPI?\nFastAPI requires explicit Content-Type: application/json for JSON endpoints. Godot does not set this by default. Always include it in your headers.\nWhy does JSON.stringify() return null?\nYou passed an object that contains non-serializable data (e.g., a Node reference). Only use basic types: int, float, String, Array, Dictionary.\nHow to test my endpoint?\nUse Postman or curl first to verify your API works independently of Godot."
+]

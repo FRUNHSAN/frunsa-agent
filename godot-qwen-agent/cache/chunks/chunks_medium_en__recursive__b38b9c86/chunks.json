@@ -1,0 +1,4 @@
+[
+  "When sending HTTP requests in Godot 4 using the HTTPRequest node, always remember to set the \"Content-Type: application/json\" header if you're sending JSON data. Without this header, backends like FastAPI will often return a 422 Unprocessable Entity error because they can't parse the request body correctly. Also, make sure the body is a string — use JSON.stringify() to convert your dictionary to a JSON string",
+  "gify() to convert your dictionary to a JSON string. But be careful: JSON.stringify() returns null if you pass non-serializable objects like Node references or custom classes. Only use basic types such as strings, numbers, arrays, and dictionaries. For testing, try your endpoint first in Postman with the same headers and body to confirm it works before integrating with Godot."
+]

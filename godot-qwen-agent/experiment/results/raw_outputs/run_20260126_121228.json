@@ -1,0 +1,27 @@
+[
+  {
+    "original_query": "在 Godot GDScript 中，如何限制一个导出变量只能在 0 到 100 之间取值？",
+    "error": "调用 Qwen 模型失败: Qwen API 错误 [401]: {\"status_code\": 401, \"request_id\": \"b1e9f561-5439-47f6-9822-1da824cd0558\", \"code\": \"InvalidApiKey\", \"message\": \"Invalid API-key provided.\", \"output\": null, \"usage\": null}",
+    "timestamp": "2026-01-26T12:12:25.959784"
+  },
+  {
+    "original_query": "PROPERTY_HINT_FLAGS 和 PROPERTY_HINT_ENUM 有什么区别？什么时候用哪个？",
+    "error": "调用 Qwen 模型失败: Qwen API 错误 [401]: {\"status_code\": 401, \"request_id\": \"4d14de8a-a414-4479-bed1-bebff3c4899e\", \"code\": \"InvalidApiKey\", \"message\": \"Invalid API-key provided.\", \"output\": null, \"usage\": null}",
+    "timestamp": "2026-01-26T12:12:26.629679"
+  },
+  {
+    "original_query": "如何在 Godot 中生成一个 -10 到 10 之间的随机浮点数？",
+    "error": "调用 Qwen 模型失败: Qwen API 错误 [401]: {\"status_code\": 401, \"request_id\": \"e33bd880-b7aa-4e27-8cdf-0dfcad66766c\", \"code\": \"InvalidApiKey\", \"message\": \"Invalid API-key provided.\", \"output\": null, \"usage\": null}",
+    "timestamp": "2026-01-26T12:12:27.265038"
+  },
+  {
+    "original_query": "lerp() 和 lerp_angle() 有什么区别？为什么旋转插值要用后者？",
+    "error": "调用 Qwen 模型失败: Qwen API 错误 [401]: {\"status_code\": 401, \"request_id\": \"5b9b9c8b-1c50-477a-b2be-4259a30e83e8\", \"code\": \"InvalidApiKey\", \"message\": \"Invalid API-key provided.\", \"output\": null, \"usage\": null}",
+    "timestamp": "2026-01-26T12:12:27.899844"
+  },
+  {
+    "original_query": "如何让一个导出的字符串变量在编辑器中显示多行文本框？",
+    "error": "调用 Qwen 模型失败: Qwen API 错误 [401]: {\"status_code\": 401, \"request_id\": \"2261114b-e943-4b10-9513-95b469153d21\", \"code\": \"InvalidApiKey\", \"message\": \"Invalid API-key provided.\", \"output\": null, \"usage\": null}",
+    "timestamp": "2026-01-26T12:12:28.599928"
+  }
+]

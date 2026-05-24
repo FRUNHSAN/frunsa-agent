@@ -1,0 +1,44 @@
+{
+  "metadata": {
+    "source": "Godot Engine Class Reference (v4.x)",
+    "generated_at": "2026-01-26",
+    "note": "Answers derived from official documentation chunks"
+  },
+  "questions": [
+    {
+      "query_id": 1,
+      "question": "在 Godot GDScript 中，如何限制一个导出变量只能在 0 到 100 之间取值？",
+      "answer": "使用 @export_range(0, 100) 注解。例如：\n@export_range(0, 100) var health: int = 50\n这会在检查器中创建滑块，并限制输入范围。",
+      "expected_chunks_keywords": ["PROPERTY_HINT_RANGE", "export_range", "hint string"],
+      "difficulty": "easy"
+    },
+    {
+      "query_id": 2,
+      "question": "PROPERTY_HINT_FLAGS 和 PROPERTY_HINT_ENUM 有什么区别？什么时候用哪个？",
+      "answer": "PROPERTY_HINT_ENUM 用于单选枚举（只能选一个值），如状态机。PROPERTY_HINT_FLAGS 用于位掩码（可多选组合），如权限标志。用 ENUM 表示互斥状态，用 FLAGS 表示可叠加能力。",
+      "expected_chunks_keywords": ["PROPERTY_HINT_ENUM", "PROPERTY_HINT_FLAGS", "bitwise", "enum vs flags"],
+      "difficulty": "medium"
+    },
+    {
+      "query_id": 3,
+      "question": "如何在 Godot 中生成一个 -10 到 10 之间的随机浮点数？",
+      "answer": "使用内置函数 randf_range(-10, 10)。或者用 randf() * 20 - 10。记得在 _ready() 中调用 randomize() 初始化随机种子。",
+      "expected_chunks_keywords": ["randf_range", "random", "randf"],
+      "difficulty": "easy"
+    },
+    {
+      "query_id": 4,
+      "question": "lerp() 和 lerp_angle() 有什么区别？为什么旋转插值要用后者？",
+      "answer": "lerp() 是普通线性插值，对角度会走长路径（如 350°→10° 转 340°）。lerp_angle() 自动选择最短弧度路径（转 20°），避免旋转异常。",
+      "expected_chunks_keywords": ["lerp", "lerp_angle", "angle interpolation"],
+      "difficulty": "medium"
+    },
+    {
+      "query_id": 5,
+      "question": "如何让一个导出的字符串变量在编辑器中显示多行文本框？",
+      "answer": "使用 @export_multiline 注解。例如：\n@export_multiline var description: String = \"...\"\n这会启用多行文本编辑器。",
+      "expected_chunks_keywords": ["PROPERTY_HINT_MULTILINE_TEXT", "export_multiline"],
+      "difficulty": "easy"
+    }
+  ]
+}

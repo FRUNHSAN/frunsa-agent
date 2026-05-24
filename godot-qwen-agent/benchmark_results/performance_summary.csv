@@ -1,0 +1,4 @@
+﻿model,latency_ms_mean,latency_ms_std,latency_ms_min,latency_ms_max,cosine_similarity_mean,cosine_similarity_std,cosine_similarity_min,cosine_similarity_max
+BAAI/bge-m3,169.038,17.517,154.944,192.069,0.714,0.108,0.605,0.846
+nomic-ai/nomic-embed-text-v1.5,68.383,2.625,66.075,71.718,0.074,0.012,0.063,0.091
+sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2,22.87,2.079,20.848,25.721,0.067,0.015,0.049,0.083

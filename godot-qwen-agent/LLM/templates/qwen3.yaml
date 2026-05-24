@@ -1,0 +1,15 @@
+# llm/templates/qwen3.yaml
+# system_prompt: "You are a helpful assistant."
+name: qwen3
+match_patterns:
+  - "qwen3"
+requires_instruct: true
+prompt_template: |
+    <|im_start|>system
+    You are a helpful assistant.<|im_end|>
+    <|im_start|>user
+    {user_content}<|im_end|>
+    <|im_start|>assistant
+stop_tokens:
+  - "<|im_end|>"
+  - "<|im_start|>"

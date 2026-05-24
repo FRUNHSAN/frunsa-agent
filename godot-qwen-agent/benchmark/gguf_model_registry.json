@@ -1,0 +1,48 @@
+{
+  "gguf_models": [
+    {
+      "hf_id": "BAAI/bge-m3",
+      "local_hf_path": "G:\\rag666",
+      "gguf_path": "G:\\GGUF\\BAAI-bge-m3.q4_k_m.gguf",
+      "quantization": "q4_k_m",
+      "created_at": "2026-01-29T17:04:18.605418"
+    },
+    {
+      "hf_id": "BAAI/bge-m3",
+      "local_hf_path": "G:\\rag666",
+      "gguf_path": "G:\\gguf111\\BAAI-bge-m3.q4_k_m.gguf",
+      "quantization": "q4_k_m",
+      "created_at": "2026-02-10T17:33:39.474740"
+    },
+    {
+      "hf_id": "BAAI/bge-m3",
+      "local_hf_path": "G:\\rag666",
+      "gguf_path": "G:\\GGUF\\BAAI-bge-m3.f16.gguf",
+      "quantization": "f16",
+      "created_at": "2026-02-10T18:15:50.344489"
+    },
+    {
+      "hf_id": "nomic-ai/nomic-embed-text-v1.5",
+      "local_hf_path": "G:\\rag666",
+      "gguf_path": "G:\\GGUF\\nomic-embed-text-v1.5.q4_k_m.gguf",
+      "quantization": "q4_k_m",
+      "created_at": "2026-02-10T17:33:39.474740"
+    }
+    ,
+    {
+      "hf_id": "Qwen/Qwen3-VL-Embedding-2B",
+      "local_hf_path": "G:\\embeddingqwen",
+      "gguf_path": "D:\\embeddingqwen1\\qwen3-vl-embedding-2b-q4_k_m.gguf",
+      "quantization": "q4_k_m",
+      "created_at": "2026-03-10T13:21:10.474740"
+    }
+    ,
+    {
+      "hf_id": "Qwen/Qwen3-Embedding-0.6B",
+      "local_hf_path": "D:\\qwen06b",
+      "gguf_path": "D:\\embeddingqwen2\\qwen3-embedding-0.6b-q4_k_m.gguf",
+      "quantization": "q4_k_m",
+      "created_at": "2026-03-10T14:06:10.474740"
+    }
+  ]
+}

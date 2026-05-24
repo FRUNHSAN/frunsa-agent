@@ -1,0 +1,17 @@
+【问题】在 Godot 4.5 中调用 HTTPRequest.request() 时 body 参数报类型错误怎么办？
+【答案】body 参数应直接传入 String 类型的 JSON 字符串，不要使用 .utf8()、.to_utf8_buffer() 或 PackedByteArray。正确写法：var body = JSON.stringify({"prompt": user_input})，然后直接传入 request() 的 body 参数。
+
+【问题】使用 JSON.stringify() 时返回 null 导致后续错误如何避免？
+【答案】JSON.stringify() 在遇到不可序列化的对象（如 Node 实例、函数等）时会返回 null。应在调用前确保传入的是纯数据对象（如 Dictionary、Array、String、Number），并在发送前检查：if body != null。
+
+【问题】FastAPI 接口返回 422 Unprocessable Entity 错误怎么解决？
+【答案】前端必须在请求头中显式设置 Content-Type: application/json。在 Godot 中，headers 应包含 ["Content-Type: application/json"]，否则 FastAPI 无法解析 JSON 请求体。
+
+【问题】如何正确调用 DashScope 的 Qwen API？
+【答案】需在 Authorization 请求头中携带 Bearer Token，格式为 "Bearer sk-你的API密钥"。请求体必须包含 model（如 qwen-max）、input（含 messages 数组）、parameters（如 temperature）字段，且使用 POST 方法发送到 https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation。
+
+【问题】在 Windows 上 conda activate 命令无效或报错怎么办？
+【答案】Windows PowerShell 默认不支持 conda activate。应改用 Anaconda Prompt 启动终端，或先运行 conda init powershell 并重启终端。也可通过双击 .bat 脚本自动激活环境（推荐工程化方案）。
+
+【问题】如何用 Postman 测试 /ask 接口？
+【答案】在 Postman 中：1) Method 选 POST；2) URL 填 http://localhost:8000/ask；3) Headers 添加 Key: Content-Type, Value: application/json；4) Body 选 raw + JSON，输入 {"prompt": "你的问题"}。

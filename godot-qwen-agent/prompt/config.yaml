@@ -1,0 +1,60 @@
+# === 顶层组件配置（供工厂函数使用）===
+query_processor:
+  type: "simple"
+  type: "expanded"
+  type: "rewritten"
+
+retriever:
+  type: "vector"
+
+prompt_builder:
+  type: "simple"  # ← 注意：这里用 simple，不是 simple_concat！
+  type: "routed"
+
+generator:
+  type: "single"
+  type: "dual"
+
+post_processor:          # ← 必须添加这一块！
+  type: "basic"          # 可选: "basic" 或 "code_formatter"
+  type: "code_formatter"
+
+# === Pipeline 定义（实际执行流程）===
+
+pipeline_version: 1
+
+pipeline:
+  - name: expand_query
+    component_type: query_processor
+    strategy: simple
+    depends_on: [original_query]
+    provides: processed_query
+    output_to_evaluate: false
+
+  - name: retrieve_docs
+    component_type: retriever
+    strategy: vector
+    params:
+      kb_key: "godot_en"
+      chunking_strategy: "level1"
+      embedding_model: "BAAI/bge-m3"
+      top_k: 3
+    depends_on: [processed_query]
+    provides: chunks
+    output_to_evaluate: false
+
+  - name: build_prompt
+    component_type: prompt_builder
+    strategy: simple_concat
+    depends_on: [processed_query, chunks]
+    provides: prompt
+    output_to_evaluate: false
+
+  - name: generate_answer
+    component_type: generator
+    strategy: echo
+    params:
+      prefix: "FINAL ANSWER: "
+    depends_on: [prompt]
+    provides: final_answer
+    output_to_evaluate: true

@@ -1,0 +1,62 @@
+[
+  {
+    "original_query": "在 Godot GDScript 中，如何限制一个导出变量只能在 0 到 100 之间取值？",
+    "processed_query": "在 Godot GDScript 中，如何限制一个导出变量只能在 0 到 100 之间取值？ GDScript code function",
+    "retrieved_count": 3,
+    "retrieved_scores": [
+      0.6098763942718506,
+      0.6071469187736511,
+      0.6065913438796997
+    ],
+    "answer": "在 Godot 的 GDScript 中，如果你想要限制一个导出变量（`export`）的值只能在 0 到 100 之间，你可以使用 `clamp` 函数来确保其值不会超出这个范围。\n\n下面是一个示例代码，展示如何定义一个导出变量，并确保它在 0 到 100 之间：\n\n```gdscript\nextends Node\n\n# 导出变量，类型为整数\nexport(int) var value = 50\n\n# 在 _ready() 函数中对值进行限制\nfunc _ready():\n    value = clamp(value, 0, 100)\n    print(\"Value is: \", value)\n```\n\n### 解释：\n- `export(int) var value = 50`：声明一个可以被编辑器修改的整数变量。\n- `clamp(value, 0, 100)`：将 `value` 限制在 0 到 100 之间。如果 `value` 小于 0，则设为 0；如果大于 100，则设为 100。\n\n### 如果你希望在变量更改时自动限制（比如通过属性面板修改后自动生效），可以使用 `setget`：\n\n```gdscript\nextends Node\n\n# 使用 setget 实现自动限制\nexport(int) var value setget set_value, get_value\n\nfunc set_value(val):\n    value = clamp(val, 0, 100)\n\nfunc get_value():\n    return value\n\nfunc _ready():\n    print(\"Value is: \", value)\n```\n\n### 总结：\n- 使用 `clamp()` 是最简单有效的方法来限制变量范围。\n- 如果需要更复杂的逻辑或实时验证，可以结合 `setget` 和自定义方法实现。",
+    "timestamp": "2026-01-26T13:11:16.364560"
+  },
+  {
+    "original_query": "PROPERTY_HINT_FLAGS 和 PROPERTY_HINT_ENUM 有什么区别？什么时候用哪个？",
+    "processed_query": "PROPERTY_HINT_FLAGS 和 PROPERTY_HINT_ENUM 有什么区别？什么时候用哪个？",
+    "retrieved_count": 3,
+    "retrieved_scores": [
+      0.680973470211029,
+      0.6764345169067383,
+      0.6641727685928345
+    ],
+    "answer": "**PROPERTY_HINT_FLAGS** 和 **PROPERTY_HINT_ENUM** 都是用于在 Godot 引擎中为属性（property）提供提示（hint），但它们的用途和适用场景不同。以下是它们的区别以及使用时机：\n\n---\n\n### 🔹 **PROPERTY_HINT_FLAGS**\n\n- **作用**：用于表示一个整数（`int`）属性是一个**位标志集合**（bitmask）。它通常用于表示多个可选的布尔值，每个位代表一个独立的选项。\n- **示例**：比如一个 `flags` 属性，可以表示“是否启用 A”、“是否启用 B”等，通过位运算来组合这些选项。\n- **显示方式**：在编辑器中，会以复选框的形式展示每个位对应的选项。\n- **适用类型**：只适用于 `int` 类型的属性。\n- **典型用法**：\n  ```gd\n  var flags: int\n  ```\n\n---\n\n### 🔹 **PROPERTY_HINT_ENUM**\n\n- **作用**：用于表示一个整数（`int`）属性是一个**枚举值**（enum），即从一组预定义的选项中选择一个值。\n- **示例**：比如一个 `type` 属性，可以是 `0 = \"Red\"`, `1 = \"Blue\"`, `2 = \"Green\"` 等。\n- **显示方式**：在编辑器中，会以下拉菜单的形式展示所有枚举项。\n- **适用类型**：也只适用于 `int` 类型的属性。\n- **典型用法**：\n  ```gd\n  var type: int\n  ```\n\n---\n\n### ✅ **区别总结**\n\n| 特性 | PROPERTY_HINT_FLAGS | PROPERTY_HINT_ENUM |\n|------|---------------------|--------------------|\n| 用途 | 表示一组位标志（bitmask） | 表示一个枚举值（enum） |\n| 显示方式 | 复选框形式 | 下拉菜单形式 |\n| 适用类型 | `int` | `int` |\n| 是否支持多选 | 是（每个位代表一个选项） | 否（只能选一个值） |\n\n---\n\n### 📌 **什么时候用哪个？**\n\n- **使用 PROPERTY_HINT_FLAGS**：\n  - 当你需要表示多个独立的布尔选项（如“是否启用某功能”）。\n  - 例如：`flags = 0b101` 表示第 0 位和第 2 位被设置。\n\n- **使用 PROPERTY_HINT_ENUM**：\n  - 当你需要从一组固定的选项中选择一个值。\n  - 例如：`type = 0` 表示“红色”，`type = 1` 表示“蓝色”。\n\n---\n\n### 🧠 示例代码\n\n```gd\n# 使用 PROPERTY_HINT_FLAGS\nset_property_hint(\"flags\", PROPERTY_HINT_FLAGS)\n\n# 使用 PROPERTY_HINT_ENUM\nset_property_hint(\"type\", PROPERTY_HINT_ENUM)\n```\n\n---\n\n### ✅ 总结\n\n- **PROPERTY_HINT_FLAGS**：适合表示多个可选的布尔状态（位标志）。\n- **PROPERTY_HINT_ENUM**：适合表示从固定列表中选择一个值（枚举）。\n\n根据你的需求选择合适的提示类型，可以提升代码的可读性和编辑器的友好性。",
+    "timestamp": "2026-01-26T13:11:25.289002"
+  },
+  {
+    "original_query": "如何在 Godot 中生成一个 -10 到 10 之间的随机浮点数？",
+    "processed_query": "如何在 Godot 中生成一个 -10 到 10 之间的随机浮点数？",
+    "retrieved_count": 3,
+    "retrieved_scores": [
+      0.6112453937530518,
+      0.5713977813720703,
+      0.5654738545417786
+    ],
+    "answer": "在 Godot 中生成一个 **-10 到 10 之间的随机浮点数**，可以使用 `randomize()` 函数来初始化随机数生成器，然后使用 `randf()` 或 `randf_range()` 函数来生成随机数。\n\n### 步骤如下：\n\n1. **调用 `randomize()`**：用于初始化随机数生成器的种子（通常在项目启动时会自动调用）。\n2. **使用 `randf_range(min, max)`**：生成一个介于 `min` 和 `max` 之间的随机浮点数。\n\n---\n\n### 示例代码：\n\n```gd\nfunc _ready():\n    randomize()  # 初始化随机数生成器（可选，因为通常已自动调用）\n    var random_float = randf_range(-10.0, 10.0)\n    print(random_float)\n```\n\n---\n\n### 说明：\n\n- `randf_range(min, max)` 是 Godot 提供的函数，可以直接生成 `[min, max]` 范围内的随机浮点数。\n- 如果你希望结果是整数，可以使用 `randi_range(min, max)`，例如 `randi_range(-10, 10)` 生成 -10 到 10 的随机整数。\n\n---\n\n### 注意：\n\n- 如果你需要 **可重复的随机数**（比如调试或测试），应该使用 `seed(value)` 来固定随机数种子，而不是 `randomize()`。\n- `randf()` 只能生成 [0, 1) 之间的随机浮点数，所以如果你需要其他范围，需要手动进行映射。例如：\n  \n  ```gd\n  var random_float = randf() * 20.0 - 10.0  # 生成 [-10, 10) 之间的随机数\n  ```\n\n---\n\n### 总结：\n\n要生成 **-10 到 10 之间的随机浮点数**，最简单的方法是使用：\n\n```gd\nrandf_range(-10.0, 10.0)\n```",
+    "timestamp": "2026-01-26T13:11:31.005488"
+  },
+  {
+    "original_query": "lerp() 和 lerp_angle() 有什么区别？为什么旋转插值要用后者？",
+    "processed_query": "lerp() 和 lerp_angle() 有什么区别？为什么旋转插值要用后者？",
+    "retrieved_count": 3,
+    "retrieved_scores": [
+      0.6628188490867615,
+      0.6627857685089111,
+      0.6427512764930725
+    ],
+    "answer": "**答案：**\n\n`lerp()` 和 `lerp_angle()` 的主要区别在于它们处理插值的方式，特别是在处理**角度（尤其是圆周角度）**时。\n\n---\n\n### 1. **`lerp()` 的作用**\n- `lerp(from, to, weight)` 是一个**线性插值函数**，它在两个数值之间进行线性插值。\n- 它适用于普通的数值范围（如0到100），但**不考虑角度的周期性**（即360度或2π弧度）。\n- 例如：\n  - `lerp(0, 10, 0.5)` → 5\n  - `lerp(0, 360, 0.5)` → 180，这在某些情况下是合理的。\n  - 但如果从 `350` 到 `10`，`lerp()` 会直接从 350 线性插值到 10，导致角度“绕了一圈”，看起来像是逆时针旋转了 340 度，而不是顺时针的 20 度。\n\n---\n\n### 2. **`lerp_angle()` 的作用**\n- `lerp_angle(from, to, weight)` 是专门用于**角度插值**的函数，它考虑了角度的**周期性**（即360度或2π弧度）。\n- 它会自动选择**最短路径**来插值，避免不必要的大角度跳变。\n- 例如：\n  - `lerp_angle(0, Math.PI, weight)` 会从 0 弧度（0度）到 π 弧度（180度）**逆时针**插值。\n  - `lerp_angle(0, Math.PI + 5 * TAU, weight)` 会从 0 弧度到 π + 5×2π（即 π + 10π = 11π）**顺时针**插值，因为这是更短的路径。\n- 这样可以确保旋转动画更加自然、平滑，不会出现“跳跃”或“扭曲”的现象。\n\n---\n\n### 3. **为什么旋转插值要用 `lerp_angle()`？**\n- 在游戏开发或图形编程中，**旋转通常用角度表示**，而角度是**周期性的**（360度=0度）。\n- 如果使用 `lerp()` 来插值角度，可能会导致以下问题：\n  - 角度突然跳变（比如从 350° 跳到 10°，实际是顺时针转了 20°，但 `lerp()` 会认为是逆时针转了 340°）。\n  - 动画不流畅，出现“卡顿”或“错误方向”。\n- 使用 `lerp_angle()` 可以自动判断并选择**最短路径**，使旋转更加自然和符合预期。\n\n---\n\n### 总结\n\n| 特性 | `lerp()` | `lerp_angle()` |\n|------|----------|----------------|\n| 是否考虑角度周期性 | ❌ 不考虑 | ✅ 考虑 |\n| 是否自动选择最短路径 | ❌ 不自动 | ✅ 自动 |\n| 适用场景 | 普通数值插值 | 角度/旋转插值 |\n| 优点 | 简单直接 | 更自然、平滑的旋转效果 |\n| 缺点 | 可能导致角度跳变 | 复杂度略高 |\n\n因此，**在进行旋转插值时，应该使用 `lerp_angle()` 而不是 `lerp()`，以确保动画的正确性和流畅性。**",
+    "timestamp": "2026-01-26T13:11:40.553619"
+  },
+  {
+    "original_query": "如何让一个导出的字符串变量在编辑器中显示多行文本框？",
+    "processed_query": "如何让一个导出的字符串变量在编辑器中显示多行文本框？",
+    "retrieved_count": 3,
+    "retrieved_scores": [
+      0.6045094132423401,
+      0.5940808057785034,
+      0.5831724405288696
+    ],
+    "answer": "Answer: 要让一个导出的字符串变量在编辑器中显示多行文本框，可以使用 `@export_multiline` 注解。这个注解会将该变量的编辑器控件从默认的单行输入框（LineEdit）改为多行文本框（TextEdit），适用于字符串、数组或字典等类型。\n\n例如：\n\n```gdscript\n@export_multiline()\nvar description: String\n```\n\n这样，在编辑器中该变量就会以多行文本框的形式显示，方便输入和编辑较长的文本内容。",
+    "timestamp": "2026-01-26T13:11:42.679226"
+  }
+]

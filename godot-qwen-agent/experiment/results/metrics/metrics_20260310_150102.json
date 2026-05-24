@@ -1,0 +1,14 @@
+{
+  "analysis_time": "2026-03-10T15:06:06.148785",
+  "source_raw_file": "run_20260310_150102.json",
+  "metrics": {
+    "total_queries": 5,
+    "successful": 5,
+    "failed": 0,
+    "success_rate": 1.0,
+    "avg_retrieved": 3.0,
+    "min_retrieved": 3,
+    "max_retrieved": 3,
+    "avg_similarity_score": 0.6152529716491699
+  }
+}

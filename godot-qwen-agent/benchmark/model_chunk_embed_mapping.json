@@ -1,0 +1,181 @@
+{
+  "chunks": {
+    "godot_en__level1__a5770051": {
+      "source_id": "godot_en",
+      "chunking_strategy": "level1",
+      "chunking_params_hash": "a5770051",
+      "chunk_dir": "G:\\chunk\\chunks_godot_en__level1__a5770051",
+      "created_at": "2026-01-25T10:20:57"
+    },
+    "long_en__recursive__f2b34284": {
+      "source_id": "long_en",
+      "chunking_strategy": "recursive",
+      "chunking_params_hash": "f2b34284",
+      "chunk_dir": "H:\\agent\\godot-qwen-agent\\cache\\chunks\\]\\chunks_long_en__recursive__f2b34284",
+      "created_at": "2026-02-10T16:00:34"
+    },
+    "medium_en__recursive__b38b9c86": {
+      "source_id": "medium_en",
+      "chunking_strategy": "recursive",
+      "chunking_params_hash": "b38b9c86",
+      "chunk_dir": "H:\\agent\\godot-qwen-agent\\cache\\chunks\\chunks_medium_en__recursive__b38b9c86",
+      "created_at": "2026-02-10T16:00:40"
+    },
+    "short_zh__fixed__5d51c90c": {
+      "source_id": "short_zh",
+      "chunking_strategy": "fixed",
+      "chunking_params_hash": "5d51c90c",
+      "chunk_dir": "H:\\agent\\godot-qwen-agent\\cache\\chunks\\chunks_short_zh__fixed__5d51c90c",
+      "created_at": "2026-02-10T16:00:42"
+    }
+  },
+  "embeddings": {
+    "godot_en__level1__a5770051__sentence-transformers_paraphrase-multilingual-MiniLM-L12-v2": {
+      "chunk_key": "godot_en__level1__a5770051",
+      "model_name": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+      "embed_dir": "G:\\embedding\\embeddings_godot_en__level1__a5770051__sentence-transformers_paraphrase-multilingual-MiniLM-L12-v2",
+      "created_at": "2026-01-25T10:36:16",
+      "chunk_count": 1513
+    },
+    "godot_en__level1__a5770051__BAAI_bge-m3": {
+      "chunk_key": "godot_en__level1__a5770051",
+      "model_name": "BAAI/bge-m3",
+      "embed_dir": "G:\\embedding\\embeddings_godot_en__level1__a5770051__BAAI_bge-m3",
+      "created_at": "2026-01-25T10:53:02",
+      "chunk_count": 1513
+    },
+    "long_en__recursive__f2b34284__sentence-transformers_paraphrase-multilingual-MiniLM-L12-v2": {
+      "chunk_key": "long_en__recursive__f2b34284",
+      "model_name": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+      "embed_dir": "G:\\embedding\\embeddings_long_en__recursive__f2b34284__sentence-transformers_paraphrase-multilingual-MiniLM-L12-v2",
+      "created_at": "2026-02-10T16:01:23",
+      "chunk_count": 12
+    },
+    "medium_en__recursive__b38b9c86__sentence-transformers_paraphrase-multilingual-MiniLM-L12-v2": {
+      "chunk_key": "medium_en__recursive__b38b9c86",
+      "model_name": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+      "embed_dir": "G:\\embedding\\embeddings_medium_en__recursive__b38b9c86__sentence-transformers_paraphrase-multilingual-MiniLM-L12-v2",
+      "created_at": "2026-02-10T16:01:33",
+      "chunk_count": 2
+    },
+    "short_zh__fixed__5d51c90c__sentence-transformers_paraphrase-multilingual-MiniLM-L12-v2": {
+      "chunk_key": "short_zh__fixed__5d51c90c",
+      "model_name": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+      "embed_dir": "G:\\embedding\\embeddings_short_zh__fixed__5d51c90c__sentence-transformers_paraphrase-multilingual-MiniLM-L12-v2",
+      "created_at": "2026-02-10T16:02:01",
+      "chunk_count": 7
+    },
+    "long_en__recursive__f2b34284__BAAI_bge-m3": {
+      "chunk_key": "long_en__recursive__f2b34284",
+      "model_name": "BAAI/bge-m3",
+      "embed_dir": "G:\\embedding\\embeddings_long_en__recursive__f2b34284__BAAI_bge-m3",
+      "created_at": "2026-02-10T16:02:34",
+      "chunk_count": 12
+    },
+    "medium_en__recursive__b38b9c86__BAAI_bge-m3": {
+      "chunk_key": "medium_en__recursive__b38b9c86",
+      "model_name": "BAAI/bge-m3",
+      "embed_dir": "G:\\embedding\\embeddings_medium_en__recursive__b38b9c86__BAAI_bge-m3",
+      "created_at": "2026-02-10T16:02:52",
+      "chunk_count": 2
+    },
+    "short_zh__fixed__5d51c90c__BAAI_bge-m3": {
+      "chunk_key": "short_zh__fixed__5d51c90c",
+      "model_name": "BAAI/bge-m3",
+      "embed_dir": "G:\\embedding\\embeddings_short_zh__fixed__5d51c90c__BAAI_bge-m3",
+      "created_at": "2026-02-10T16:03:11",
+      "chunk_count": 7
+    },
+    "medium_en__recursive__b38b9c86__nomic-ai_nomic-embed-text-v1.5": {
+      "chunk_key": "medium_en__recursive__b38b9c86",
+      "model_name": "nomic-ai/nomic-embed-text-v1.5",
+      "embed_dir": "G:\\embedding\\embeddings_medium_en__recursive__b38b9c86__nomic-ai_nomic-embed-text-v1.5",
+      "created_at": "2026-02-10T22:19:48",
+      "chunk_count": 2
+    },
+    "short_zh__fixed__5d51c90c__nomic-ai_nomic-embed-text-v1.5": {
+      "chunk_key": "short_zh__fixed__5d51c90c",
+      "model_name": "nomic-ai/nomic-embed-text-v1.5",
+      "embed_dir": "G:\\embedding\\embeddings_short_zh__fixed__5d51c90c__nomic-ai_nomic-embed-text-v1.5",
+      "created_at": "2026-02-10T22:19:56",
+      "chunk_count": 7
+    },
+    "long_en__recursive__f2b34284__nomic-ai_nomic-embed-text-v1.5": {
+      "chunk_key": "long_en__recursive__f2b34284",
+      "model_name": "nomic-ai/nomic-embed-text-v1.5",
+      "embed_dir": "G:\\embedding\\embeddings_long_en__recursive__f2b34284__nomic-ai_nomic-embed-text-v1.5",
+      "created_at": "2026-02-10T22:55:31",
+      "chunk_count": 12
+    },
+    "godot_en__level1__a5770051__nomic-ai_nomic-embed-text-v1.5": {
+      "chunk_key": "godot_en__level1__a5770051",
+      "model_name": "nomic-ai/nomic-embed-text-v1.5",
+      "embed_dir": "G:\\embedding\\embeddings_godot_en__level1__a5770051__nomic-ai_nomic-embed-text-v1.5",
+      "created_at": "2026-02-10T23:31:44",
+      "chunk_count": 1513
+    },
+    "long_en__recursive__f2b34284__gguf_nomic-ai_nomic-embed-text-v1.5_q4_k_m": {
+      "chunk_key": "long_en__recursive__f2b34284",
+      "model_name": "gguf:nomic-ai/nomic-embed-text-v1.5:q4_k_m",
+      "embed_dir": "G:\\embedding\\embeddings_long_en__recursive__f2b34284__gguf_nomic-ai_nomic-embed-text-v1.5_q4_k_m",
+      "created_at": "2026-02-10T23:45:05",
+      "chunk_count": 12
+    },
+    "medium_en__recursive__b38b9c86__gguf_nomic-ai_nomic-embed-text-v1.5_q4_k_m": {
+      "chunk_key": "medium_en__recursive__b38b9c86",
+      "model_name": "gguf:nomic-ai/nomic-embed-text-v1.5:q4_k_m",
+      "embed_dir": "G:\\embedding\\embeddings_medium_en__recursive__b38b9c86__gguf_nomic-ai_nomic-embed-text-v1.5_q4_k_m",
+      "created_at": "2026-02-10T23:50:52",
+      "chunk_count": 2
+    },
+    "short_zh__fixed__5d51c90c__gguf_nomic-ai_nomic-embed-text-v1.5_q4_k_m": {
+      "chunk_key": "short_zh__fixed__5d51c90c",
+      "model_name": "gguf:nomic-ai/nomic-embed-text-v1.5:q4_k_m",
+      "embed_dir": "G:\\embedding\\embeddings_short_zh__fixed__5d51c90c__gguf_nomic-ai_nomic-embed-text-v1.5_q4_k_m",
+      "created_at": "2026-02-10T23:51:11",
+      "chunk_count": 7
+    },
+    "godot_en__level1__a5770051__Qwen_Qwen3-Embedding-0.6B": {
+      "chunk_key": "godot_en__level1__a5770051",
+      "model_name": "Qwen/Qwen3-Embedding-0.6B",
+      "embed_dir": "G:\\embedding\\embeddings_godot_en__level1__a5770051__Qwen_Qwen3-Embedding-0.6B",
+      "created_at": "2026-03-10T13:50:52",
+      "chunk_count": 1513
+    },
+    "short_zh__fixed__5d51c90c__Qwen_Qwen3-Embedding-0.6B": {
+      "chunk_key": "short_zh__fixed__5d51c90c",
+      "model_name": "Qwen/Qwen3-Embedding-0.6B",
+      "embed_dir": "G:\\embedding\\embeddings_short_zh__fixed__5d51c90c__Qwen_Qwen3-Embedding-0.6B",
+      "created_at": "2026-03-10T13:54:50",
+      "chunk_count": 7
+    },
+    "long_en__recursive__f2b34284__Qwen_Qwen3-Embedding-0.6B": {
+      "chunk_key": "long_en__recursive__f2b34284",
+      "model_name": "Qwen/Qwen3-Embedding-0.6B",
+      "embed_dir": "G:\\embedding\\embeddings_long_en__recursive__f2b34284__Qwen_Qwen3-Embedding-0.6B",
+      "created_at": "2026-03-10T13:55:29",
+      "chunk_count": 12
+    },
+    "medium_en__recursive__b38b9c86__Qwen_Qwen3-Embedding-0.6B": {
+      "chunk_key": "medium_en__recursive__b38b9c86",
+      "model_name": "Qwen/Qwen3-Embedding-0.6B",
+      "embed_dir": "G:\\embedding\\embeddings_medium_en__recursive__b38b9c86__Qwen_Qwen3-Embedding-0.6B",
+      "created_at": "2026-03-10T13:56:00",
+      "chunk_count": 2
+    },
+    "medium_en__recursive__b38b9c86__gguf_Qwen_Qwen3-Embedding-0.6B_q4_k_m": {
+      "chunk_key": "medium_en__recursive__b38b9c86",
+      "model_name": "gguf:Qwen/Qwen3-Embedding-0.6B:q4_k_m",
+      "embed_dir": "G:\\embedding\\embeddings_medium_en__recursive__b38b9c86__gguf_Qwen_Qwen3-Embedding-0.6B_q4_k_m",
+      "created_at": "2026-03-10T14:09:02",
+      "chunk_count": 2
+    },
+    "long_en__recursive__f2b34284__gguf_Qwen_Qwen3-Embedding-0.6B_q4_k_m": {
+      "chunk_key": "long_en__recursive__f2b34284",
+      "model_name": "gguf:Qwen/Qwen3-Embedding-0.6B:q4_k_m",
+      "embed_dir": "G:\\embedding\\embeddings_long_en__recursive__f2b34284__gguf_Qwen_Qwen3-Embedding-0.6B_q4_k_m",
+      "created_at": "2026-03-10T14:10:20",
+      "chunk_count": 12
+    }
+  }
+}

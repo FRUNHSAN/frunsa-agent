@@ -1,0 +1,11 @@
+# === 核心依赖 ===
+pyyaml>=6.0
+
+# === LLM 后端（全量安装）===
+dashscope>=1.14.0      # 阿里 Qwen
+openai>=1.0.0          # OpenAI / DeepSeek / Moonshot / vLLM 等
+anthropic>=0.30.0      # Anthropic Claude
+ollama>=0.1.0          # 本地开源模型（llama3, qwen:7b 等）
+
+# === 可选：评估与工具 ===
+pandas>=2.0.0          # 数据分析

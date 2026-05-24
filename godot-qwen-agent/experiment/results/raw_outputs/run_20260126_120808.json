@@ -1,0 +1,27 @@
+[
+  {
+    "original_query": "在 Godot GDScript 中，如何限制一个导出变量只能在 0 到 100 之间取值？",
+    "error": "QwenClient.__init__() got an unexpected keyword argument 'timeout'",
+    "timestamp": "2026-01-26T12:08:07.494454"
+  },
+  {
+    "original_query": "PROPERTY_HINT_FLAGS 和 PROPERTY_HINT_ENUM 有什么区别？什么时候用哪个？",
+    "error": "QwenClient.__init__() got an unexpected keyword argument 'timeout'",
+    "timestamp": "2026-01-26T12:08:07.659874"
+  },
+  {
+    "original_query": "如何在 Godot 中生成一个 -10 到 10 之间的随机浮点数？",
+    "error": "QwenClient.__init__() got an unexpected keyword argument 'timeout'",
+    "timestamp": "2026-01-26T12:08:07.816604"
+  },
+  {
+    "original_query": "lerp() 和 lerp_angle() 有什么区别？为什么旋转插值要用后者？",
+    "error": "QwenClient.__init__() got an unexpected keyword argument 'timeout'",
+    "timestamp": "2026-01-26T12:08:07.977833"
+  },
+  {
+    "original_query": "如何让一个导出的字符串变量在编辑器中显示多行文本框？",
+    "error": "QwenClient.__init__() got an unexpected keyword argument 'timeout'",
+    "timestamp": "2026-01-26T12:08:08.141007"
+  }
+]

@@ -1,0 +1,142 @@
+
+    <!DOCTYPE html>
+    <html lang="zh-CN">
+    <head>
+        <meta charset="UTF-8">
+        <title>RAG 问答评估报告</title>
+        <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 20px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+            th, td { border: 1px solid #dee2e6; padding: 12px; text-align: left; vertical-align: top; }
+            th { background-color: #f1f3f5; }
+            tr:nth-child(even) { background-color: #fafafa; }
+            .header { text-align: center; margin-bottom: 20px; }
+            .summary { background: #e2e3e5; padding: 12px; border-radius: 6px; margin-bottom: 20px; }
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <h1>🔍 RAG 问答评估报告</h1>
+            <p>生成时间: 2026-03-10 15:03:48</p>
+            <p>原始结果: run_20260310_150102.json</p>
+        </div>
+        <div class="summary">
+            <strong>整体表现:</strong> 
+            平均关键词得分: 36.7%
+             | 平均语义相似度: 63.3%
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>问题</th>
+                    <th>模型回答（🟢 高亮命中关键词）</th>
+                    <th>标准答案（参考）</th>
+                </tr>
+            </thead>
+            <tbody>
+                
+        <tr>
+            <td style="vertical-align: top; width: 20%;"><strong>在 Godot GDScript 中，如何限制一个导出变量只能在 0 到 100 之间取值？</strong></td>
+            <td style="vertical-align: top; width: 40%;">
+                <div style="background: #f8f9fa; padding: 8px; border-radius: 4px; margin-bottom: 6px;">
+                    在 Godot 的 GDScript 中，如果你想限制一个**导出变量（exported variable）**的值只能在 **0 到 100 之间**，你可以通过自定义 `set` 和 `get` 方法来实现。虽然 GDScript 不支持直接在导出变量上设置范围限制（如 Unity 的 `[Range(0, 100)]`），但可以通过这些方法来验证和限制值。<br><br>### 示例：限制导出变量在 0 到 100 之间<br><br>```gdscript<br>extends Node<br><br># 导出变量<br>export(int) var value: int setget set_value, get_value = 50<br><br># 内部变量<br>var _value: int = 50<br><br># 获取值的方法<br>func get_value() -&gt; int:<br>    return _value<br><br># 设置值的方法<br>func set_value(val: int) -&gt; void:<br>    if val &lt; 0:<br>        val = 0<br>        push_warning("Value cannot be less than 0. Setting to 0.")<br>    elif val &gt; 100:<br>        val = 100<br>        push_warning("Value cannot be greater than 100. Setting to 100.")<br>    _value = val<br>```<br><br>### 解释：<br><br>- `export(int) var value: int setget set_value, get_value = 50`：将 `value` 导出为编辑器中的变量，并使用 `set_value` 和 `get_value` 方法来自定义访问器。<br>- `set_value(val: int) -&gt; void`：在设置值时，检查值是否在 0 到 100 之间。如果超出范围，则自动修正，并通过 `push_warning()` 输出警告信息。<br>- `_value: int = 50`：实际存储值的内部变量。<br>- `get_value() -&gt; int`：获取当前值的方法。<br><br>### 注意事项：<br><br>- 这种方式适用于所有类型（int、float、string 等）。<br>- 如果你希望在运行时也限制值，可以结合 `set_value` 和其他逻辑使用。<br>- 如果你只是想生成一个介于 0 到 100 的随机数，可以使用 `randi_range(0, 100)`。<br><br>### 示例：生成 0 到 100 的随机数<br><br>```gdscript<br>var random_value: int = randi_range(0, 100)<br>print(random_value)<br>```<br><br>如果你有更多关于变量限制或数据验证的需求，也可以告诉我，我可以提供更复杂的逻辑。
+                </div>
+                <div style="font-size: 0.9em; color: #6c757d;">
+                    <strong>关键词得分:</strong> 0.0% |
+                    <span style="color: green;">命中: —</span> |
+                    <span style="color: red;">缺失: property_hint_range, export_range, hint string</span>
+                     | <strong>相似度:</strong> 55.0%
+                </div>
+            </td>
+            <td style="vertical-align: top; width: 40%;">
+                <div style="background: #e9ecef; padding: 8px; border-radius: 4px;">
+                    使用 @<span style="background-color: #d4edda; color: #155724; font-weight: bold;">EXPORT_RANGE</span>(0, 100) 注解。例如：<br>@<span style="background-color: #d4edda; color: #155724; font-weight: bold;">EXPORT_RANGE</span>(0, 100) var health: int = 50<br>这会在检查器中创建滑块，并限制输入范围。
+                </div>
+            </td>
+        </tr>
+        
+        <tr>
+            <td style="vertical-align: top; width: 20%;"><strong>PROPERTY_HINT_FLAGS 和 PROPERTY_HINT_ENUM 有什么区别？什么时候用哪个？</strong></td>
+            <td style="vertical-align: top; width: 40%;">
+                <div style="background: #f8f9fa; padding: 8px; border-radius: 4px; margin-bottom: 6px;">
+                    在 Godot 引擎中，`<span style="background-color: #d4edda; color: #155724; font-weight: bold;">PROPERTY_HINT_FLAGS</span>` 和 `<span style="background-color: #d4edda; color: #155724; font-weight: bold;">PROPERTY_HINT_ENUM</span>` 都是用来为属性提供额外信息的提示（hint），但它们的用途和表现形式有所不同。以下是它们的区别以及使用场景的详细说明：<br><br>### 一、`<span style="background-color: #d4edda; color: #155724; font-weight: bold;">PROPERTY_HINT_ENUM</span>`<br><br>**定义：**<br>- `<span style="background-color: #d4edda; color: #155724; font-weight: bold;">PROPERTY_HINT_ENUM</span>` 用于表示一个属性是枚举类型（enum），即该属性的值只能从一组预定义的选项中选择。<br><br>**格式：**<br>- 通常以字符串形式传递，格式如下：<br>  ```gdscript<br>  "Option1,Option2,Option3"<br>  ```<br><br>**示例：**<br>- 假设有一个属性 `item_type`，可以设置为不同的物品类型：<br>  ```gdscript<br>  set("item_type", "weapon")<br>  set("item_type", "armor")<br>  ```<br><br>**适用场景：**<br>- 当你希望用户从一组固定的选项中选择一个值时使用，比如：<br>  - 物品类型（如“武器”、“护甲”、“消耗品”）<br>  - 状态（如“空闲”、“移动”、“攻击”）<br><br>**代码示例：**<br>```gdscript<br># 在类中声明<br>var item_type: String = "weapon"<br><br># 设置属性<br>set("item_type", "weapon")<br>set("item_type", "armor")<br>```<br><br>### 二、`<span style="background-color: #d4edda; color: #155724; font-weight: bold;">PROPERTY_HINT_FLAGS</span>`<br><br>**定义：**<br>- `<span style="background-color: #d4edda; color: #155724; font-weight: bold;">PROPERTY_HINT_FLAGS</span>` 用于表示一个属性是一个位标志集合（bit flags），即该属性可以同时包含多个选项，每个选项代表一个布尔状态。<br><br>**格式：**<br>- 同样以字符串形式传递，格式如下：<br>  ```gdscript<br>  "Flag1,Flag2,Flag3"<br>  ```<br><br>**示例：**<br>- 假设有一个属性 `permissions`，可以设置为多个权限组合：<br>  ```gdscript<br>  set("permissions", 0b101)  # 表示 Flag1 和 Flag3 被选中<br>  ```<br><br>**适用场景：**<br>- 当你需要表示多个独立的布尔状态（例如权限、开关等）时使用，比如：<br>  - 权限设置（读/写/执行）<br>  - 开关状态（是否启用某些功能）<br><br>**代码示例：**<br>```gdscript<br># 在类中声明<br>var permissions: int = 0b101<br><br># 设置属性<br>set("permissions", 0b101)  # 读和执行权限<br>```<br><br>### 三、区别总结<br><br>| 特性 | `<span style="background-color: #d4edda; color: #155724; font-weight: bold;">PROPERTY_HINT_ENUM</span>` | `<span style="background-color: #d4edda; color: #155724; font-weight: bold;">PROPERTY_HINT_FLAGS</span>` |<br>|------|----------------------|------------------------|<br>| **用途** | 从固定选项中选择一个值 | 表示多个布尔状态的组合 |<br>| **数据类型** | 字符串或整数（取决于实现） | 整数（位掩码） |<br>| **支持多选吗？** | ❌ 不支持（只能选一个） | ✅ 支持（可选多个） |<br>| **典型用法** | 选择一个类别、状态、类型 | 设置权限、开关、标志 |<br><br>### 四、什么时候用哪个？<br><br>- **用 `<span style="background-color: #d4edda; color: #155724; font-weight: bold;">PROPERTY_HINT_ENUM</span>`：**<br>  - 当你希望用户从一组互斥的选项中选择一个值时，比如“角色类型”、“物品类型”、“状态”。<br><br>- **用 `<span style="background-color: #d4edda; color: #155724; font-weight: bold;">PROPERTY_HINT_FLAGS</span>`：**<br>  - 当你需要表示多个独立的布尔选项（如权限、功能开关）时，比如“是否允许编辑”、“是否显示”、“是否启用”。<br><br>### 五、示例对比<br><br>#### 使用 `<span style="background-color: #d4edda; color: #155724; font-weight: bold;">PROPERTY_HINT_ENUM</span>`：<br>```gdscript<br># 属性提示<br>set("item_type", "weapon")<br>set("item_type", "armor")<br><br># 在类中声明<br>var item_type: String = "weapon"<br>```<br><br>#### 使用 `<span style="background-color: #d4edda; color: #155724; font-weight: bold;">PROPERTY_HINT_FLAGS</span>`：<br>```gdscript<br># 属性提示<br>set("permissions", 0b101)  # 读和执行权限<br><br># 在类中声明<br>var permissions: int = 0b101<br>```<br><br>### 六、注意事项<br><br>- `<span style="background-color: #d4edda; color: #155724; font-weight: bold;">PROPERTY_HINT_ENUM</span>` 和 `<span style="background-color: #d4edda; color: #155724; font-weight: bold;">PROPERTY_HINT_FLAGS</span>` 都是通过 `PropertyHint` 枚举来指定的。<br>- 它们通常与 `PropertyUsageFlags` 一起使用，以控制属性是否存储、可见等。<br>- 在 Godot 的编辑器中，这些提示会帮助开发者更直观地设置属性值。<br><br>### 总结<br><br>- **`<span style="background-color: #d4edda; color: #155724; font-weight: bold;">PROPERTY_HINT_ENUM</span>` 用于单选枚举值，`<span style="background-color: #d4edda; color: #155724; font-weight: bold;">PROPERTY_HINT_FLAGS</span>` 用于多选位标志。根据你的需求选择合适的提示类型。**<br><br>通过以上说明，你应该能够清楚地了解 `<span style="background-color: #d4edda; color: #155724; font-weight: bold;">PROPERTY_HINT_ENUM</span>` 和 `<span style="background-color: #d4edda; color: #155724; font-weight: bold;">PROPERTY_HINT_FLAGS</span>` 的区别，并在适当的情况下选择使用哪一个。
+                </div>
+                <div style="font-size: 0.9em; color: #6c757d;">
+                    <strong>关键词得分:</strong> 50.0% |
+                    <span style="color: green;">命中: property_hint_enum, property_hint_flags</span> |
+                    <span style="color: red;">缺失: bitwise, enum vs flags</span>
+                     | <strong>相似度:</strong> 67.8%
+                </div>
+            </td>
+            <td style="vertical-align: top; width: 40%;">
+                <div style="background: #e9ecef; padding: 8px; border-radius: 4px;">
+                    <span style="background-color: #d4edda; color: #155724; font-weight: bold;">PROPERTY_HINT_ENUM</span> 用于单选枚举（只能选一个值），如状态机。<span style="background-color: #d4edda; color: #155724; font-weight: bold;">PROPERTY_HINT_FLAGS</span> 用于位掩码（可多选组合），如权限标志。用 ENUM 表示互斥状态，用 FLAGS 表示可叠加能力。
+                </div>
+            </td>
+        </tr>
+        
+        <tr>
+            <td style="vertical-align: top; width: 20%;"><strong>如何在 Godot 中生成一个 -10 到 10 之间的随机浮点数？</strong></td>
+            <td style="vertical-align: top; width: 40%;">
+                <div style="background: #f8f9fa; padding: 8px; border-radius: 4px; margin-bottom: 6px;">
+                    在 Godot 引擎中，生成一个介于 **-10 到 10** 之间的随机浮点数可以通过使用 `<span style="background-color: #d4edda; color: #155724; font-weight: bold;">RANDF</span>()` 函数结合简单的数学运算来实现。这里有一个更简洁的方法，而不需要直接调用 `remap()` 函数。<br><br>### 步骤如下：<br><br>1. **`<span style="background-color: #d4edda; color: #155724; font-weight: bold;">RANDF</span>()`**：生成一个介于 **0 和 1** 之间的随机浮点数。<br>2. **映射到目标范围**：通过将 `<span style="background-color: #d4edda; color: #155724; font-weight: bold;">RANDF</span>()` 的结果乘以目标范围的宽度（即 20），然后减去范围的一半（即 10）来将其映射到 [-10, 10] 范围内。<br><br>### 示例代码：<br><br>```gdscript<br># 生成一个介于 -10 到 10 之间的随机浮点数<br>var <span style="background-color: #d4edda; color: #155724; font-weight: bold;">RANDOM</span>_value = (<span style="background-color: #d4edda; color: #155724; font-weight: bold;">RANDF</span>() * 20) - 10<br>print(<span style="background-color: #d4edda; color: #155724; font-weight: bold;">RANDOM</span>_value)<br>```<br><br>### 解释：<br><br>- `<span style="background-color: #d4edda; color: #155724; font-weight: bold;">RANDF</span>()` 返回一个 `[0.0, 1.0)` 之间的随机浮点数。<br>- `(<span style="background-color: #d4edda; color: #155724; font-weight: bold;">RANDF</span>() * 20)` 将这个值扩展到 `[0.0, 20.0)` 范围。<br>- `((<span style="background-color: #d4edda; color: #155724; font-weight: bold;">RANDF</span>() * 20) - 10)` 将这个值平移到 `[-10.0, 10.0)` 范围。<br><br>### 注意事项：<br><br>- 如果你希望结果是**整数**（例如 -10 到 10 的整数），可以使用 `randi()` 并进行调整：<br>  <br>  ```gdscript<br>  var <span style="background-color: #d4edda; color: #155724; font-weight: bold;">RANDOM</span>_int = randi() % 21 - 10<br>  print(<span style="background-color: #d4edda; color: #155724; font-weight: bold;">RANDOM</span>_int)<br>  ```<br><br>- 如果你需要**可重复的随机数**（比如用于测试），请使用 `seed()` 函数初始化随机数种子。<br><br>### 总结：<br><br>&gt; 在 Godot 中生成一个介于 -10 到 10 之间的随机浮点数的方法是：使用 `(<span style="background-color: #d4edda; color: #155724; font-weight: bold;">RANDF</span>() * 20) - 10`。<br><br>这种方法不仅简单直观，而且避免了额外的函数调用，提高了代码的效率和可读性。
+                </div>
+                <div style="font-size: 0.9em; color: #6c757d;">
+                    <strong>关键词得分:</strong> 66.7% |
+                    <span style="color: green;">命中: random, randf</span> |
+                    <span style="color: red;">缺失: randf_range</span>
+                     | <strong>相似度:</strong> 61.4%
+                </div>
+            </td>
+            <td style="vertical-align: top; width: 40%;">
+                <div style="background: #e9ecef; padding: 8px; border-radius: 4px;">
+                    使用内置函数 <span style="background-color: #d4edda; color: #155724; font-weight: bold;"><span style="background-color: #d4edda; color: #155724; font-weight: bold;">RANDF</span>_RANGE</span>(-10, 10)。或者用 <span style="background-color: #d4edda; color: #155724; font-weight: bold;">RANDF</span>() * 20 - 10。记得在 _ready() 中调用 <span style="background-color: #d4edda; color: #155724; font-weight: bold;">RANDOM</span>ize() 初始化随机种子。
+                </div>
+            </td>
+        </tr>
+        
+        <tr>
+            <td style="vertical-align: top; width: 20%;"><strong>lerp() 和 lerp_angle() 有什么区别？为什么旋转插值要用后者？</strong></td>
+            <td style="vertical-align: top; width: 40%;">
+                <div style="background: #f8f9fa; padding: 8px; border-radius: 4px; margin-bottom: 6px;">
+                    在 Godot 引擎中，`<span style="background-color: #d4edda; color: #155724; font-weight: bold;">LERP</span>()` 和 `<span style="background-color: #d4edda; color: #155724; font-weight: bold;">LERP</span>_angle()` 都是用于线性插值的函数，但它们在处理角度（尤其是**旋转角度**）时有显著的区别。以下是它们的主要区别以及为什么在进行**旋转插值**时推荐使用 `<span style="background-color: #d4edda; color: #155724; font-weight: bold;">LERP</span>_angle()` 的原因：<br><br>### 一、`<span style="background-color: #d4edda; color: #155724; font-weight: bold;">LERP</span>()` 与 `<span style="background-color: #d4edda; color: #155724; font-weight: bold;">LERP</span>_angle()` 的区别<br><br>| 特性 | `<span style="background-color: #d4edda; color: #155724; font-weight: bold;">LERP</span>()` | `<span style="background-color: #d4edda; color: #155724; font-weight: bold;">LERP</span>_angle()` |<br>|------|----------|----------------|<br>| **用途** | 通用的线性插值函数，适用于任何数值类型（如 float、Vector2 等）。 | 专门用于**角度（以弧度表示）**的插值，考虑了角度的**周期性**（即 0° 和 360° 是同一个方向）。 |<br>| **是否处理角度周期性** | ❌ 不处理。直接按线性方式插值，可能导致不自然的旋转方向（例如从 350° 到 10° 会绕一圈）。 | ✅ 处理。会自动选择最短路径进行插值（例如从 350° 到 10° 会顺时针旋转 20° 而不是逆时针旋转 340°）。 |<br>| **参数类型** | 通常用于数字或向量（如 `Vector2`, `Color` 等）。 | 专用于**浮点数**（代表弧度），且强调“角度”概念。 |<br>| **是否支持超出 [0, 1] 的 weight** | ✅ 支持，可用于外推（extrapolation）。 | ✅ 也支持，但更注重角度的正确性。 |<br><br>### 二、为什么旋转插值要用 `<span style="background-color: #d4edda; color: #155724; font-weight: bold;">LERP</span>_angle()`？<br><br>在游戏开发中，**旋转角度**是一个**周期性**（circular）变量，也就是说：<br><br>- 0° 和 360° 是同一个方向。<br>- 90° 和 450° 也是同一个方向。<br><br>如果使用普通的 `<span style="background-color: #d4edda; color: #155724; font-weight: bold;">LERP</span>()` 来插值两个角度，可能会出现以下问题：<br><br>#### 示例：<br>```gdscript<br>var angle1 = deg_to_rad(350)<br>var angle2 = deg_to_rad(10)<br>var result = <span style="background-color: #d4edda; color: #155724; font-weight: bold;">LERP</span>(angle1, angle2, 0.5)<br>```<br><br>在这种情况下，`<span style="background-color: #d4edda; color: #155724; font-weight: bold;">LERP</span>()` 会直接计算中间值，导致结果为 `180°`，这显然不符合预期（实际应为 `0°` 或 `360°`）。<br><br>而 `<span style="background-color: #d4edda; color: #155724; font-weight: bold;">LERP</span>_angle()` 会自动判断哪条路径更短，从而避免这种“绕远”的情况。<br><br>### 三、总结：`<span style="background-color: #d4edda; color: #155724; font-weight: bold;">LERP</span>()` vs `<span style="background-color: #d4edda; color: #155724; font-weight: bold;">LERP</span>_angle()`<br><br>| 项目 | `<span style="background-color: #d4edda; color: #155724; font-weight: bold;">LERP</span>()` | `<span style="background-color: #d4edda; color: #155724; font-weight: bold;">LERP</span>_angle()` |<br>|------|----------|----------------|<br>| 适用场景 | 一般数值插值（非角度） | 角度（弧度）插值 |<br>| 是否考虑角度周期性 | ❌ 否 | ✅ 是 |<br>| 是否自动选择最短路径 | ❌ 否 | ✅ 是 |<br>| 推荐用于旋转插值 | ❌ 否 | ✅ 是 |<br><br>### 四、补充说明：`<span style="background-color: #d4edda; color: #155724; font-weight: bold;">LERP</span>f()` 和其他 `<span style="background-color: #d4edda; color: #155724; font-weight: bold;">LERP</span>` 函数<br><br>Godot 还提供了其他更安全的 `<span style="background-color: #d4edda; color: #155724; font-weight: bold;">LERP</span>` 函数，比如：<br><br>- `<span style="background-color: #d4edda; color: #155724; font-weight: bold;">LERP</span>f()`：和 `<span style="background-color: #d4edda; color: #155724; font-weight: bold;">LERP</span>()` 类似，但更明确地用于浮点数，提供更好的类型安全性。<br>- `Vector2.<span style="background-color: #d4edda; color: #155724; font-weight: bold;">LERP</span>()`, `Vector3.<span style="background-color: #d4edda; color: #155724; font-weight: bold;">LERP</span>()` 等：用于向量插值。<br>- `Quaternion.s<span style="background-color: #d4edda; color: #155724; font-weight: bold;">LERP</span>()`：用于四元数插值，适合更复杂的旋转。<br><br>但在处理**角度（弧度）**时，**`<span style="background-color: #d4edda; color: #155724; font-weight: bold;">LERP</span>_angle()`** 是最合适的，因为它专门针对角度的周期性和最短路径进行了优化。<br><br>### ✅ 结论<br><br>在 Godot 中，**旋转插值应该使用 `<span style="background-color: #d4edda; color: #155724; font-weight: bold;">LERP</span>_angle()`**，而不是 `<span style="background-color: #d4edda; color: #155724; font-weight: bold;">LERP</span>()`，因为 `<span style="background-color: #d4edda; color: #155724; font-weight: bold;">LERP</span>_angle()` 能够正确处理角度的周期性，确保插值沿着最短路径进行，避免不自然的旋转行为。<br><br>通过这种方式，你可以确保你的旋转动画更加平滑和自然，特别是在处理大角度变化时。
+                </div>
+                <div style="font-size: 0.9em; color: #6c757d;">
+                    <strong>关键词得分:</strong> 66.7% |
+                    <span style="color: green;">命中: lerp, lerp_angle</span> |
+                    <span style="color: red;">缺失: angle interpolation</span>
+                     | <strong>相似度:</strong> 57.5%
+                </div>
+            </td>
+            <td style="vertical-align: top; width: 40%;">
+                <div style="background: #e9ecef; padding: 8px; border-radius: 4px;">
+                    <span style="background-color: #d4edda; color: #155724; font-weight: bold;">LERP</span>() 是普通线性插值，对角度会走长路径（如 350°→10° 转 340°）。<span style="background-color: #d4edda; color: #155724; font-weight: bold;">LERP</span>_angle() 自动选择最短弧度路径（转 20°），避免旋转异常。
+                </div>
+            </td>
+        </tr>
+        
+        <tr>
+            <td style="vertical-align: top; width: 20%;"><strong>如何让一个导出的字符串变量在编辑器中显示多行文本框？</strong></td>
+            <td style="vertical-align: top; width: 40%;">
+                <div style="background: #f8f9fa; padding: 8px; border-radius: 4px; margin-bottom: 6px;">
+                    在 Godot 引擎中，如果你想让一个**导出的字符串变量（exported string variable）**在编辑器中显示为**多行文本框**，你可以使用 `Text` 类型，并通过 `@export` 注解来指定它在编辑器中的显示方式。<br><br>### 正确做法如下：<br><br>#### 1. 使用 `@export` 注解并指定类型为 `Text`<br>在 GDScript 中，你可以这样写：<br><br>```gdscript<br>@export(type="Text") var my_string: String<br>```<br><br>这会告诉 Godot 编辑器：这个变量应该以**多行文本框**的形式显示，而不是默认的单行输入框。<br><br>#### 2. 示例代码<br><br>```gdscript<br>extends Node<br><br>@export(type="Text") var my_string: String = "这是多行文本\n可以换行"<br>```<br><br>当你将这个脚本附加到节点上后，在 Godot 编辑器的 **Inspector** 面板中，`my_string` 变量就会显示为一个多行文本框，你可以直接在编辑器中输入或修改多行文本。<br><br>---<br><br>### 注意事项：<br><br>- `@export(type="Text")` 是 Godot 4.x 中推荐的方式。<br>- 如果你使用的是旧版本（如 Godot 3.x），可能需要使用 `@export` 的其他语法，例如：<br>  <br>  ```gdscript<br>  @export var my_string: String<br>  ```<br><br>  然后在编辑器中手动更改该变量的类型为 `Text`。<br><br>- `Text` 类型支持换行符 `\n`，所以你可以直接在编辑器中输入多行内容。<br><br>---<br><br>### 总结<br><br>&gt; **如何让一个导出的字符串变量在编辑器中显示多行文本框？**<br>&gt;<br>&gt; 在 GDScript 中，使用 `@export(type="Text")` 注解来声明变量，即可在 Godot 编辑器中将其显示为多行文本框。例如：<br>&gt;<br>&gt; ```gdscript<br>&gt; @export(type="Text") var my_string: String<br>&gt; ```<br>&gt;<br>&gt; 这样你就可以在编辑器的 Inspector 面板中直接编辑多行文本了。<br><br>### 附加信息<br><br>- **Godot 版本差异**：确保你使用的 Godot 版本支持 `@export(type="Text")` 语法。如果你使用的是较旧的版本，请参考相关文档进行调整。<br>- **多行文本编辑**：`TextEdit` 控件不仅支持多行文本输入，还支持代码编辑功能，适用于更复杂的文本处理需求。<br><br>希望这些信息对你有所帮助！如果你有任何其他问题，请随时提问。
+                </div>
+                <div style="font-size: 0.9em; color: #6c757d;">
+                    <strong>关键词得分:</strong> 0.0% |
+                    <span style="color: green;">命中: —</span> |
+                    <span style="color: red;">缺失: property_hint_multiline_text, export_multiline</span>
+                     | <strong>相似度:</strong> 74.6%
+                </div>
+            </td>
+            <td style="vertical-align: top; width: 40%;">
+                <div style="background: #e9ecef; padding: 8px; border-radius: 4px;">
+                    使用 @<span style="background-color: #d4edda; color: #155724; font-weight: bold;">EXPORT_MULTILINE</span> 注解。例如：<br>@<span style="background-color: #d4edda; color: #155724; font-weight: bold;">EXPORT_MULTILINE</span> var description: String = "..."<br>这会启用多行文本编辑器。
+                </div>
+            </td>
+        </tr>
+        
+            </tbody>
+        </table>
+    </body>
+    </html>
+    

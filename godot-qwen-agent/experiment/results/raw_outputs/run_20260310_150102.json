@@ -1,0 +1,62 @@
+[
+  {
+    "original_query": "在 Godot GDScript 中，如何限制一个导出变量只能在 0 到 100 之间取值？",
+    "processed_query": "How to 在 Godot GDScript 中，如何限制一个导出变量只能在 0 到 100 之间取值？ in Godot engine?",
+    "retrieved_count": 3,
+    "retrieved_scores": [
+      0.590572714805603,
+      0.5882318019866943,
+      0.5864508152008057
+    ],
+    "answer": "在 Godot 的 GDScript 中，如果你想限制一个**导出变量（exported variable）**的值只能在 **0 到 100 之间**，你可以通过自定义 `set` 和 `get` 方法来实现。虽然 GDScript 不支持直接在导出变量上设置范围限制（如 Unity 的 `[Range(0, 100)]`），但可以通过这些方法来验证和限制值。\n\n### 示例：限制导出变量在 0 到 100 之间\n\n```gdscript\nextends Node\n\n# 导出变量\nexport(int) var value: int setget set_value, get_value = 50\n\n# 内部变量\nvar _value: int = 50\n\n# 获取值的方法\nfunc get_value() -> int:\n    return _value\n\n# 设置值的方法\nfunc set_value(val: int) -> void:\n    if val < 0:\n        val = 0\n        push_warning(\"Value cannot be less than 0. Setting to 0.\")\n    elif val > 100:\n        val = 100\n        push_warning(\"Value cannot be greater than 100. Setting to 100.\")\n    _value = val\n```\n\n### 解释：\n\n- `export(int) var value: int setget set_value, get_value = 50`：将 `value` 导出为编辑器中的变量，并使用 `set_value` 和 `get_value` 方法来自定义访问器。\n- `set_value(val: int) -> void`：在设置值时，检查值是否在 0 到 100 之间。如果超出范围，则自动修正，并通过 `push_warning()` 输出警告信息。\n- `_value: int = 50`：实际存储值的内部变量。\n- `get_value() -> int`：获取当前值的方法。\n\n### 注意事项：\n\n- 这种方式适用于所有类型（int、float、string 等）。\n- 如果你希望在运行时也限制值，可以结合 `set_value` 和其他逻辑使用。\n- 如果你只是想生成一个介于 0 到 100 的随机数，可以使用 `randi_range(0, 100)`。\n\n### 示例：生成 0 到 100 的随机数\n\n```gdscript\nvar random_value: int = randi_range(0, 100)\nprint(random_value)\n```\n\n如果你有更多关于变量限制或数据验证的需求，也可以告诉我，我可以提供更复杂的逻辑。",
+    "timestamp": "2026-03-10T14:57:37.070675"
+  },
+  {
+    "original_query": "PROPERTY_HINT_FLAGS 和 PROPERTY_HINT_ENUM 有什么区别？什么时候用哪个？",
+    "processed_query": "How to PROPERTY_HINT_FLAGS 和 PROPERTY_HINT_ENUM 有什么区别？什么时候用哪个？ in Godot engine?",
+    "retrieved_count": 3,
+    "retrieved_scores": [
+      0.6748356223106384,
+      0.6645113825798035,
+      0.6618552207946777
+    ],
+    "answer": "在 Godot 引擎中，`PROPERTY_HINT_FLAGS` 和 `PROPERTY_HINT_ENUM` 都是用来为属性提供额外信息的提示（hint），但它们的用途和表现形式有所不同。以下是它们的区别以及使用场景的详细说明：\n\n### 一、`PROPERTY_HINT_ENUM`\n\n**定义：**\n- `PROPERTY_HINT_ENUM` 用于表示一个属性是枚举类型（enum），即该属性的值只能从一组预定义的选项中选择。\n\n**格式：**\n- 通常以字符串形式传递，格式如下：\n  ```gdscript\n  \"Option1,Option2,Option3\"\n  ```\n\n**示例：**\n- 假设有一个属性 `item_type`，可以设置为不同的物品类型：\n  ```gdscript\n  set(\"item_type\", \"weapon\")\n  set(\"item_type\", \"armor\")\n  ```\n\n**适用场景：**\n- 当你希望用户从一组固定的选项中选择一个值时使用，比如：\n  - 物品类型（如“武器”、“护甲”、“消耗品”）\n  - 状态（如“空闲”、“移动”、“攻击”）\n\n**代码示例：**\n```gdscript\n# 在类中声明\nvar item_type: String = \"weapon\"\n\n# 设置属性\nset(\"item_type\", \"weapon\")\nset(\"item_type\", \"armor\")\n```\n\n### 二、`PROPERTY_HINT_FLAGS`\n\n**定义：**\n- `PROPERTY_HINT_FLAGS` 用于表示一个属性是一个位标志集合（bit flags），即该属性可以同时包含多个选项，每个选项代表一个布尔状态。\n\n**格式：**\n- 同样以字符串形式传递，格式如下：\n  ```gdscript\n  \"Flag1,Flag2,Flag3\"\n  ```\n\n**示例：**\n- 假设有一个属性 `permissions`，可以设置为多个权限组合：\n  ```gdscript\n  set(\"permissions\", 0b101)  # 表示 Flag1 和 Flag3 被选中\n  ```\n\n**适用场景：**\n- 当你需要表示多个独立的布尔状态（例如权限、开关等）时使用，比如：\n  - 权限设置（读/写/执行）\n  - 开关状态（是否启用某些功能）\n\n**代码示例：**\n```gdscript\n# 在类中声明\nvar permissions: int = 0b101\n\n# 设置属性\nset(\"permissions\", 0b101)  # 读和执行权限\n```\n\n### 三、区别总结\n\n| 特性 | `PROPERTY_HINT_ENUM` | `PROPERTY_HINT_FLAGS` |\n|------|----------------------|------------------------|\n| **用途** | 从固定选项中选择一个值 | 表示多个布尔状态的组合 |\n| **数据类型** | 字符串或整数（取决于实现） | 整数（位掩码） |\n| **支持多选吗？** | ❌ 不支持（只能选一个） | ✅ 支持（可选多个） |\n| **典型用法** | 选择一个类别、状态、类型 | 设置权限、开关、标志 |\n\n### 四、什么时候用哪个？\n\n- **用 `PROPERTY_HINT_ENUM`：**\n  - 当你希望用户从一组互斥的选项中选择一个值时，比如“角色类型”、“物品类型”、“状态”。\n\n- **用 `PROPERTY_HINT_FLAGS`：**\n  - 当你需要表示多个独立的布尔选项（如权限、功能开关）时，比如“是否允许编辑”、“是否显示”、“是否启用”。\n\n### 五、示例对比\n\n#### 使用 `PROPERTY_HINT_ENUM`：\n```gdscript\n# 属性提示\nset(\"item_type\", \"weapon\")\nset(\"item_type\", \"armor\")\n\n# 在类中声明\nvar item_type: String = \"weapon\"\n```\n\n#### 使用 `PROPERTY_HINT_FLAGS`：\n```gdscript\n# 属性提示\nset(\"permissions\", 0b101)  # 读和执行权限\n\n# 在类中声明\nvar permissions: int = 0b101\n```\n\n### 六、注意事项\n\n- `PROPERTY_HINT_ENUM` 和 `PROPERTY_HINT_FLAGS` 都是通过 `PropertyHint` 枚举来指定的。\n- 它们通常与 `PropertyUsageFlags` 一起使用，以控制属性是否存储、可见等。\n- 在 Godot 的编辑器中，这些提示会帮助开发者更直观地设置属性值。\n\n### 总结\n\n- **`PROPERTY_HINT_ENUM` 用于单选枚举值，`PROPERTY_HINT_FLAGS` 用于多选位标志。根据你的需求选择合适的提示类型。**\n\n通过以上说明，你应该能够清楚地了解 `PROPERTY_HINT_ENUM` 和 `PROPERTY_HINT_FLAGS` 的区别，并在适当的情况下选择使用哪一个。",
+    "timestamp": "2026-03-10T14:58:31.820519"
+  },
+  {
+    "original_query": "如何在 Godot 中生成一个 -10 到 10 之间的随机浮点数？",
+    "processed_query": "How to 如何在 Godot 中生成一个 -10 到 10 之间的随机浮点数？ in Godot engine?",
+    "retrieved_count": 3,
+    "retrieved_scores": [
+      0.6063207387924194,
+      0.5764721035957336,
+      0.5567346811294556
+    ],
+    "answer": "在 Godot 引擎中，生成一个介于 **-10 到 10** 之间的随机浮点数可以通过使用 `randf()` 函数结合简单的数学运算来实现。这里有一个更简洁的方法，而不需要直接调用 `remap()` 函数。\n\n### 步骤如下：\n\n1. **`randf()`**：生成一个介于 **0 和 1** 之间的随机浮点数。\n2. **映射到目标范围**：通过将 `randf()` 的结果乘以目标范围的宽度（即 20），然后减去范围的一半（即 10）来将其映射到 [-10, 10] 范围内。\n\n### 示例代码：\n\n```gdscript\n# 生成一个介于 -10 到 10 之间的随机浮点数\nvar random_value = (randf() * 20) - 10\nprint(random_value)\n```\n\n### 解释：\n\n- `randf()` 返回一个 `[0.0, 1.0)` 之间的随机浮点数。\n- `(randf() * 20)` 将这个值扩展到 `[0.0, 20.0)` 范围。\n- `((randf() * 20) - 10)` 将这个值平移到 `[-10.0, 10.0)` 范围。\n\n### 注意事项：\n\n- 如果你希望结果是**整数**（例如 -10 到 10 的整数），可以使用 `randi()` 并进行调整：\n  \n  ```gdscript\n  var random_int = randi() % 21 - 10\n  print(random_int)\n  ```\n\n- 如果你需要**可重复的随机数**（比如用于测试），请使用 `seed()` 函数初始化随机数种子。\n\n### 总结：\n\n> 在 Godot 中生成一个介于 -10 到 10 之间的随机浮点数的方法是：使用 `(randf() * 20) - 10`。\n\n这种方法不仅简单直观，而且避免了额外的函数调用，提高了代码的效率和可读性。",
+    "timestamp": "2026-03-10T14:59:03.475848"
+  },
+  {
+    "original_query": "lerp() 和 lerp_angle() 有什么区别？为什么旋转插值要用后者？",
+    "processed_query": "How to lerp() 和 lerp_angle() 有什么区别？为什么旋转插值要用后者？ in Godot engine?",
+    "retrieved_count": 3,
+    "retrieved_scores": [
+      0.639410138130188,
+      0.630918025970459,
+      0.6301369667053223
+    ],
+    "answer": "在 Godot 引擎中，`lerp()` 和 `lerp_angle()` 都是用于线性插值的函数，但它们在处理角度（尤其是**旋转角度**）时有显著的区别。以下是它们的主要区别以及为什么在进行**旋转插值**时推荐使用 `lerp_angle()` 的原因：\n\n### 一、`lerp()` 与 `lerp_angle()` 的区别\n\n| 特性 | `lerp()` | `lerp_angle()` |\n|------|----------|----------------|\n| **用途** | 通用的线性插值函数，适用于任何数值类型（如 float、Vector2 等）。 | 专门用于**角度（以弧度表示）**的插值，考虑了角度的**周期性**（即 0° 和 360° 是同一个方向）。 |\n| **是否处理角度周期性** | ❌ 不处理。直接按线性方式插值，可能导致不自然的旋转方向（例如从 350° 到 10° 会绕一圈）。 | ✅ 处理。会自动选择最短路径进行插值（例如从 350° 到 10° 会顺时针旋转 20° 而不是逆时针旋转 340°）。 |\n| **参数类型** | 通常用于数字或向量（如 `Vector2`, `Color` 等）。 | 专用于**浮点数**（代表弧度），且强调“角度”概念。 |\n| **是否支持超出 [0, 1] 的 weight** | ✅ 支持，可用于外推（extrapolation）。 | ✅ 也支持，但更注重角度的正确性。 |\n\n### 二、为什么旋转插值要用 `lerp_angle()`？\n\n在游戏开发中，**旋转角度**是一个**周期性**（circular）变量，也就是说：\n\n- 0° 和 360° 是同一个方向。\n- 90° 和 450° 也是同一个方向。\n\n如果使用普通的 `lerp()` 来插值两个角度，可能会出现以下问题：\n\n#### 示例：\n```gdscript\nvar angle1 = deg_to_rad(350)\nvar angle2 = deg_to_rad(10)\nvar result = lerp(angle1, angle2, 0.5)\n```\n\n在这种情况下，`lerp()` 会直接计算中间值，导致结果为 `180°`，这显然不符合预期（实际应为 `0°` 或 `360°`）。\n\n而 `lerp_angle()` 会自动判断哪条路径更短，从而避免这种“绕远”的情况。\n\n### 三、总结：`lerp()` vs `lerp_angle()`\n\n| 项目 | `lerp()` | `lerp_angle()` |\n|------|----------|----------------|\n| 适用场景 | 一般数值插值（非角度） | 角度（弧度）插值 |\n| 是否考虑角度周期性 | ❌ 否 | ✅ 是 |\n| 是否自动选择最短路径 | ❌ 否 | ✅ 是 |\n| 推荐用于旋转插值 | ❌ 否 | ✅ 是 |\n\n### 四、补充说明：`lerpf()` 和其他 `lerp` 函数\n\nGodot 还提供了其他更安全的 `lerp` 函数，比如：\n\n- `lerpf()`：和 `lerp()` 类似，但更明确地用于浮点数，提供更好的类型安全性。\n- `Vector2.lerp()`, `Vector3.lerp()` 等：用于向量插值。\n- `Quaternion.slerp()`：用于四元数插值，适合更复杂的旋转。\n\n但在处理**角度（弧度）**时，**`lerp_angle()`** 是最合适的，因为它专门针对角度的周期性和最短路径进行了优化。\n\n### ✅ 结论\n\n在 Godot 中，**旋转插值应该使用 `lerp_angle()`**，而不是 `lerp()`，因为 `lerp_angle()` 能够正确处理角度的周期性，确保插值沿着最短路径进行，避免不自然的旋转行为。\n\n通过这种方式，你可以确保你的旋转动画更加平滑和自然，特别是在处理大角度变化时。",
+    "timestamp": "2026-03-10T15:00:09.432028"
+  },
+  {
+    "original_query": "如何让一个导出的字符串变量在编辑器中显示多行文本框？",
+    "processed_query": "How to 如何让一个导出的字符串变量在编辑器中显示多行文本框？ in Godot engine?",
+    "retrieved_count": 3,
+    "retrieved_scores": [
+      0.6154722571372986,
+      0.6043267250061035,
+      0.6025453805923462
+    ],
+    "answer": "在 Godot 引擎中，如果你想让一个**导出的字符串变量（exported string variable）**在编辑器中显示为**多行文本框**，你可以使用 `Text` 类型，并通过 `@export` 注解来指定它在编辑器中的显示方式。\n\n### 正确做法如下：\n\n#### 1. 使用 `@export` 注解并指定类型为 `Text`\n在 GDScript 中，你可以这样写：\n\n```gdscript\n@export(type=\"Text\") var my_string: String\n```\n\n这会告诉 Godot 编辑器：这个变量应该以**多行文本框**的形式显示，而不是默认的单行输入框。\n\n#### 2. 示例代码\n\n```gdscript\nextends Node\n\n@export(type=\"Text\") var my_string: String = \"这是多行文本\\n可以换行\"\n```\n\n当你将这个脚本附加到节点上后，在 Godot 编辑器的 **Inspector** 面板中，`my_string` 变量就会显示为一个多行文本框，你可以直接在编辑器中输入或修改多行文本。\n\n---\n\n### 注意事项：\n\n- `@export(type=\"Text\")` 是 Godot 4.x 中推荐的方式。\n- 如果你使用的是旧版本（如 Godot 3.x），可能需要使用 `@export` 的其他语法，例如：\n  \n  ```gdscript\n  @export var my_string: String\n  ```\n\n  然后在编辑器中手动更改该变量的类型为 `Text`。\n\n- `Text` 类型支持换行符 `\\n`，所以你可以直接在编辑器中输入多行内容。\n\n---\n\n### 总结\n\n> **如何让一个导出的字符串变量在编辑器中显示多行文本框？**\n>\n> 在 GDScript 中，使用 `@export(type=\"Text\")` 注解来声明变量，即可在 Godot 编辑器中将其显示为多行文本框。例如：\n>\n> ```gdscript\n> @export(type=\"Text\") var my_string: String\n> ```\n>\n> 这样你就可以在编辑器的 Inspector 面板中直接编辑多行文本了。\n\n### 附加信息\n\n- **Godot 版本差异**：确保你使用的 Godot 版本支持 `@export(type=\"Text\")` 语法。如果你使用的是较旧的版本，请参考相关文档进行调整。\n- **多行文本编辑**：`TextEdit` 控件不仅支持多行文本输入，还支持代码编辑功能，适用于更复杂的文本处理需求。\n\n希望这些信息对你有所帮助！如果你有任何其他问题，请随时提问。",
+    "timestamp": "2026-03-10T15:01:02.159235"
+  }
+]

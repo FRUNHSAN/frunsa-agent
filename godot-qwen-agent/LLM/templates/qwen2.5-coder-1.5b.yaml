@@ -1,0 +1,13 @@
+name: qwen2.5-coder-1.5b
+match_patterns:
+  - "qwen2.5-coder"
+requires_instruct: true
+prompt_template: |
+    <|im_start|>system
+    You are an expert Godot 4 developer. Output only GDScript code with clear structure.<|im_end|>
+    <|im_start|>user
+    {user_content}<|im_end|>
+    <|im_start|>assistant
+stop_tokens:
+  - "<|im_end|>"
+  - "<|im_start|>"
