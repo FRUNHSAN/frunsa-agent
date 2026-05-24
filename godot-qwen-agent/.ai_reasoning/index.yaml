@@ -1,0 +1,82 @@
+# ── Reasoning Chain Library — Global Index ──────────────────────────────
+#
+# This file is the entry point for AI agents. Before any coding task,
+# agents MUST read this index to understand which historical decisions
+# apply to the current module.
+#
+# Usage:
+#   1. Read this index (tags + status) to find relevant chains
+#   2. Load the chain YAML files that match the current task's domain
+#   3. After completing a complex feature or fixing a non-trivial bug,
+#      write a new chain and update this index
+#
+# Schema: schemas/reasoning_chain.schema.json
+
+library_version: 1
+last_updated: "2026-05-24T17:00:00Z"
+
+# ── Chains by architectural layer ────────────────────────────────────
+
+chains:
+  # ── Foundational architecture ──
+  - chain_id: phase_01_three_platform
+    file: chains/phase_01_three_platform.yaml
+    title: "Three-platform architecture: contracts ↔ adapters ↔ pipeline"
+    layer: foundation
+    tags: [architecture, contracts, adapters, pipeline, platform_design]
+    status: active
+
+  - chain_id: phase_01_data_integrity
+    file: chains/phase_01_data_integrity.yaml
+    title: "Immutable data models: frozen dataclasses, MappingProxyType, deepcopy defense"
+    layer: contracts
+    tags: [data_model, immutability, frozen, mappingproxytype, deepcopy]
+    status: active
+
+  # ── Pipeline engine ──
+  - chain_id: phase_02_skip_propagation
+    file: chains/phase_02_skip_propagation.yaml
+    title: "Empty-result skip semantics: _SKIP_SENTINEL and graceful degradation"
+    layer: pipeline
+    tags: [pipeline, skip, sentinel, empty_result, propagation]
+    status: active
+
+  # ── Translation layer ──
+  - chain_id: phase_03_adapter_pattern
+    file: chains/phase_03_adapter_pattern.yaml
+    title: "Strict adapter pattern: AdapterTypeError, Protocol-based strategies, factory caching"
+    layer: adapters
+    tags: [adapter, translation, protocol, factory, caching, type_safety]
+    status: active
+
+  # ── Observability ──
+  - chain_id: phase_04_observability
+    file: chains/phase_04_observability.yaml
+    title: "Observability contracts: TraceLog, DependencyHealth, SnapshotPolicy, three-level errors"
+    layer: pipeline
+    tags: [observability, tracing, health_check, snapshot, error_severity]
+    status: active
+
+  # ── External I/O ──
+  - chain_id: phase_05_external_io
+    file: chains/phase_05_external_io.yaml
+    title: "External I/O pattern: async adapter, trace inspection, health probe defense"
+    layer: adapters
+    tags: [external_io, vector_store, async, health_probe, exception_handling]
+    status: active
+
+# ── Tag index for quick lookup ───────────────────────────────────────
+
+tag_index:
+  architecture: [phase_01_three_platform]
+  data_model: [phase_01_data_integrity]
+  immutability: [phase_01_data_integrity]
+  pipeline: [phase_02_skip_propagation, phase_04_observability]
+  skip: [phase_02_skip_propagation]
+  adapter: [phase_03_adapter_pattern, phase_05_external_io]
+  protocol: [phase_03_adapter_pattern]
+  observability: [phase_04_observability]
+  health_check: [phase_04_observability, phase_05_external_io]
+  external_io: [phase_05_external_io]
+  async: [phase_05_external_io]
+  exception_handling: [phase_05_external_io]

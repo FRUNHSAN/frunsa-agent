@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent.local/schemas/reasoning_chain.schema.json",
+  "title": "Reasoning Chain",
+  "description": "Schema for a single architectural reasoning chain entry. AI agents read this before coding and write new entries after completing complex features or bug fixes.",
+  "type": "object",
+  "required": [
+    "chain_id",
+    "title",
+    "created_at",
+    "status",
+    "context",
+    "decision",
+    "rationale",
+    "future_guidance"
+  ],
+  "properties": {
+    "chain_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+$",
+      "description": "Unique kebab-case identifier, e.g. phase_05_retriever_health"
+    },
+    "title": {
+      "type": "string",
+      "maxLength": 120,
+      "description": "Human-readable one-line summary"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of when this chain was authored"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of last modification"
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+      "maxItems": 10,
+      "description": "Lowercase tags for filtering: chunker, retriever, health_check, etc."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["active", "deprecated", "superseded"],
+      "description": "active = currently applicable; deprecated = no longer relevant; superseded = replaced by a newer chain"
+    },
+    "superseded_by": {
+      "type": "string",
+      "description": "chain_id of the newer chain that replaces this one (required when status=superseded)"
+    },
+    "related_chains": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "List of related chain_ids for cross-referencing"
+    },
+
+    "context": {
+      "type": "string",
+      "minLength": 20,
+      "description": "Background: what problem triggered this decision, what constraints existed"
+    },
+    "alternatives": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["option", "pros", "cons"],
+        "properties": {
+          "option": { "type": "string" },
+          "pros": { "type": "string" },
+          "cons": { "type": "string" }
+        }
+      },
+      "maxItems": 6,
+      "description": "Alternatives considered before the final decision (2-4 typical)"
+    },
+    "decision": {
+      "type": "string",
+      "minLength": 10,
+      "description": "What was chosen (1-2 sentences)"
+    },
+    "rationale": {
+      "type": "string",
+      "minLength": 20,
+      "description": "Why this option won: architectural alignment, risk profile, simplicity, etc."
+    },
+    "evidence": {
+      "type": "object",
+      "properties": {
+        "test_files": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "test_cases": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "benchmark_results": {
+          "type": "string"
+        }
+      },
+      "description": "Concrete artifacts that validate this decision"
+    },
+    "future_guidance": {
+      "type": "string",
+      "minLength": 20,
+      "description": "Rules for future AI agents: what patterns to follow, what anti-patterns to avoid"
+    },
+    "anti_patterns": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Explicit list of things future code must NOT do, based on this experience"
+    }
+  }
+}
