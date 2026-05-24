@@ -1,4 +1,4 @@
-"""Structured validation types and runtime chunk-output validator."""
+"""Structured validation types and runtime output validators."""
 
 from __future__ import annotations
 
@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from typing import List, Literal, Tuple
 
 from .chunking import Chunk
+from .generation import GenerationResult
+from .retrieval import RetrievalResult
 
 
 @dataclass(frozen=True)
@@ -131,4 +133,166 @@ def validate_chunk_output(chunks: List[Chunk]) -> ContractValidationResult:
         warnings=warnings,
         chunk_count=len(chunks),
         total_chars=sum(len(c.text) for c in chunks if isinstance(c, Chunk)),
+    )
+
+
+# ── Generation output validator ────────────────────────────────────
+
+
+def validate_generation_output(result: GenerationResult) -> ContractValidationResult:
+    """Runtime validation of LLM generation output.
+
+    Checks: type correctness, non-empty text (warning), finish_reason validity (info),
+    usage fields present (warning).
+    """
+    errors: List[ValidationError] = []
+    warnings: List[ValidationError] = []
+
+    if not isinstance(result, GenerationResult):
+        return ContractValidationResult(
+            passed=False,
+            errors=[
+                ValidationError(
+                    field="output",
+                    code="NOT_GENERATION_RESULT",
+                    message=f"Expected GenerationResult, got {type(result).__name__}",
+                )
+            ],
+        )
+
+    if not result.text or not result.text.strip():
+        warnings.append(
+            ValidationError(
+                field="result.text",
+                code="EMPTY_GENERATION",
+                message="Generation produced empty text",
+                level="warning",
+            )
+        )
+
+    known_reasons = {"stop", "length", "content_filter", "tool_calls"}
+    if result.finish_reason not in known_reasons:
+        warnings.append(
+            ValidationError(
+                field="result.finish_reason",
+                code="UNKNOWN_FINISH_REASON",
+                message=f"Unrecognized finish_reason: {result.finish_reason}",
+                level="warning",
+            )
+        )
+
+    if result.total_tokens == 0 and result.finish_reason != "error":
+        warnings.append(
+            ValidationError(
+                field="result.usage",
+                code="ZERO_TOKENS",
+                message="Generation used zero tokens — possible placeholder result",
+                level="warning",
+            )
+        )
+
+    return ContractValidationResult(
+        passed=len(errors) == 0,
+        errors=errors,
+        warnings=warnings,
+        chunk_count=len(result.text),
+        total_chars=len(result.text),
+    )
+
+
+# ── Reranker output validator ───────────────────────────────────────
+
+
+def validate_reranker_output(
+    results: List[RetrievalResult], input_len: int
+) -> ContractValidationResult:
+    """Runtime validation of reranker/scoring output.
+
+    Contract checks:
+      - Every element is a RetrievalResult
+      - Output length <= input length (error if violated)
+      - Ranks are sequential starting at 1 (warning if not)
+      - Scores are in descending order (warning if not)
+      - Scores are in [-1, 1] (warning if outside)
+    """
+    errors: List[ValidationError] = []
+    warnings: List[ValidationError] = []
+
+    if not isinstance(results, list):
+        return ContractValidationResult(
+            passed=False,
+            errors=[
+                ValidationError(
+                    field="output",
+                    code="NOT_A_LIST",
+                    message=f"Expected list, got {type(results).__name__}",
+                )
+            ],
+        )
+
+    # Length contract
+    if len(results) > input_len:
+        errors.append(
+            ValidationError(
+                field="results",
+                code="OUTPUT_EXCEEDS_INPUT",
+                message=f"Reranker returned {len(results)} results for {input_len} input chunks",
+            )
+        )
+
+    total_score = 0.0
+    for i, item in enumerate(results):
+        if not isinstance(item, RetrievalResult):
+            errors.append(
+                ValidationError(
+                    field=f"results[{i}]",
+                    code="TYPE_MISMATCH",
+                    message=f"Expected RetrievalResult, got {type(item).__name__}",
+                )
+            )
+            continue
+
+        # Score range
+        if not (-1.0 <= item.score <= 1.0):
+            warnings.append(
+                ValidationError(
+                    field=f"results[{i}].score",
+                    code="SCORE_OUT_OF_RANGE",
+                    message=f"Score {item.score} is outside [-1, 1]",
+                    level="warning",
+                )
+            )
+
+        total_score += item.score
+
+    # Rank contract
+    for i, item in enumerate(r for r in results if isinstance(r, RetrievalResult)):
+        if item.rank != i + 1:
+            warnings.append(
+                ValidationError(
+                    field=f"results[{i}].rank",
+                    code="NON_SEQUENTIAL_RANK",
+                    message=f"Expected rank {i + 1}, got {item.rank}",
+                    level="warning",
+                )
+            )
+
+    # Descending score contract
+    score_list = [r.score for r in results if isinstance(r, RetrievalResult)]
+    if score_list != sorted(score_list, reverse=True):
+        warnings.append(
+            ValidationError(
+                field="results[*].score",
+                code="UNSORTED_SCORES",
+                message="Results are not sorted by descending score",
+                level="warning",
+            )
+        )
+
+    return ContractValidationResult(
+        passed=len(errors) == 0,
+        errors=errors,
+        warnings=warnings,
+        chunk_count=len(results),
+        total_chars=0,
     )

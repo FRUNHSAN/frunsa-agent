@@ -12,7 +12,13 @@ from .registry import (
 )
 from .retrieval import RetrievalResult, RetrievalStrategy
 from .scoring import ScoringStrategy
-from .validation import ContractValidationResult, ValidationError, validate_chunk_output
+from .validation import (
+    ContractValidationResult,
+    ValidationError,
+    validate_chunk_output,
+    validate_generation_output,
+    validate_reranker_output,
+)
 
 __all__ = [
     # Data models
@@ -30,6 +36,8 @@ __all__ = [
     "ContractValidationResult",
     "ValidationError",
     "validate_chunk_output",
+    "validate_generation_output",
+    "validate_reranker_output",
     # Registry
     "COMPONENT_REGISTRY",
     "ComponentRegistry",
