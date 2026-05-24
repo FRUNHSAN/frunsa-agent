@@ -1,0 +1,227 @@
+# ── Reasoning Chain ───────────────────────────────────────────────────
+chain_id: phase_12_observability_closed_loop
+title: "Observability closed loop: per-item trace, SQLite sink, component candidate analysis"
+created_at: "2026-05-25T12:00:00Z"
+status: active
+tags: [observability, streaming_trace, sqlite_sink, per_item, cost_boundary, schema_first, component_analysis, orchestration_pre_design, observability_closed_loop]
+related_chains:
+  - phase_11_trace_contract_verification
+  - phase_10_planning_engine_integration
+  - phase_05_external_io
+  - phase_04_observability
+
+# ── 1. Context ───────────────────────────────────────────────────────
+
+context: |
+  Phase 11 proved trace_context passes through the adapter pipe losslessly
+  and built the first "at-rest" consumer (FileTraceExporter writing JSON Lines
+  + declarative TRACE_KEY_REGISTRY). 350 tests, 0 failures, 11 guardrails.
+
+  Critical limitation: DependencyCallTrace.trace_context captures only the
+  LAST StreamItem's trace_context — not per-item. A RAG call with 50 chunks
+  and a Planning call with 3 steps both produce exactly 1 trace record.
+  This is insufficient for per-item latency analysis, streaming completeness
+  verification, and component-level trace key empirical analysis.
+
+  Phase 12 is 观测闭环 (observability closed loop), NOT 编排开启
+  (orchestration kickoff). The goal: make Phase 11's data actually usable,
+  before adding any new system complexity.
+
+  Strategic constraint: zero external dependencies. SQLite is in Python
+  stdlib (sqlite3). Pure B-tree indexes — NO FTS5 (compile-time optional,
+  not needed for structured WHERE queries).
+
+  Guiding principle: 观测先行 — every new capability layer must first be
+  covered by the observability layer above it. Phase 11 proved engine-layer
+  trace is transmittable → Phase 12 proves sink can consume it → Phase 13
+  can build component platform on top.
+
+# ── 2. Decision ──────────────────────────────────────────────────────
+
+decision: |
+  Phase 12 delivers 4 components (~1,000 LOC, zero new dependencies):
+
+  1. **Per-item Streaming Trace abstraction** — StreamingTraceRecord (frozen)
+     captures trace_context from EVERY StreamItem. StreamingTraceWriter
+     Protocol enforces max_items_per_call as structural cost boundary
+     (-1=unlimited, 0=count-only, N>0=cap). Adapter blindly collects all
+     records; sink enforces truncation — single responsibility.
+
+  2. **SQLiteTraceSink** — at-rest archival implementing both TraceWriter
+     (summary) and StreamingTraceWriter (per-item) protocols. Schema generated
+     from declarative ColumnDef/IndexDef in sink_schema.py. Pure B-tree,
+     no FTS5. Schema validated by sink_schema_consistency guardrail.
+
+  3. **Component Candidate empirical analysis** — runs N=2 engine stubs,
+     computes per-key statistics with hardcoded classification thresholds
+     (95% occurrence, 100% type match, bounded cardinality). Produces
+     human-readable report + structured JSON for Phase 13 interface design.
+
+  4. **Orchestration trace pre-design** — 6 projected orchestration.* keys
+     documented in a separate reasoning chain (phase_12_orchestration_trace_pre_design).
+     NOT FOR IMPLEMENTATION. Exists so sink schema doesn't need disruptive
+     migration when orchestration arrives (Phase 14+).
+
+# ── 3. Rationale ─────────────────────────────────────────────────────
+
+rationale: |
+  ## Why Option B (parallel write path)?
+
+  StreamingTraceWriter Protocol lives alongside TraceWriter — no existing
+  types modified. FileTraceExporter continues to consume TraceLog for summary
+  records. SQLiteTraceSink consumes StreamingTraceRecord for per-item records.
+  350 existing tests continue to pass without modification.
+
+  Alternative A (unified write path) would require changing TraceWriter's
+  signature, breaking FileTraceExporter and all existing test cases.
+  Alternative C (adapter-side truncation) would duplicate cost boundary logic
+  across every future adapter implementation.
+
+  ## Why SQLite pure B-tree (not FTS5)?
+
+  FTS5 is compile-time optional in SQLite — not guaranteed to be available.
+  Phase 12's query patterns (WHERE engine=? AND status=? GROUP BY key)
+  are structured, not free-text. B-tree indexes are sufficient. FTS5 can
+  be added later with CREATE VIRTUAL TABLE ... USING fts5(...) if needed.
+
+  ## Why cost boundary in protocol, not adapter?
+
+  max_items_per_call is a property on StreamingTraceWriter — a structural
+  requirement, not an optimization. Without it, a RAG call with 50 chunks
+  produces 50 records vs Planning's 3 = 16x storage asymmetry with no
+  upper bound.
+
+  Enforcing in the sink (not adapter) means a single implementation
+  handles truncation for all future adapters. The adapter blindly collects
+  all StreamingTraceRecords — no duplicate truncation logic.
+
+  ## Why schema-first?
+
+  sink_schema.py is written before any SQL. It's a TypedDict-based
+  declarative definition of all tables, columns, and indexes. The
+  sink_schema_consistency guardrail validates that runtime SQL matches
+  the declaration. This is the most important deliverable — it's a
+  schema design problem, not a retrieval performance problem.
+
+  ## Why 95%/100%/bounded classification thresholds?
+
+  95% occurrence: tolerates engine stub edge cases while requiring
+  near-universal presence. 100% type match: TraceKeyDef.type is a contract
+  — runtime deviation is unambiguous. Bounded cardinality: free-text values
+  (user-generated content) are not component-level signals.
+
+# ── 4. Alternatives ───────────────────────────────────────────────────
+
+alternatives:
+  - option: "A: Unified write path — extend TraceWriter to handle per-item"
+    pros: "Single protocol, less code"
+    cons: "Breaks FileTraceExporter contract, requires all existing tests to change, couples summary and per-item concerns"
+
+  - option: "B: Parallel write path — StreamingTraceWriter alongside TraceWriter"
+    pros: "No existing types modified, 350 tests unchanged, clean separation of concerns"
+    cons: "Two protocols to implement, slight duplication in SQLiteTraceSink (implements both)"
+
+  - option: "C: Adapter-side truncation"
+    pros: "Sink stays simple"
+    cons: "Duplicate truncation logic across N adapter implementations, violates single responsibility"
+
+  - option: "D: FTS5 full-text search in SQLite"
+    pros: "Full-text query support"
+    cons: "Compile-time optional — not guaranteed, not needed for structured WHERE queries, adds complexity"
+
+  - option: "E: Kafka / PostgreSQL / external DB for sink"
+    pros: "Production-grade, concurrent writers"
+    cons: "External dependency, violates zero-dependency constraint, overkill for Phase 12 archival needs"
+
+# ── 5. Evidence ───────────────────────────────────────────────────────
+
+evidence:
+  test_files:
+    - tests/e2e/test_trace_serialization.py
+    - tests/e2e/test_sqlite_sink.py
+  test_cases:
+    - TestStreamingTraceRecord::test_frozen_integrity
+    - TestStreamingTraceRecord::test_field_population
+    - TestStreamingTraceRecord::test_delta_preview_truncation
+    - TestStreamingTraceRecord::test_default_engine_empty_string
+    - TestStreamingTraceWriterProtocol::test_max_items_per_call_required
+    - TestStreamingTraceWriterProtocol::test_write_streaming_signature
+    - TestStreamingTraceWriterProtocol::test_streaming_write_result_frozen
+    - TestAdapterPerItemCapture::test_send_stream_captures_per_item
+    - TestAdapterPerItemCapture::test_receive_stream_captures_per_item
+    - TestAdapterPerItemCapture::test_independence_from_last_trace
+    - TestAdapterPerItemCapture::test_null_trace_context
+    - TestAdapterPerItemCapture::test_streaming_traces_cleared_between_calls
+    - TestSQLiteTraceSink::test_schema_creation
+    - TestSQLiteTraceSink::test_registry_seeding
+    - TestSQLiteTraceSink::test_registry_seeding_idempotent
+    - TestSQLiteTraceSink::test_version_recording
+    - TestSQLiteTraceSink::test_summary_write
+    - TestSQLiteTraceSink::test_summary_write_error_status
+    - TestSQLiteTraceSink::test_streaming_write
+    - TestSQLiteTraceSink::test_truncation_at_cap
+    - TestSQLiteTraceSink::test_count_only_mode
+    - TestSQLiteTraceSink::test_unlimited_mode
+    - TestSQLiteTraceSink::test_empty_streaming_write
+    - TestSQLiteTraceSink::test_query_by_engine
+    - TestSQLiteTraceSink::test_query_by_run
+    - TestSQLiteTraceSink::test_query_keys_component_candidate_filter
+    - TestSQLiteTraceSink::test_query_item_counts_by_dependency
+    - TestSQLiteTraceSink::test_engine_inference
+    - TestSQLiteTraceSink::test_context_manager
+    - TestSQLiteTraceSink::test_summary_and_streaming_coexistence
+    - TestSinkSchemaGuardrail::test_consistent_schema_passes
+    - TestSinkSchemaGuardrail::test_guardrail_includes_all_declared_indexes
+  benchmark_results: |
+    382 tests pass (350 Phase 11 + 32 Phase 12), 1 skipped, 0 failures.
+    12 guardrails PASSED. 0 external dependencies. Full stdlib.
+
+# ── 6. Future Guidance ───────────────────────────────────────────────
+
+future_guidance: |
+  ## Phase 13: Component platform trace keys
+
+  The 3 component_candidate=True keys that meet confirmed_component
+  thresholds should migrate to component-level trace contracts in
+  core/contracts/trace_keys.py. The analysis script
+  (scripts/analyze_component_candidates.py) provides stable, reproducible
+  justification for each migration decision.
+
+  ## max_items_per_call tuning
+
+  Default cap of 100 items/dependency call is intentionally conservative.
+  Tune per-environment based on observed item counts. RAG calls typically
+  produce 5-50 chunks; Planning calls produce 3-10 steps. The guardrail
+  validation ensures the cap is declared, not what value it should be.
+
+  ## Sink schema migration
+
+  To add new tables or columns:
+  1. Update sink_schema.py declarations first
+  2. Increment CURRENT_SCHEMA_VERSION
+  3. Update SQLiteTraceSink._create_schema() migration logic
+  4. Run sink_schema_consistency guardrail to validate
+  5. The schema_version table records migration history
+
+  ## Per-item trace as Phase 13+ input
+
+  StreamingTraceRecord data in SQLite enables:
+  - Per-item latency analysis (ts_iso deltas between consecutive items)
+  - Streaming completeness verification (item_index gaps)
+  - Component-level trace key empirical analysis (aggregate across N engines)
+  - Engine identification from trace_context keys (for unregistered engines)
+
+  ## Guardrail upgrade path
+
+  sink_schema_consistency is WARNING in Phase 12. Upgrade to ERROR in
+  Phase 14+ after schema has proven stable through 2+ phases of use.
+
+anti_patterns:
+  - "Adapter-side truncation: putting max_items_per_call logic in stream_adapter.py instead of the sink. One implementation in the sink vs N in every adapter."
+  - "FTS5 for structured queries: using CREATE VIRTUAL TABLE ... USING fts5 for exact-match and GROUP BY queries. B-tree indexes are sufficient and guaranteed available."
+  - "Last-item-only trace_context: using DependencyCallTrace.trace_context (last-item semantics) for per-item analysis. Use StreamingTraceRecord for per-item needs."
+  - "Schema without guardrail: adding tables or columns to SQLiteTraceSink without updating sink_schema.py declarations. The sink_schema_consistency guardrail enforces schema-first."
+  - "Cost boundary as afterthought: treating max_items_per_call as optional optimization rather than a structural protocol requirement. Without it, per-item trace is unbounded storage."
+  - "Component candidate keys without empirical validation: promoting component_candidate keys to core/contracts/ without running the analysis script. Classification thresholds provide stable justification."
+  - "Orchestration implementation before Phase 14: implementing orchestration keys or engine before the component platform exists. The pre-design chain explicitly marks these as NOT FOR IMPLEMENTATION."
+  - "Mixed engine occurrence rate expectations: expecting a per-engine key like 'rag.chunk_id' to appear in 95% of ALL items across heterogeneous engines. Per-engine keys should be analyzed within their engine scope."

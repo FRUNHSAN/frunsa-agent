@@ -13,7 +13,7 @@
 # Schema: schemas/reasoning_chain.schema.json
 
 library_version: 1
-last_updated: "2026-05-24T23:59:00Z"
+last_updated: "2026-05-25T12:00:00Z"
 
 # ── Chains by architectural layer ────────────────────────────────────
 
@@ -124,6 +124,20 @@ chains:
     tags: [observability, trace_context, file_exporter, serialization, json_lines, registry, component_candidate]
     status: active
 
+  - chain_id: phase_12_observability_closed_loop
+    file: chains/phase_12_observability_closed_loop.yaml
+    title: "Observability closed loop: per-item trace, SQLite sink, component candidate analysis"
+    layer: observability
+    tags: [observability, streaming_trace, sqlite_sink, per_item, cost_boundary, schema_first, component_analysis, orchestration_pre_design, observability_closed_loop]
+    status: active
+
+  - chain_id: phase_12_orchestration_trace_pre_design
+    file: chains/phase_12_orchestration_trace_pre_design.yaml
+    title: "Orchestration trace key pre-design: 6 projected keys for Phase 14+"
+    layer: observability
+    tags: [orchestration, trace_keys, pre_design, observability_closed_loop, schema_planning]
+    status: active
+
 # ── Tag index for quick lookup ───────────────────────────────────────
 
 tag_index:
@@ -179,4 +193,16 @@ tag_index:
   file_exporter: [phase_11_trace_contract_verification]
   json_lines: [phase_11_trace_contract_verification]
   registry: [phase_11_trace_contract_verification]
-  component_candidate: [phase_11_trace_contract_verification]
+  component_candidate: [phase_11_trace_contract_verification, phase_12_observability_closed_loop]
+  streaming_trace: [phase_12_observability_closed_loop]
+  sqlite_sink: [phase_12_observability_closed_loop]
+  per_item: [phase_12_observability_closed_loop]
+  cost_boundary: [phase_12_observability_closed_loop]
+  schema_first: [phase_12_observability_closed_loop]
+  component_analysis: [phase_12_observability_closed_loop]
+  orchestration_pre_design: [phase_12_observability_closed_loop, phase_12_orchestration_trace_pre_design]
+  observability_closed_loop: [phase_12_observability_closed_loop, phase_12_orchestration_trace_pre_design]
+  orchestration: [phase_12_orchestration_trace_pre_design]
+  trace_keys: [phase_12_orchestration_trace_pre_design]
+  pre_design: [phase_12_orchestration_trace_pre_design]
+  schema_planning: [phase_12_orchestration_trace_pre_design]

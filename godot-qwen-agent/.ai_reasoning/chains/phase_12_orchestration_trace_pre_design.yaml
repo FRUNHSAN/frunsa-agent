@@ -1,0 +1,144 @@
+# ── Reasoning Chain ───────────────────────────────────────────────────
+chain_id: phase_12_orchestration_trace_pre_design
+title: "Orchestration trace key pre-design: 6 projected keys for Phase 14+"
+created_at: "2026-05-25T12:00:00Z"
+status: active
+tags: [orchestration, trace_keys, pre_design, observability_closed_loop, schema_planning]
+related_chains:
+  - phase_11_trace_contract_verification
+  - phase_12_observability_closed_loop
+
+# ── 1. Context ───────────────────────────────────────────────────────
+
+context: |
+  Phase 12 is 观测闭环, NOT 编排开启. The orchestration platform
+  (core/orchestration/) is projected for Phase 14+. However, the
+  SQLiteTraceSink schema (sink_schema.py) must accommodate future
+  orchestration trace keys without a disruptive migration.
+
+  This chain pre-defines 6 projected `orchestration.*` trace_context keys
+  that the orchestration engine will emit. These are DOCUMENTATION ONLY —
+  no implementation, no registry entries, no guardrail updates. They exist
+  so that:
+  1. The trace_keys table schema already supports orchestration keys
+     (engine="orchestration", component_candidate=False)
+  2. Future Phase 14+ work knows exactly which keys to register
+  3. No disruptive schema migration is needed when orchestration arrives
+
+  NOT FOR IMPLEMENTATION. Phase 14+ will implement.
+
+# ── 2. Projected orchestration.* keys ─────────────────────────────────
+
+decision: |
+  6 projected orchestration trace_context keys, categorized by semantic role:
+
+  ## Execution identity
+  - orchestration.dag_node_id (str): unique identifier of the DAG node
+    currently executing. Enables per-node latency tracking and error
+    attribution.
+
+  ## Concurrency structure
+  - orchestration.parallel_depth (int): current depth in the parallel
+    execution tree (0=root, increments at each fan-out). Enables
+    parallelism efficiency analysis.
+  - orchestration.merge_ordinal (int): ordinal position (0-based) when
+    merging results from parallel branches into a single downstream node.
+    Enables merge ordering determinism verification.
+
+  ## Control flow
+  - orchestration.branch_taken (str): identifier of which branch was
+    selected for conditional branching nodes (e.g. "fast_path",
+    "full_rerank"). Enables branch frequency and decision quality analysis.
+  - orchestration.retry_count (int): number of retries attempted for this
+    node (0 = first attempt). Enables reliability analysis and retry storm
+    detection (retry_count >= 3 -> alert candidate).
+
+  ## Resource management
+  - orchestration.resource_pool_key (str): resource pool identifier for
+    capacity tracking (e.g. "gpu_t4", "high_mem", "default"). Enables
+    resource utilization and pool saturation analysis.
+
+# ── 3. Rationale ──────────────────────────────────────────────────────
+
+rationale: |
+  These 6 keys were chosen by projecting the orchestration engine's
+  runtime concerns onto the trace_context plane:
+
+  1. Every Phase 14+ orchestration primitive (fan-out, fan-in, retry,
+     conditional branch, resource acquisition) has exactly one
+     corresponding trace key — no more, no less.
+  2. Value types are simple (str, int) — no nested structures, no
+     serialization complexity. This is intentionally conservative:
+     complex orchestration state belongs in orchestration-internal
+     records, not trace_context.
+  3. No key is marked component_candidate. Orchestration keys describe
+     the orchestration engine's own behavior, not a component capability.
+     They belong in the engine platform, not the component platform.
+  4. The "orchestration." prefix namespace is reserved. No current engine
+     uses it (planning.*, rag.*). No future engine should use it unless
+     it is the orchestration engine.
+
+  Schema impact: the trace_keys table already supports arbitrary engine
+  names via its TEXT `engine` column. Seeding orchestration keys requires
+  only INSERT statements — no DDL migration.
+
+# ── 4. Alternatives ───────────────────────────────────────────────────
+
+alternatives:
+  - option: "A: Add orchestration.* keys to TRACE_KEY_REGISTRY now"
+    pros: "Schema future-proofed immediately, guardrail covers them"
+    cons: "No runtime producer exists — registry reflects unreality. Violates 观测先行 principle"
+  - option: "B: Defer entirely to Phase 14 — no pre-design"
+    pros: "Zero Phase 12 work"
+    cons: "Phase 14 implementer has no schema contract guidance; risk of disruptive schema migration or namespace collision"
+  - option: "C: Pre-design as documentation-only chain (CHOSEN)"
+    pros: "Schema impact documented, namespace reserved, Phase 14 implementer has clear checklist; no Phase 12 implementation burden"
+    cons: "Requires Phase 14 implementer to read this chain before implementing"
+
+# ── 5. Future Guidance ────────────────────────────────────────────────
+
+future_guidance: |
+  ## Phase 14+ implementation checklist (DO NOT implement before Phase 14):
+
+  1. Add 6 TraceKeyDef entries to TRACE_KEY_REGISTRY under
+     engine="orchestration", all component_candidate=False.
+  2. The orchestration engine MUST emit trace_context dicts containing
+     these keys on every StreamItem it yields. No optional keys —
+     all 6 keys must be present on every orchestration StreamItem.
+  3. SQLiteTraceSink will store them automatically — no schema change
+     needed (engine column is TEXT, accepts "orchestration").
+  4. Update trace_key_registration guardrail to expect these 6 keys
+     in orchestration engine output.
+  5. FileTraceExporter._infer_engine() will resolve "orchestration.*" ->
+     "orchestration" via the registry prefix map — no code change needed.
+  6. The component_candidate analysis script (Step 4) will naturally
+     skip these keys (component_candidate=False).
+
+  ## Schema migration path (Phase 12 -> 14+):
+  - Phase 12: trace_keys table has 6 rows (planning + rag).
+  - Phase 14+: _seed_trace_keys() inserts 6 more rows (orchestration).
+    No ALTER TABLE, no index rebuild, no data migration.
+  - The schema_version table records migration history:
+    v1 = Phase 12 initial schema, v2 = Phase 14 orchestration seed.
+
+  ## Anti-patterns to avoid:
+  - DO NOT add orchestration keys to TRACE_KEY_REGISTRY before Phase 14.
+  - DO NOT create orchestration engine stub before Phase 14.
+  - DO NOT mark orchestration keys as component_candidate.
+  - DO NOT use nested dicts as orchestration key values.
+  - DO NOT collide with the "orchestration." prefix from non-orchestration
+    engines.
+
+anti_patterns:
+  - "Premature orchestration key registration: adding orchestration.* TraceKeyDef entries before the orchestration engine exists. The registry reflects runtime reality, not projections."
+  - "Orchestration keys marked component_candidate: orchestration keys describe engine behavior, not component capabilities. Only retrieval/generation/scoring keys are component_candidate."
+  - "Nested orchestration trace values: using dict/list values for orchestration keys instead of simple str/int. Complex state belongs in orchestration-internal records, not trace_context."
+  - "Orchestration prefix collision: any non-orchestration engine using the 'orchestration.' prefix. This namespace is reserved."
+  - "Schema migration via ALTER TABLE: the trace_keys table already supports orchestration via TEXT engine column. Use INSERT, not DDL."
+
+# ── 6. Evidence ───────────────────────────────────────────────────────
+
+evidence:
+  test_files: []
+  test_cases: []
+  benchmark_results: "No tests — this is a documentation-only pre-design. Verification deferred to Phase 14+."

@@ -65,6 +65,7 @@ These are non-negotiable. Violating any of them will break the platform contract
 | 8 | `health_check()` uses `get_running_loop()` + `asyncio.run()` fallback, never bare `get_event_loop()` | phase_05_external_io |
 | 9 | `DependencyHealth` declared for every external dependency | phase_04_observability |
 | 10 | `DependencyCallTrace` injected for every external call | phase_04_observability |
+| 11 | 观测先行: every new capability layer must first be covered by the observability layer above it (engine trace → sink → component platform) | phase_12_observability_closed_loop |
 
 ## Machine Enforcement (Phase 8.0)
 
