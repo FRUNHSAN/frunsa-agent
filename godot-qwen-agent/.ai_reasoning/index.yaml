@@ -102,6 +102,20 @@ chains:
     tags: [cloud_native, transport, streaming, pace_shaping, multi_engine, architecture, wire_format]
     status: active
 
+  - chain_id: phase_10_planning_engine_selection
+    file: chains/phase_10_planning_engine_selection.yaml
+    title: "Second-engine selection: why Planning over Tool Use / Reflection / Code Generation"
+    layer: architecture
+    tags: [planning, multi_engine, engine_selection, adapter_validation, contract_testing]
+    status: active
+
+  - chain_id: phase_10_planning_engine_integration
+    file: chains/phase_10_planning_engine_integration.yaml
+    title: "Planning engine integration findings: N=2 contract validation results"
+    layer: architecture
+    tags: [planning, multi_engine, integration, adapter_validation, trace_context, deadline, jitter]
+    status: active
+
 # ── Tag index for quick lookup ───────────────────────────────────────
 
 tag_index:
@@ -143,5 +157,13 @@ tag_index:
   cloud_native: [phase_09_multi_engine_architecture_vision]
   transport: [phase_09_multi_engine_architecture_vision]
   pace_shaping: [phase_09_multi_engine_architecture_vision]
-  multi_engine: [phase_09_multi_engine_architecture_vision]
+  multi_engine: [phase_09_multi_engine_architecture_vision, phase_10_planning_engine_selection, phase_10_planning_engine_integration]
   wire_format: [phase_09_multi_engine_architecture_vision]
+  planning: [phase_10_planning_engine_selection]
+  engine_selection: [phase_10_planning_engine_selection]
+  adapter_validation: [phase_10_planning_engine_selection]
+  contract_testing: [phase_10_planning_engine_selection]
+  integration: [phase_10_planning_engine_integration]
+  trace_context: [phase_10_planning_engine_integration]
+  deadline: [phase_10_planning_engine_integration]
+  jitter: [phase_10_planning_engine_integration]

@@ -9,9 +9,11 @@ from guardrails.report import CheckReport, Severity, Violation
 from guardrails.rules import (
     component_registration_coverage,
     cross_platform_imports,
+    engine_interface_purity,
     frozen_dataclass_integrity,
     internal_stream_only,
     reasoning_chain_coverage,
+    trace_context_namespace,
     transport_adapter_boundary,
     user_facing_stream_isolation,
 )
@@ -31,6 +33,8 @@ class GuardrailChecker:
             "user-facing-stream-isolation": user_facing_stream_isolation,
             "internal-stream-only": internal_stream_only,
             "transport-adapter-boundary": transport_adapter_boundary,
+            "engine-interface-purity": engine_interface_purity,
+            "trace-context-namespace": trace_context_namespace,
         }
 
     @staticmethod

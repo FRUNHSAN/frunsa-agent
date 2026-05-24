@@ -1,0 +1,183 @@
+# ── Reasoning Chain ───────────────────────────────────────────────────
+chain_id: phase_10_planning_engine_integration
+title: "Planning engine integration findings: N=2 contract validation results"
+created_at: "2026-05-25T00:30:00Z"
+updated_at: "2026-05-25T00:30:00Z"
+tags: [planning, multi_engine, integration, adapter_validation, trace_context, deadline, jitter]
+status: active
+related_chains:
+  - phase_10_planning_engine_selection
+  - phase_09_multi_engine_architecture_vision
+  - phase_08_async_native_evolution
+  - phase_03_adapter_pattern
+
+# ── 1. Context ───────────────────────────────────────────────────────
+
+context: |
+  Phase 10 selected Planning as the second engine type to validate
+  Phase 9/9.1 adapter contracts. The goal was to use Planning's orthogonal
+  behavior (bursty CPU-bound reasoning vs. uniform I/O-bound retrieval)
+  as an adversarial test of the adapter's abstraction boundaries.
+
+  Three extension points were tested:
+  1. trace_context: opaque Dict with engine-specific key namespaces
+  2. adaptive_strategy="jitter": PaceConfig routing to engine-specific pacing
+  3. send_with_deadline: operation-level timeout distinct from transport timeout
+
+  This chain documents what was learned during the integration — what
+  worked without changes, what required adjustment, and what should
+  inform Phase 11 (Observability) design.
+
+# ── 2. Decision ──────────────────────────────────────────────────────
+
+decision: |
+  The Phase 9/9.1 adapter contracts passed N=2 validation with minimal
+  friction. Planning engine integration required:
+  - Zero changes to RAG engine code (verified invariant)
+  - 3 lines added to PaceShapingWrapper for jitter strategy routing
+  - 1 clock resolution fix in stub (time.monotonic() → time.perf_counter())
+  - 2 new guardrails rules to enforce multi-engine hygiene
+
+  The opaque Dict design of trace_context proved correct: Planning's
+  hierarchical keys (planning.step_index, planning.reasoning_depth,
+  planning.parent_step_id) and RAG's flat keys (rag.chunk_id,
+  rag.retrieval_latency_ms) coexist without adapter changes.
+
+# ── 3. Rationale ─────────────────────────────────────────────────────
+
+rationale: |
+  Key findings from the integration process:
+
+  1. trace_context opaque Dict = correct design:
+     The adapter serializes/deserializes trace_context without inspecting
+     keys. JsonRpc20Serializer round-trips all key namespaces intact.
+     Planning.* and rag.* keys coexist in a single StreamItem without
+     collision. The design choice of Dict[str, Any] over structured fields
+     was validated — any structured schema would have leaked RAG or
+     Planning assumptions into the contract.
+
+  2. adaptive_strategy routing mechanism works:
+     PaceConfig.adaptive_strategy is read by PaceShapingWrapper and
+     routed to the correct strategy branch. The jitter branch raises
+     NotImplementedError — proving routing without premature implementation.
+     The check is positioned BEFORE the backpressure_signal check, so
+     jitter strategy does not require a backpressure signal (correct:
+     jitter is about timing variance, not queue depth).
+
+  3. Operation-level deadline semantics validated:
+     Planning stub checks elapsed time (perf_counter, not monotonic)
+     before each step yield. When deadline=0.0, the first iteration
+     catches it and raises asyncio.TimeoutError. The adapter's send_stream
+     catches this in its asyncio.TimeoutError handler and records
+     status="timeout" in last_trace. The layered timeout contract
+     (transport-level vs. operation-level) is proven.
+
+  4. Clock resolution matters for sub-ms deadlines:
+     time.monotonic() has ~15ms resolution on Windows — insufficient
+     for deadline enforcement in fast stubs. time.perf_counter() provides
+     microsecond resolution and is the correct clock for operation-level
+     deadlines. Production Planning engines with real LLM calls (>100ms
+     per step) would not hit this, but the stub exposed it.
+
+  5. Guardrails: 2 new rules for multi-engine hygiene:
+     - engine_interface_purity: AST-enforced zero-implementation in
+       engines/*/interface.py (Ellipsis-only bodies)
+     - trace_context_namespace: WARNING-level enforcement of dot-separated
+       engine prefixes in trace_context keys
+
+# ── 4. Alternatives ──────────────────────────────────────────────────
+
+alternatives:
+  - option: "Implement jitter strategy in Phase 10"
+    pros: "End-to-end pacing validation for Planning engine"
+    cons: "Premature implementation without real Planning workload data.
+      The NotImplementedError routing is sufficient to prove the extension
+      point works. Implementation deferred to Phase 11+ when real Planning
+      latency data is available."
+
+  - option: "Make trace_context_namespace ERROR instead of WARNING"
+    pros: "Stronger enforcement from day one"
+    cons: "Existing test code uses bare keys in some places; migration
+      should be gradual. Upgrading to ERROR in Phase 11 after tech-debt
+      cleanup is the safer path."
+
+  - option: "Merge PlanningStep into StreamItem (no separate engine model)"
+    pros: "Fewer types; simpler adapter path"
+    cons: "Violates the engines-as-consumers principle. Each engine needs
+      its own internal model optimized for its domain. PlanningStep →
+      StreamItem conversion is the engine's responsibility, not the
+      adapter's."
+
+# ── 5. Evidence ──────────────────────────────────────────────────────
+
+evidence:
+  test_files:
+    - tests/e2e/test_planning_adapter_integration.py (10 tests, all green)
+    - engines/planning/interface.py (Protocol + dataclass, zero implementation)
+    - engines/planning/stub.py (3-step hardcoded planner)
+  test_cases:
+    - "TestTraceContextNamespaceIsolation::test_planning_keys_survive_round_trip"
+    - "TestTraceContextNamespaceIsolation::test_planning_keys_dont_conflict_with_rag_keys"
+    - "TestTraceContextNamespaceIsolation::test_no_cross_engine_key_leakage"
+    - "TestAdaptiveStrategyJitterRouting::test_jitter_strategy_recognized"
+    - "TestAdaptiveStrategyJitterRouting::test_jitter_strategy_error_context"
+    - "TestDeadlineTimeout::test_planning_deadline_triggers_timeout"
+    - "TestDeadlineTimeout::test_planning_with_sufficient_deadline_completes"
+  adapter_changes:
+    - core/adapters/stream_adapter.py: +3 lines (jitter strategy routing)
+  rag_changes:
+    - (none — verified by git diff core/pipeline/engine.py is empty)
+  guardrails:
+    - 9 rules passing (2 new: engine-interface-purity, trace-context-namespace)
+
+# ── 6. Anti-Patterns ─────────────────────────────────────────────────
+
+anti_patterns:
+  - "Hardcoding engine_type-based branches in PaceShapingWrapper. Strategy routing uses PaceConfig.adaptive_strategy — the engine declares its need, the adapter provides the mechanism. No if engine_type == 'planning' checks."
+  - "Using time.monotonic() for operation-level deadlines. Use time.perf_counter() for sub-ms resolution. monotonic() has ~15ms granularity on Windows."
+  - "Adding engine-specific fields to StreamItem. Use the opaque trace_context Dict — each engine owns its key namespace."
+  - "Implementing jitter strategy from Planning stub data alone. Wait for real Planning workload profiles before choosing pacing algorithm parameters."
+  - "Making trace_context keys without '.' separator. Always use engine prefix: 'planning.*', 'rag.*'. Guardrail trace-context-001 enforces this."
+
+# ── 7. Future Guidance ───────────────────────────────────────────────
+
+future_guidance: |
+  1. For Phase 11 (Observability):
+     - trace_context is now proven to carry engine-specific tracing data
+       through the adapter. The Observability layer should read trace_context
+       keys by engine prefix to build per-engine trace views without
+       parsing engine-specific semantics.
+     - last_trace on AsyncDataStreamAdapter already records timeout/error/success
+       status. Phase 11 should add trace_context propagation to DependencyCallTrace
+       so cross-engine call chains are traceable.
+     - The deadline timeout path (status="timeout") is tested and working.
+       Phase 11 should add metrics aggregation for timeout rates per engine type.
+
+  2. For future engine integrations (Phase 11+):
+     - Follow the Planning pattern: define interface.py (Protocol + data model),
+       write TDD tests against adapter contracts, implement minimal stub.
+     - Each new engine should use a UNIQUE trace_context key prefix.
+     - adaptive_strategy values should be registered in PaceShapingWrapper's
+       strategy dispatch table before the engine stub is written.
+     - The next engine should differ from BOTH RAG (I/O-bound) AND Planning
+       (CPU-bound bursty) — consider Event-driven or streaming-ingest engines
+       to maximize contract coverage.
+
+  3. For jitter strategy implementation:
+     - Deferred to Phase 11+. Requires real Planning engine latency data.
+     - The strategy should control inter-item timing variance (max jitter
+       in milliseconds between consecutive yields), not throughput.
+     - Implementation belongs in PaceShapingWrapper._throttled_iter(),
+       replacing the current NotImplementedError with actual pacing logic.
+
+  4. For trace_context_namespace upgrade:
+     - Currently WARNING. After existing bare keys are migrated (target: Phase 11),
+       upgrade to ERROR to prevent new bare keys from entering the codebase.
+     - Migration plan: audit all trace_context usages, add engine prefixes,
+       remove the WARNING→ERROR upgrade in guardrails/checker.py.
+
+  5. When engines/ directory grows beyond ~5 types:
+     - Consider grouping by domain: engines/reasoning/ (Planning, Reflection),
+       engines/retrieval/ (RAG), engines/generation/ (CodeGen).
+     - Each sub-package should have its own interface.py and stub.py.
+     - This is premature for Phase 10 — document only.

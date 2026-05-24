@@ -1,0 +1,160 @@
+# ── Reasoning Chain ───────────────────────────────────────────────────
+chain_id: phase_10_planning_engine_selection
+title: "Second-engine selection: why Planning over Tool Use / Reflection / Code Generation"
+created_at: "2026-05-25T00:00:00Z"
+updated_at: "2026-05-25T00:00:00Z"
+tags: [planning, multi_engine, engine_selection, adapter_validation, contract_testing]
+status: active
+related_chains:
+  - phase_09_multi_engine_architecture_vision
+  - phase_08_dag_streaming_semantics
+  - phase_03_adapter_pattern
+
+# ── 1. Context ───────────────────────────────────────────────────────
+
+context: |
+  Phase 9 built the cloud-native adaptation layer (AsyncDataStreamAdapter,
+  PaceShapingWrapper, TransportBackend) and Phase 9.1 added three extension
+  points (trace_context, adaptive_strategy, send_with_deadline). But these
+  abstractions were validated against exactly ONE engine type — RAG.
+
+  In software engineering, N=1 abstractions are guesses; N=2 are contracts.
+  The goal of Phase 10 is NOT to build a usable second engine. It is to use
+  a second engine's orthogonal behavior as the strongest possible adversarial
+  test of the Phase 9 adapter contracts.
+
+  The only valid selection criterion: which candidate engine differs most
+  from RAG in ways that stress the adapter's implicit assumptions?
+
+# ── 2. Decision ──────────────────────────────────────────────────────
+
+decision: |
+  Planning engine selected as the second engine type for Phase 10.
+
+  Planning was chosen NOT because it is "useful" or "needed by users",
+  but because it is the strongest adversarial test case against the
+  Phase 9 adapter contracts. Its behavior pattern is maximally orthogonal
+  to RAG across all three extension point dimensions.
+
+# ── 3. Rationale ─────────────────────────────────────────────────────
+
+rationale: |
+  The selection criteria matrix:
+
+  | Candidate       | Timing model        | Timeout semantics     | Trace shape        | Orthogonality |
+  |-----------------|---------------------|-----------------------|--------------------|---------------|
+  | **Planning**    | Bursty + silent     | Step-level reasoning  | Hierarchical       | **MAX**       |
+  | Tool Use        | Request-response    | Transport-only        | Flat               | LOW           |
+  | Reflection      | Consumer, not prod  | N/A (minimal output)  | N/A                | N/A           |
+  | Code Generation | Uniform text stream | Transport-only        | Flat               | NEAR-ZERO     |
+
+  Why Planning maximizes orthogonality:
+
+  1. **Timing model**: RAG is I/O-bound uniform streaming (document chunks
+     arrive at predictable intervals). Planning is CPU-bound bursty reasoning
+     (burst of output followed by silent thinking periods). This directly
+     validates adaptive_strategy="jitter" — the extension point exists
+     precisely because uniform backpressure doesn't model bursty workloads.
+
+  2. **Timeout semantics**: RAG's timeout is transport-level (did the vector
+     store respond?). Planning's timeout is operation-level (did this specific
+     reasoning step exceed its thinking budget?). This validates
+     send_with_deadline as a layered concept distinct from transport timeout.
+
+  3. **Trace shape**: RAG's trace_context is flat (chunk_id, retrieval_latency).
+     Planning's trace_context is hierarchical (step_index, reasoning_depth,
+     parent_step_id). This validates that the opaque Dict design doesn't
+     accidentally assume flat key spaces.
+
+  Why NOT the alternatives:
+
+  - **Tool Use**: Request-response pattern with no streaming output. Cannot
+    trigger pace_stream(), backpressure, or adaptive_strategy. It validates
+    "can the adapter wrap a non-streaming call" — a degenerate case, not a
+    contract stress test.
+
+  - **Reflection**: Primarily consumes other engines' outputs and produces
+    minimal feedback. Insufficient output volume to stress the adapter.
+    Its value is in Phase 11+ cross-engine orchestration, not Phase 10
+    single-engine adapter validation.
+
+  - **Code Generation**: Input→streaming output is structurally isomorphic
+    to RAG's GenerationAdapter pattern. Same timing model, same flat traces,
+    same transport-level timeout. Would produce N=1.1, not N=2.
+
+# ── 4. Alternatives ──────────────────────────────────────────────────
+
+alternatives:
+  - option: "Tool Use engine (function calling)"
+    pros: "Popular pattern; maps to MCP/tool-use protocols; high user demand"
+    cons: "Request-response, not streaming. Cannot validate pace_stream(),
+      backpressure, or adaptive_strategy. Degenerate adapter test."
+
+  - option: "Reflection / Critique engine"
+    pros: "Complements Planning; enables self-correction loops; novel pattern"
+    cons: "Consumer-type engine — primarily reads other engine outputs.
+      Minimal output of its own. Insufficient to stress adapter contracts.
+      Better suited as Phase 11+ orchestration test."
+
+  - option: "Code Generation engine"
+    pros: "Familiar pattern; shares GenerationAdapter infrastructure"
+    cons: "Structurally isomorphic to RAG (prompt→streaming text). Same
+      timing model, same trace shape. Would discover zero new adapter
+      boundary conditions. N=1.1, not N=2."
+
+  - option: "Multi-Agent coordination engine"
+    pros: "Most complex pattern; would stress all adapter dimensions"
+    cons: "Too large for Phase 10 scope. Requires inter-engine communication
+      protocol not yet designed. Premature without single-engine validation."
+
+# ── 5. Evidence ──────────────────────────────────────────────────────
+
+evidence:
+  test_files:
+    - tests/e2e/test_planning_adapter_integration.py (Phase 10 Step 2)
+    - engines/planning/interface.py (Phase 10 Step 1)
+    - engines/planning/stub.py (Phase 10 Step 3)
+  test_cases:
+    - "TestTraceContextNamespaceIsolation::test_planning_keys_survive_round_trip"
+    - "TestTraceContextNamespaceIsolation::test_planning_keys_dont_conflict_with_rag_keys"
+    - "TestAdaptiveStrategyJitterRouting::test_jitter_strategy_recognized"
+    - "TestDeadlineTimeout::test_planning_deadline_triggers_timeout"
+  design_principle: |
+    Adversarial validation: select the engine that is MAXIMALLY DIFFERENT
+    from RAG, not the engine that is most useful or most requested. Phase 10
+    is a contract stress test, not a feature delivery.
+
+# ── 6. Anti-Patterns ─────────────────────────────────────────────────
+
+anti_patterns:
+  - "Selecting Tool Use as second engine. Cannot validate streaming contracts — wastes the N=2 verification window."
+  - "Selecting an engine because it's 'useful to users' rather than because it stresses adapter boundaries."
+  - "Implementing real LLM calls in the Planning stub. Phase 10 validates contracts, not inference quality."
+  - "Adding engine_type-based branching in adapters. The adapter must remain engine-agnostic."
+  - "Modifying RAG engine during Planning integration. The point is to verify RAG needs zero changes."
+
+# ── 7. Future Guidance ───────────────────────────────────────────────
+
+future_guidance: |
+  1. When selecting future engine types for integration:
+     - Prioritize orthogonality to ALL existing engines, not just RAG
+     - After Planning is integrated, the next engine should differ from BOTH
+       RAG (uniform I/O-bound) AND Planning (bursty CPU-bound)
+     - Event-driven or streaming-ingest engines are good Phase 11+ candidates
+
+  2. trace_context namespace convention (established here):
+     - All keys MUST use dot-separated engine prefix: "planning.*", "rag.*"
+     - Guardrail trace_context_namespace enforces this at WARNING level
+     - Upgrade to ERROR when existing bare keys are migrated (target: Phase 11)
+
+  3. adaptive_strategy extension model:
+     - Each new engine declares its strategy via PaceConfig.adaptive_strategy
+     - PaceShapingWrapper routes to strategy branch; raises NotImplementedError
+       until the strategy is implemented
+     - Strategy implementations live in PaceShapingWrapper, not in engines
+     - This inverts control: engines declare needs, adapter provides mechanisms
+
+  4. When engines/ grows beyond ~5 types:
+     - Consider grouping by domain: engines/reasoning/ (Planning, Reflection),
+       engines/retrieval/ (RAG), engines/generation/ (CodeGen)
+     - This is premature for Phase 10 — document, don't implement

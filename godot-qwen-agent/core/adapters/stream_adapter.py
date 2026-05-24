@@ -152,13 +152,21 @@ class PaceShapingWrapper:
             items_since_sample += 1
 
             if items_since_sample >= burst:
-                if self._config.adaptive and self._backpressure_signal is not None:
-                    try:
-                        pressure = await self._backpressure_signal()
-                        pressure = max(0.0, min(1.0, pressure))
-                        current_rate = rate * (1.0 - pressure)
-                    except Exception:
-                        current_rate = rate
+                if self._config.adaptive:
+                    # Phase 10: route to engine-specific pacing strategy
+                    if self._config.adaptive_strategy == "jitter":
+                        raise NotImplementedError(
+                            f"adaptive_strategy='jitter' recognized but not implemented; "
+                            f"pace_config={self._config}"
+                        )
+
+                    if self._backpressure_signal is not None:
+                        try:
+                            pressure = await self._backpressure_signal()
+                            pressure = max(0.0, min(1.0, pressure))
+                            current_rate = rate * (1.0 - pressure)
+                        except Exception:
+                            current_rate = rate
 
                 if current_rate > 0:
                     delay = burst / current_rate
