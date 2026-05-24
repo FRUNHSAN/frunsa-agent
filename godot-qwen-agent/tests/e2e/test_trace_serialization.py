@@ -22,7 +22,14 @@ from core.adapters.stream_adapter import AsyncDataStreamAdapter, JsonRpc20Serial
 from core.contracts import PaceConfig, StreamItem
 from core.observability.file_exporter import FileTraceExporter
 from core.observability.trace_registry import TRACE_KEY_REGISTRY, TraceKeyDef
-from core.pipeline.tracing import DependencyCallTrace, TraceLog, StepTrace
+from core.pipeline.tracing import (
+    DependencyCallTrace,
+    StreamingTraceRecord,
+    StreamingTraceWriter,
+    StreamingWriteResult,
+    StepTrace,
+    TraceLog,
+)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -535,3 +542,239 @@ class TestTraceRegistryIntegrity:
             "rag.chunk_id",
             "rag.retrieval_latency_ms",
         }
+
+
+# ── TestStreamingTraceRecord ────────────────────────────────────────
+
+
+class TestStreamingTraceRecord:
+    """StreamingTraceRecord frozen dataclass integrity and field population (Phase 12)."""
+
+    def test_frozen_integrity(self):
+        """StreamingTraceRecord is frozen — mutation raises FrozenInstanceError."""
+        record = StreamingTraceRecord(
+            pipeline_run_id="run-1",
+            step_name="test_step",
+            dependency_name="test_dep",
+            item_index=0,
+            item_delta_preview="preview text",
+            is_terminal=False,
+            trace_context={"planning.step_index": 0},
+            ts_iso="2026-01-01T00:00:00Z",
+        )
+        with pytest.raises(Exception):  # FrozenInstanceError or AttributeError
+            record.item_index = 99  # type: ignore
+
+    def test_field_population(self):
+        """All constructor fields are stored and retrievable."""
+        record = StreamingTraceRecord(
+            pipeline_run_id="run-2",
+            step_name="rag_step",
+            dependency_name="vector_store",
+            item_index=5,
+            item_delta_preview="chunk content preview...",
+            is_terminal=True,
+            trace_context={"rag.chunk_id": "c042", "rag.retrieval_latency_ms": 12.5},
+            ts_iso="2026-01-15T10:30:00Z",
+            engine="rag",
+        )
+        assert record.pipeline_run_id == "run-2"
+        assert record.step_name == "rag_step"
+        assert record.dependency_name == "vector_store"
+        assert record.item_index == 5
+        assert record.item_delta_preview == "chunk content preview..."
+        assert record.is_terminal is True
+        assert record.trace_context == {"rag.chunk_id": "c042", "rag.retrieval_latency_ms": 12.5}
+        assert record.ts_iso == "2026-01-15T10:30:00Z"
+        assert record.engine == "rag"
+
+    def test_delta_preview_truncation(self):
+        """item_delta_preview is truncated to 200 chars by the adapter, not the dataclass."""
+        long_delta = "x" * 500
+        preview = long_delta[:200]
+        assert len(preview) == 200
+        record = StreamingTraceRecord(
+            pipeline_run_id="r", step_name="s", dependency_name="d",
+            item_index=0, item_delta_preview=preview, is_terminal=False,
+            trace_context=None, ts_iso="",
+        )
+        assert len(record.item_delta_preview) == 200
+
+    def test_default_engine_empty_string(self):
+        """engine field defaults to empty string."""
+        record = StreamingTraceRecord(
+            pipeline_run_id="r", step_name="s", dependency_name="d",
+            item_index=0, item_delta_preview="p", is_terminal=False,
+            trace_context=None, ts_iso="",
+        )
+        assert record.engine == ""
+
+
+# ── TestStreamingTraceWriterProtocol ─────────────────────────────────
+
+
+class TestStreamingTraceWriterProtocol:
+    """StreamingTraceWriter Protocol contract validation (Phase 12)."""
+
+    def test_max_items_per_call_required(self):
+        """Protocol requires max_items_per_call property."""
+        assert hasattr(StreamingTraceWriter, "max_items_per_call")
+
+    def test_write_streaming_signature(self):
+        """Protocol requires write_streaming method."""
+        assert hasattr(StreamingTraceWriter, "write_streaming")
+        assert callable(getattr(StreamingTraceWriter, "write_streaming", None))
+
+    def test_streaming_write_result_frozen(self):
+        """StreamingWriteResult is a frozen dataclass."""
+        result = StreamingWriteResult(accepted_count=5, overflow_count=0, sentinel_written=False)
+        assert result.accepted_count == 5
+        assert result.overflow_count == 0
+        assert result.sentinel_written is False
+        with pytest.raises(Exception):
+            result.accepted_count = 99  # type: ignore
+
+
+# ── TestAdapterPerItemCapture ────────────────────────────────────────
+
+
+class TestAdapterPerItemCapture:
+    """AsyncDataStreamAdapter captures per-item StreamingTraceRecords (Phase 12)."""
+
+    def test_send_stream_captures_per_item(self):
+        """send_stream → streaming_traces has one record per StreamItem."""
+        transport = _FakeTransport()
+        serializer = JsonRpc20Serializer()
+        adapter = AsyncDataStreamAdapter(
+            serializer, transport,
+            stream_trace_step_name="planning",
+            stream_trace_run_id="run-per-item-1",
+        )
+
+        async def _gen():
+            yield _planning_item("step 0", 0, step_index=0, reasoning_depth=0)
+            yield _planning_item("step 1", 1, step_index=1, reasoning_depth=1, parent_step_id="step-0")
+            yield _planning_item("final", 2, step_index=2, reasoning_depth=2, parent_step_id="step-1", is_terminal=True)
+
+        async def _test():
+            await adapter.send_stream(_gen())
+
+            records = adapter.streaming_traces
+            assert len(records) == 3, f"Expected 3 per-item records, got {len(records)}"
+
+            for i, rec in enumerate(records):
+                assert rec.pipeline_run_id == "run-per-item-1"
+                assert rec.step_name == "planning"
+                assert rec.dependency_name == "cloud_transport"
+                assert rec.item_index == i
+                assert isinstance(rec.item_delta_preview, str)
+                assert len(rec.item_delta_preview) <= 200
+                assert rec.trace_context is not None
+                assert rec.trace_context["planning.step_index"] == i
+                assert rec.ts_iso
+
+        asyncio.run(_test())
+
+    def test_receive_stream_captures_per_item(self):
+        """receive_stream → streaming_traces populated per deserialized item."""
+        items_out = [
+            _planning_item("rx_0", 0, step_index=0),
+            _planning_item("rx_1", 1, step_index=1, is_terminal=True),
+        ]
+
+        serializer = JsonRpc20Serializer()
+        transport = _FakeTransport()
+        for item in items_out:
+            transport.sent.append(serializer.serialize(item))
+
+        adapter = AsyncDataStreamAdapter(
+            serializer, transport,
+            stream_trace_step_name="receive_step",
+            stream_trace_run_id="run-rx-1",
+        )
+
+        async def _test():
+            received = [item async for item in adapter.receive_stream()]
+            assert len(received) == 2
+
+            records = adapter.streaming_traces
+            assert len(records) == 2
+            assert records[0].item_index == 0
+            assert records[1].item_index == 1
+            assert records[1].is_terminal is True
+
+        asyncio.run(_test())
+
+    def test_independence_from_last_trace(self):
+        """streaming_traces captures ALL items; last_trace still has only LAST item."""
+        transport = _FakeTransport()
+        adapter = AsyncDataStreamAdapter(
+            JsonRpc20Serializer(), transport,
+            stream_trace_step_name="indep",
+            stream_trace_run_id="run-indep",
+        )
+
+        async def _gen():
+            yield _planning_item("first", 0, step_index=0)
+            yield _planning_item("second", 1, step_index=1)
+            yield _planning_item("third", 2, step_index=2, is_terminal=True)
+
+        async def _test():
+            await adapter.send_stream(_gen())
+
+            assert len(adapter.streaming_traces) == 3
+
+            assert adapter.last_trace is not None
+            ctx = adapter.last_trace.trace_context
+            assert ctx["planning.step_index"] == 2  # last, not first
+
+            assert adapter.streaming_traces[0].trace_context["planning.step_index"] == 0
+
+        asyncio.run(_test())
+
+    def test_null_trace_context(self):
+        """StreamItems with trace_context=None produce records with None trace_context."""
+        transport = _FakeTransport()
+        adapter = AsyncDataStreamAdapter(
+            JsonRpc20Serializer(), transport,
+            stream_trace_step_name="null_ctx",
+            stream_trace_run_id="run-null",
+        )
+
+        async def _gen():
+            yield StreamItem(delta="bare", index=0, model="test", trace_context=None)
+            yield StreamItem(delta="bare", index=1, model="test", trace_context=None, is_terminal=True)
+
+        async def _test():
+            await adapter.send_stream(_gen())
+            records = adapter.streaming_traces
+            assert len(records) == 2
+            assert records[0].trace_context is None
+            assert records[1].trace_context is None
+
+        asyncio.run(_test())
+
+    def test_streaming_traces_cleared_between_calls(self):
+        """Second call to send_stream clears previous streaming_traces."""
+        transport = _FakeTransport()
+        adapter = AsyncDataStreamAdapter(
+            JsonRpc20Serializer(), transport,
+            stream_trace_step_name="clear",
+            stream_trace_run_id="run-clear",
+        )
+
+        async def _test():
+            async def _gen1():
+                yield _planning_item("a", 0, step_index=0)
+
+            await adapter.send_stream(_gen1())
+            assert len(adapter.streaming_traces) == 1
+
+            async def _gen2():
+                yield _planning_item("b", 0, step_index=0)
+                yield _planning_item("c", 1, step_index=1, is_terminal=True)
+
+            await adapter.send_stream(_gen2())
+            assert len(adapter.streaming_traces) == 2  # replaced, not appended
+
+        asyncio.run(_test())
