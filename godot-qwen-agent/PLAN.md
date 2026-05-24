@@ -1747,3 +1747,542 @@ async def pace_stream(
 3. `pytest tests/ -q` — 300+ 测试，无回归
 4. `python -c "from core.adapters import AsyncDataStreamAdapter, JsonRpc20Serializer, PaceShapingWrapper"` — 全部可导入
 5. `python -c "from core.contracts import SerializationFormat, TransportBackend, PaceConfig"` — 契约面整洁
+
+---
+
+## Phase 9.1: 运维契约加固 — 为第二引擎验证打开扩展点
+
+**完成状态**: ✅ 已完成 (Phase 9.1)
+
+### 背景
+
+Phase 9 构建了云原生适配层（AsyncDataStreamAdapter、PaceShapingWrapper、TransportBackend），但所有抽象仅对 RAG 一种引擎类型进行了验证。N=1 的抽象是猜测，N=2 的抽象才是契约。Phase 9.1 在"不对适配器填充实现"的前提下打开三个扩展点，作为 Phase 10 第二引擎（Planning）的探针。
+
+### 三个扩展点
+
+| 扩展点 | 位置 | 语义 | 当前状态 |
+|--------|------|------|----------|
+| `StreamItem.trace_context: Optional[Dict[str, Any]]` | `core/contracts/generation.py` | 引擎专属追踪数据的不透明容器，适配器盲传 | 字段已添加，deepcopy 防御已就位 |
+| `PaceConfig.adaptive_strategy: Optional[str]` | `core/contracts/streaming_protocol.py` | 引擎声明其调速需求（如 `"jitter"`），适配器路由到对应策略分支 | 字段已添加，PaceShapingWrapper 含 jitter 路由（抛 NotImplementedError 证明路由可达） |
+| `TransportBackend.send_with_deadline(data, deadline)` | `core/contracts/streaming_protocol.py` | 操作级超时，区别于传输级超时 | Protocol 方法已声明，两个 transport 占位已添加 abstractmethod |
+
+### Bug 修复（Phase 9 测试中暴露）
+
+| 问题 | 根因 | 修复 |
+|------|------|------|
+| `SpanType.EXTERNAL_CALL` 不存在 | stream_adapter.py 从未对真实测试运行 | → `SpanType.DEPENDENCY_CALL` |
+| `dependency=` 无效字段 | DependencyCallTrace 字段名是 `dependency_name` | → 4 处替换 |
+| `span=` 无效字段 | DependencyCallTrace 字段名是 `span_type` | → 4 处替换 |
+| `error_message=` 无效字段 | DependencyCallTrace 使用 `metadata={"error": str(exc)}` | → 4 处替换 |
+| `pace_stream()` 无法传递 backpressure_signal | 函数签名缺少参数 | → 添加 `backpressure_signal` 参数 |
+| `timeout` 参数被静默忽略 | send_stream/receive_stream 未使用 | → `asyncio.wait_for` 包裹 send；`asyncio.timeout_at` 包裹 receive |
+| merge 测试 hang | merge_streams 要求每个生产者以 terminal item 结束 | → 测试生成器末尾添加 terminal items |
+
+### 架构不变量
+
+- StreamItem frozen dataclass 不变（仅新增 Optional 字段）
+- PaceConfig adaptive/adaptive_strategy 均 Optional，向后兼容
+- 所有三个扩展点均"打开但未填充"——Planning 的真实需求将定义其最终形态
+
+---
+
+## Phase 10: 多引擎编排原型 — Planning 引擎集成验证
+
+**完成状态**: ✅ 已完成 (Phase 10)
+
+### 背景
+
+Phase 9/9.1 的适配器契约仅对一种引擎类型（RAG）进行了验证。在软件工程中，N=1 的抽象是猜测，N=2 的抽象才是契约。Phase 10 的目标**不是**构建可用的 Planning 引擎，而是利用 Planning 的正交行为（突发的 CPU 密集型推理 vs. 均匀的 I/O 密集型检索）作为对 Phase 9 适配器契约的最强对抗性测试。
+
+**战略约束**：零改动 RAG 引擎。适配器改动 ≤5 行。所有 Planning 专属行为驻留在 `engines/planning/`。
+
+### 引擎选择：为什么是 Planning？
+
+| 候选引擎 | 压力维度 | 结论 |
+|----------|----------|------|
+| **Planning** | 突发时序、多步超时、层级化 trace_context | **选中**：与 RAG 正交性最大 |
+| Tool Use | 请求-响应，无流式 | 拒绝：无法验证 pace_stream() 或 backpressure |
+| Reflection | 消费者，非生产者 | 拒绝：产出不足以对适配器施压 |
+| Code Generation | 均匀文本流 ≈ 同构于 RAG | 拒绝：N=1.1，不是 N=2 |
+
+### 架构：engines/ 作为顶级消费者包
+
+```
+engines/                              ← 新建顶级包
+  __init__.py                         ← "每个引擎是核心平台的消费者"
+  planning/
+    __init__.py                       ← 导出 PlanningEngine、PlanningStep
+    interface.py                      ← PlanningStep + PlanningEngine Protocol（零实现）
+    stub.py                           ← 最小 3 步硬编码桩
+```
+
+`engines/` 与 `core/` 平行，不在其内部。引擎通过核心平台的公开 API（AsyncDataStreamAdapter、StreamItem、PaceConfig）**消费**平台，不扩展或修改 core 内部。
+
+### Step 1: Planning 引擎接口（零实现）
+
+**`engines/planning/interface.py`**：
+
+```python
+@dataclass(frozen=True)
+class PlanningStep:
+    step_index: int
+    reasoning_depth: int
+    parent_step_id: Optional[str]
+    content: str
+    is_terminal: bool = False
+
+class PlanningEngine(Protocol):
+    async def plan(
+        self, goal: str, deadline: float, pace_config: PaceConfig
+    ) -> AsyncIterator[StreamItem]: ...
+```
+
+关键设计决策：
+- `PlanningStep` 是引擎内部数据模型——**不是** StreamItem。桩负责 PlanningStep → StreamItem 转换
+- trace_context 键命名空间：`planning.step_index`、`planning.reasoning_depth`、`planning.parent_step_id`、`planning.cumulative_tokens`。所有键使用 `planning.` 前缀加点分隔符
+- `deadline` 参数在通过适配器时映射到 `send_with_deadline`
+- `pace_config` 携带 `adaptive_strategy="jitter"`——引擎声明其调速需求
+
+### Step 2: TDD 测试（实现前先写 10 个失败测试）
+
+**`tests/e2e/test_planning_adapter_integration.py`** — 3 个测试类：
+
+**TestTraceContextNamespaceIsolation**（5 个测试）：
+- `test_planning_keys_survive_round_trip`：携带 `planning.step_index`、`planning.reasoning_depth` 的 StreamItem 经序列化往返后键完整保留
+- `test_parent_step_id_round_trip`：`planning.parent_step_id` 经往返后保留
+- `test_planning_keys_dont_conflict_with_rag_keys`：混合 trace_context（planning.* + rag.*）共存无覆盖
+- `test_no_cross_engine_key_leakage`：两个引擎的键命名空间保持隔离
+- `test_bare_key_awareness_meta`：确认无前缀键可被检测到（为 WARNING 级 guardrail 提供依据）
+
+**TestAdaptiveStrategyJitterRouting**（3 个测试）：
+- `test_jitter_strategy_recognized`：`PaceConfig(adaptive=True, adaptive_strategy="jitter")` 路由到 jitter 分支（捕获 NotImplementedError 作为路由证明）
+- `test_jitter_strategy_error_context`：错误消息具有 grep 可搜索性
+- `test_null_strategy_uses_default`：无策略时使用默认调速行为
+
+**TestDeadlineTimeout**（2 个测试）：
+- `test_planning_deadline_triggers_timeout`：deadline=0.0 立即触发 asyncio.TimeoutError，adapter.last_trace.status == "timeout"
+- `test_planning_with_sufficient_deadline_completes`：充足 deadline 下所有 3 步完成
+
+### Step 3: 最小 Planning 桩
+
+**`engines/planning/stub.py`** — 实现 PlanningEngine Protocol：
+
+- 3 步硬编码序列，无 LLM：
+  - Step 0："Analyzing goal: {goal}"（深度 0，根节点）
+  - Step 1："Decomposing into sub-tasks..."（深度 1）
+  - Step 2："Final conclusion..."（深度 2，is_terminal=True）
+- 使用 `time.perf_counter()` 进行 μs 级 deadline 检查（**非** monotonic）
+- Deadline 语义：持续时间（`perf_counter() - start > deadline`），**非**绝对时间戳
+- 每个 step 产生携带 `planning.*` trace_context 键的 StreamItem
+
+### Step 4: PaceShapingWrapper — jitter 策略路由（~3 行）
+
+在 `PaceShapingWrapper._throttled_iter()` 中，adaptive 检查之后、backpressure_signal 检查之前：
+
+```python
+if self._config.adaptive_strategy == "jitter":
+    raise NotImplementedError(
+        f"adaptive_strategy='jitter' recognized but not implemented; "
+        f"pace_config={self._config}"
+    )
+```
+
+这是**唯一的适配器改动**。它证明了策略路由机制有效，且未过早实现 jitter 语义。Jitter 检查位于 backpressure_signal 检查**之前**——因为 jitter 关注的是时序方差，与队列深度无关。
+
+### Step 5: Guardrails — 2 条新规则（总计 9 条）
+
+**`engine_interface_purity`**（ERROR）：
+- 目标：`engines/*/interface.py`
+- 检测：AST 扫描 Protocol 类中函数体非 `...`（Ellipsis）或纯 docstring 的方法
+- 排除：测试文件、不在 engines/ 中的文件
+- 规则 ID：`engine-interface-001`
+
+**`trace_context_namespace`**（WARNING）：
+- 目标：所有 `core/` 和 `engines/` Python 文件
+- 检测：AST 扫描 `trace_context={...}` 赋值中的字典键——所有字符串键必须包含 `.`（点分隔符）
+- 理由：防止 `"step"` 等裸键在引擎间冲突
+- 排除：测试文件、`None` 赋值、`**` 解包
+- 规则 ID：`trace-context-001`
+
+### 实际集成发现
+
+1. **trace_context 不透明 Dict = 正确设计**：适配器序列化/反序列化 trace_context 时不检查键。JsonRpc20Serializer 原封不动地往返所有键命名空间。Planning.* 和 rag.* 键共存于单个 StreamItem 中无冲突。`Dict[str, Any]` 优于结构化字段——任何结构化 schema 都会将 RAG 或 Planning 的假设泄露到契约中。
+
+2. **adaptive_strategy 路由机制有效**：PaceConfig.adaptive_strategy 被 PaceShapingWrapper 读取并路由到正确的策略分支。jitter 分支抛出 NotImplementedError——证明了路由可达且未过早实现。检查位于 backpressure_signal 检查之前——jitter 策略不需要 backpressure 信号（jitter 关注的是时序方差，而非队列深度）。
+
+3. **操作级 deadline 语义已验证**：Planning 桩在每次 step yield 前检查已用时间（perf_counter，非 monotonic）。deadline=0.0 时，第一次迭代即捕获并抛出 asyncio.TimeoutError。适配器的 send_stream 在其 asyncio.TimeoutError 处理器中捕获并在 last_trace 中记录 status="timeout"。分层超时契约（传输级 vs. 操作级）得到证明。
+
+4. **时钟分辨率对亚毫秒级 deadline 至关重要**：`time.monotonic()` 在 Windows 上分辨率约 15ms——不足以在快速桩中执行 deadline。`time.perf_counter()` 提供微秒级分辨率，是操作级 deadline 的正确时钟。真实的 LLM 调用的 Planning 引擎（每步 >100ms）不会触发此问题，但桩暴露了它——这正是 Phase 10 设计的 N=2 边界条件发现。
+
+5. **两项 guardrails 强制执行多引擎卫生**：
+   - `engine_interface_purity`：AST 强制 engines/*/interface.py 中零实现（仅 Ellipsis 体）
+   - `trace_context_namespace`：WARNING 级强制执行 trace_context 键中的点分隔引擎前缀
+
+### 反模式
+
+- "在 PaceShapingWrapper 中硬编码 engine_type 分支。策略路由使用 PaceConfig.adaptive_strategy——引擎声明其需求，适配器提供机制。无 `if engine_type == 'planning'` 检查。"
+- "对操作级 deadline 使用 time.monotonic()。使用 time.perf_counter() 以获得亚毫秒级分辨率。monotonic() 在 Windows 上粒度约 15ms。"
+- "向 StreamItem 添加引擎专属字段。使用不透明的 trace_context Dict——每个引擎拥有自己的键命名空间。"
+- "仅凭 Planning 桩数据实现 jitter 策略。等待真实的 Planning 工作负载画像后再选择调速算法参数。"
+- "创建无 '.' 分隔符的 trace_context 键。始终使用引擎前缀：'planning.*'、'rag.*'。Guardrail trace-context-001 强制执行此规则。"
+
+### 交付物
+
+| 文件 | 说明 |
+|------|------|
+| `engines/__init__.py` | 引擎注册包 |
+| `engines/planning/__init__.py` | 导出 PlanningEngine、PlanningStep |
+| `engines/planning/interface.py` | PlanningStep frozen dataclass + PlanningEngine Protocol（零实现） |
+| `engines/planning/stub.py` | 3 步硬编码 Planner，含 deadline 支持 + trace_context |
+| `core/adapters/stream_adapter.py` | +3 行（jitter 策略路由） |
+| `tests/e2e/test_planning_adapter_integration.py` | 10 个 E2E 测试 |
+| `guardrails/rules/engine_interface_purity.py` | 新规则（ERROR） |
+| `guardrails/rules/trace_context_namespace.py` | 新规则（WARNING） |
+| `.ai_reasoning/chains/phase_10_planning_engine_selection.yaml` | 引擎选择推理链 |
+| `.ai_reasoning/chains/phase_10_planning_engine_integration.yaml` | 集成发现推理链 |
+
+### 架构不变量检查
+
+| # | 不变量 | 结果 |
+|---|--------|------|
+| 1 | RAG 引擎零改动 | `git diff core/pipeline/engine.py` 为空 ✅ |
+| 2 | 适配器改动 ≤5 行 | `git diff core/adapters/stream_adapter.py` = 3 行 ✅ |
+| 3 | 适配器中无 `if engine_type ==` 分支 | `grep -rn "engine_type" core/adapters/` 为空 ✅ |
+| 4 | Planning 代码仅在 engines/ 中 | 所有新代码在 core/ 外 ✅ |
+| 5 | StreamItem frozen dataclass 不变 | `git diff core/contracts/generation.py` 为空 ✅ |
+| 6 | 331 个已有测试仍通过 | `pytest tests/ -q` 无回归 ✅ |
+| 7 | 9 条 guardrails 通过 | `python -m guardrails check --all` PASSED ✅ |
+| 8 | 2 条新推理链 | index.yaml 含 phase_10_planning_engine_selection + phase_10_planning_engine_integration ✅ |
+
+### 对未来 Phase 的指导
+
+1. **Phase 11（可观测性）**：trace_context 现已被证明可通过适配器携带引擎专属追踪数据。可观测性层应按引擎前缀读取 trace_context 键以构建每引擎追踪视图，且不解析引擎专属语义。last_trace 已记录 timeout/error/success 状态——应添加 trace_context 传播到 DependencyCallTrace 以使跨引擎调用链可追踪。
+
+2. **未来引擎集成（Phase 11+）**：遵循 Planning 模式——定义 interface.py（Protocol + 数据模型），针对适配器契约编写 TDD 测试，实现最小桩。每个新引擎应使用**唯一**的 trace_context 键前缀。下一种引擎类型应与 RAG（I/O 密集型）**和** Planning（CPU 密集型突发）都不同——考虑 Event-driven 或 streaming-ingest 引擎以最大化契约覆盖。
+
+3. **Jitter 策略实现**：推迟到 Phase 11+。需要真实的 Planning 引擎延迟数据。策略应控制项间时序方差（连续 yield 之间的最大抖动毫秒数），而非吞吐量。实现属于 PaceShapingWrapper._throttled_iter()，将当前的 NotImplementedError 替换为实际的调速逻辑。
+
+4. **trace_context_namespace 升级**：当前为 WARNING。在现有裸键迁移后（目标：Phase 11），升级为 ERROR 以阻止新裸键进入代码库。
+
+### 验证
+
+1. `pytest tests/e2e/test_planning_adapter_integration.py -v` — 10 个测试全部通过
+2. `pytest tests/ -q` — 331 个测试，0 个失败
+3. `python -m guardrails check` — 9 条规则 PASSED
+4. `python -c "from engines.planning import PlanningEngine, PlanningStep; from engines.planning.stub import StubPlanningEngine"` — 全部可导入
+5. `grep -rn "engine_type" core/adapters/` — 空（无硬编码引擎分支）
+
+---
+
+## Phase 11: Trace 契约验证 — 文件导出器 + 声明式键注册表
+
+**完成状态**: ✅ 已完成 (Phase 11)
+
+### 背景
+
+Phase 10 证明了 `trace_context` 能无损通过适配器管道——Planning 的 `planning.*` 键和 RAG 的 `rag.*` 键共存于单个 StreamItem 中，经过 JSON-RPC 往返后不冲突。但这是"飞行中"验证：没有任何下游消费者读取这些 trace 数据。
+
+**缺口**：`AsyncDataStreamAdapter` 为每次 send/receive 操作构造 `DependencyCallTrace`，但 `DependencyCallTrace` 没有 `trace_context` 字段。每个 StreamItem 内部的 trace_context 经过序列化、线上传输、反序列化——然后被丢弃。
+
+Phase 11 构建第一个"静态"消费者：一个文件导出器，将 trace_context 以结构化 JSON Lines 格式写入文件，可直接用 `cat | jq` 验证。这在实际选用任何可观测性后端之前，证明了契约的运行时可见性。
+
+**战略约束**：零外部依赖。纯标准库。文件导出器实现已有的 `TraceWriter` 协议——不新增抽象层。
+
+**核心约束（用户提出）**：组件平台尚未搭建（Phase 13+），因此 Trace Key Registry **不是**跨引擎语义标准——它是 N=2 引擎桩实际产出的私有语义快照。其价值在于：
+1. 防止引擎私有语义在组件平台搭建前就固化
+2. 标记 `component_candidate=True` 的键，保留被组件平台接管的空间
+3. 为组件平台接口设计积累实证数据（哪些 trace 是"引擎的"vs"组件的"）
+
+### 架构
+
+```
+core/observability/                    ← 新建包
+  __init__.py                          ← 导出 FileTraceExporter, TraceKeyDef, TRACE_KEY_REGISTRY
+  file_exporter.py                     ← ~65 LOC, 纯 stdlib (json, pathlib, random)
+  trace_registry.py                    ← ~40 LOC, 声明式 key→semantics 映射
+```
+
+### 数据流
+
+```
+StreamItem.trace_context
+  → AsyncDataStreamAdapter 捕获最终项的 ctx
+    → DependencyCallTrace.trace_context (新字段)
+      → StepTrace.dependency_calls
+        → TraceLog.steps
+          → FileTraceExporter.write() → JSON Lines 文件
+```
+
+### 关键设计决策
+
+**a) Last-item 语义**：`DependencyCallTrace.trace_context` 捕获本次依赖调用中**最后一个** StreamItem 的上下文。对于 RAG（所有项上下文一致），每项携带相同上下文。对于 Planning（逐步上下文），仅保留终止步骤的上下文。逐项流式 trace 推迟到 Phase 12+。
+
+此决策在三个位置显式记录：
+1. `DependencyCallTrace.trace_context` 字段 docstring
+2. `file_exporter.py` 模块级 docstring
+3. Phase 11 推理链 "Known Limitations" 部分
+
+**b) Sample rate**：`FileTraceExporter.__init__(path, sample_rate=1.0)`。参数从第一天就存在——声明导出器不是无限带宽管道。所有 Phase 11 测试使用 `sample_rate=1.0`（无采样，验证期间无数据丢失）。
+
+**c) O(1) 引擎前缀推断**：`_infer_engine()` 使用 `@lru_cache(maxsize=1)` + 注册表派生前缀映射。不硬编码引擎名称——映射完全从 TRACE_KEY_REGISTRY 派生。
+
+**d) 写原子性**：`write()` 将批次的所有记录拼接为单个字符串，在单次 `f.write()` 中写入。防止多个写入器共享同一文件路径时的行交错。
+
+**e) JSON Lines 格式**：每行一个自包含的 JSON 对象，代表一条 `DependencyCallTrace` 记录。字段包含 `run_id`、`step_name`、`dependency`、`status`、`duration_ms`、`engine`、`trace_context`（原始 dict）、`_registered_keys`、`_unregistered_keys`。
+
+**f) 语义冲突防护（用户提出）**：键命名空间隔离（Phase 10 `trace-context-001`）和值类型安全（Phase 11 `trace-key-serializability-001`）防止**语法**冲突。但两者都防不住**语义**冲突：
+
+| 场景 | Key 1 | Key 2 | 冲突？ |
+|------|-------|-------|--------|
+| 相同后缀，不同引擎 | `planning.cumulative_tokens` | `rag.cumulative_tokens` | 无语义键冲突，但**语义重叠**：RAG tokens = 检索上下文 tokens，Planning tokens = 推理 LLM tokens。Phase 12 汇聚器若按 `cumulative_tokens` 聚合将静默合并不相关指标 |
+| 相同后缀，不同延迟类型 | `planning.latency_ms` | `rag.latency_ms` | RAG = I/O 延迟（网络受限），Planning = CPU 延迟（计算受限）。键结构完全相同，含义截然不同 |
+
+解决方案：**Trace Key Registry** —— 声明式、只读元数据表，记录系统中每个 trace 键的语义。配合 WARNING 级 guardrail（标记未注册键）。
+
+这**不是**运行时强制执行机制。它是编译时文档契约——"如果你新增 trace_context 键，你必须声明其含义。"
+
+### Step 1: DependencyCallTrace + trace_context 字段
+
+**文件**: `core/pipeline/tracing.py` (+4 行)
+
+```python
+trace_context: Optional[Dict[str, Any]] = None
+# Captures trace_context from the LAST StreamItem in this dependency call.
+# For engines emitting per-step context (e.g., Planning), only the terminal
+# step's context is retained here. Per-item streaming trace → Phase 12+.
+```
+
+`_deep_serializable()` 已递归处理 `dict` 值——`to_dict()` 无需改动即可工作。
+
+### Step 2: AsyncDataStreamAdapter 捕获 trace_context
+
+**文件**: `core/adapters/stream_adapter.py` (~15 行变更)
+
+`send_stream()` 中：
+```python
+last_ctx = None
+async for item in stream:
+    last_ctx = item.trace_context  # 在序列化+发送之前捕获
+    data = self._serializer.serialize(item)
+    await self._transport.send(data)
+return last_ctx
+```
+
+`DependencyCallTrace` 构造的三个分支中：
+- success: `trace_context=last_ctx`
+- timeout: `trace_context=None`
+- error: `trace_context=None`
+
+`receive_stream()` 同理：`last_ctx = item.trace_context`（在反序列化之后，yield 之前）。
+
+### Step 3: Trace Key Registry
+
+**文件**: `core/observability/trace_registry.py` (新建, ~60 行)
+
+```python
+@dataclass(frozen=True)
+class TraceKeyDef:
+    """单个 trace_context 键的声明式元数据。"""
+    type: type
+    semantics: str
+    engine: str
+    unit: str = ""
+    component_candidate: bool = False
+    # True = 此键的语义属于组件能力（retrieval, generation, scoring），
+    # 不属于引擎本身。当组件平台搭建时，这些键应迁移到组件级 trace 契约。
+
+TRACE_KEY_REGISTRY: Dict[str, TraceKeyDef] = {
+    # ── Planning 引擎键（引擎内部） ──
+    "planning.step_index": TraceKeyDef(type=int, semantics="...", engine="planning"),
+    "planning.reasoning_depth": TraceKeyDef(type=int, semantics="...", engine="planning"),
+    "planning.parent_step_id": TraceKeyDef(type=str, semantics="...", engine="planning"),
+
+    # ── Planning 引擎键（component-candidate: LLM generation） ──
+    "planning.cumulative_tokens": TraceKeyDef(
+        type=int, semantics="...", engine="planning", unit="tokens",
+        component_candidate=True,
+    ),
+
+    # ── RAG 引擎键（component-candidate: retrieval） ──
+    "rag.chunk_id": TraceKeyDef(
+        type=str, semantics="...", engine="rag",
+        component_candidate=True,
+    ),
+    "rag.retrieval_latency_ms": TraceKeyDef(
+        type=float, semantics="...", engine="rag", unit="ms",
+        component_candidate=True,
+    ),
+}
+```
+
+**6 个键总计**：3 个引擎内部键 (planning.step_index/reasoning_depth/parent_step_id) + 3 个 component_candidate (planning.cumulative_tokens, rag.chunk_id, rag.retrieval_latency_ms)。
+
+3 个引擎内部键将永久保留在引擎级注册表中。3 个 component_candidate 键标记为待迁移至 `core/contracts/trace_keys.py`（当组件平台搭建时，Phase 13+）。
+
+### Step 4: FileTraceExporter
+
+**文件**: `core/observability/file_exporter.py` (新建, ~85 行)
+
+实现 `TraceWriter` 协议。关键特征：
+
+- **JSON Lines 格式**：每行一个 JSON 对象，代表一条 DependencyCallTrace 记录
+- **自包含行**：每行包括 `run_id`、`step_name`、`dependency`、`status`、`duration_ms`、`engine`（通过注册表从 trace_context 键前缀派生）、`trace_context`（原始 dict）、`_registered_keys`、`_unregistered_keys`
+- **仅追加**：以 `"a"` 模式打开文件，立即写入并刷新——长时间运行的进程安全
+- **sample_rate**：`random.random() > sample_rate` → 跳过。确定性：在测试中设置 `random.seed()` 可得到可复现的采样
+- **引擎前缀推断**：使用 `TRACE_KEY_REGISTRY` 从键前缀推断引擎类型（非硬编码）。对未注册键回退到前缀分割
+- **Schema anchoring**：输出中 `_registered_keys` 和 `_unregistered_keys` 分类，使 Phase 12 消费者能区分"已知语义"和"未注册"
+
+```python
+def write(self, traces: List[TraceLog]) -> None:
+    lines: List[str] = []
+    for trace_log in traces:
+        for step in trace_log.steps:
+            for dep_call in step.dependency_calls:
+                if dep_call.trace_context is None:
+                    continue
+                if self._sample_rate < 1.0 and random.random() > self._sample_rate:
+                    continue
+                ctx = dep_call.trace_context
+                record = {
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "run_id": trace_log.pipeline_run_id,
+                    "step": step.step_name,
+                    "dependency": dep_call.dependency_name,
+                    "status": dep_call.status,
+                    "duration_ms": dep_call.duration_ms,
+                    "engine": self._infer_engine(ctx),
+                    "trace_context": ctx,
+                    "_registered_keys": [k for k in ctx if k in registry_keys],
+                    "_unregistered_keys": [k for k in ctx if k not in registry_keys],
+                }
+                lines.append(json.dumps(record, ensure_ascii=False, separators=(",", ":")))
+    if lines:
+        with open(self._path, "a", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+```
+
+### Step 5: Guardrail — trace_key_serializability
+
+**文件**: `guardrails/rules/trace_key_serializability.py` (新建, ~60 行)
+
+规则 ID: `trace-key-serializability-001`
+
+**分级严重度**：基于 AST 节点类型两级违规：
+
+| 节点类型 | 严重度 | 理由 |
+|----------|--------|------|
+| `ast.Call` | ERROR | 函数调用 (datetime.now(), uuid4()) 产生非 JSON 类型 |
+| `ast.Attribute` | ERROR | 属性访问可能解析为非可序列化对象 |
+| `ast.Tuple` | ERROR | 非有效 JSON 类型 |
+| `ast.Set` | ERROR | 非有效 JSON 类型 |
+| `ast.BinOp` | ERROR | 表达式结果类型未知 |
+| `ast.UnaryOp` | ERROR | 表达式结果类型未知 |
+| `ast.Name` | WARNING (REVIEW_REQUIRED) | 变量引用——AST 无法追踪运行时类型。保守策略：标记人工审查而非阻止提交 |
+
+**设计理由**：AST 级类型推断有根本性的局限。对 JSON 可序列化类型的变量引用（`step_idx: int`、`chunk_name: str`）是常见且有效的模式。用 ERROR 阻止会迫使所有 trace_context 值都是内联字面量，损害代码可读性。WARNING 在保持可见性的同时不干扰合法使用。
+
+**允许的值类型**（白名单，静默通过）：
+- `ast.Constant`: str, int, float, bool, None
+- `ast.List`: 若所有元素为允许类型
+- `ast.Dict`: 若所有值为允许类型
+
+**排除**：测试文件（路径含 "test"）、None 值（合法）、`**` 解包（无法静态分析）、stub.py 文件（桩产生 trace_context 自然产物）。
+
+### Step 6: Guardrail — trace_key_registration
+
+**文件**: `guardrails/rules/trace_key_registration.py` (新建, ~35 行)
+
+规则 ID: `trace-key-registration-001`, Severity: WARNING
+
+AST 扫描 `trace_context=` dict 字面量。对每个**键**（字符串常量），检查是否存在于 `TRACE_KEY_REGISTRY`。未注册键触发 WARNING——它们序列化正常，但缺乏文档化语义。
+
+```
+trace_context key 'planning.estimated_complexity' is not registered in TRACE_KEY_REGISTRY.
+Add a TraceKeyDef(type=..., semantics="...", engine="planning") entry to
+core/observability/trace_registry.py to document its meaning.
+```
+
+**WARNING（非 ERROR）的设计理由**：
+- 未注册键不会破坏序列化或命名空间隔离
+- Phase 11 是在记录当前已知键，而非定义"所有可能的"键
+- Phase 12+ 的新引擎自然会新增键——WARNING 提醒而不阻塞
+- 注册表覆盖度达到成熟后（Phase 13+）可升级为 ERROR
+
+**排除**：测试文件、stub.py 文件、None 键、`**` 解包、变量名键（无法静态验证）。
+
+### Step 7: Guardrail 注册
+
+**文件**: `guardrails/rules/__init__.py` + `guardrails/checker.py` (+8 行)
+
+两条新规则注册到 checker 的 `_rules` dict 中，导入并加入 `__all__`。总计 11 条 guardrails 规则。
+
+### 反模式
+
+1. **在组件平台存在前设计组件级 trace 契约**。当前注册表捕获 N=2 引擎桩的实际产出。`component_candidate=True` 标记的是假设，尚未验证（需要组件平台来验证）。
+
+2. **预集成 OTel/Jaeger 之后再理解自己的 trace 数据**。文件导出器是路径 C（零依赖验证）→ B（自定义轻量汇聚器）。OTel 在路径 A 上——可能永远不会到达。
+
+3. **向注册表添加推测性 trace 键（tool.\*、memory.\*、skill.\*）**。Phase 11 之后唯一允许的注册表键是引擎桩实际产生的键或 guardrail 检测到的未注册键。
+
+4. **将 trace_key_registration 设为 ERROR 而非 WARNING**。在注册表覆盖度成熟前，ERROR 会扼杀引擎演进。新引擎在 Phase 12+ 自然会新增键。
+
+5. **将引擎级键视为永久键，而它们属于组件**。`planning.cumulative_tokens`、`rag.chunk_id`、`rag.retrieval_latency_ms` 被标记为 `component_candidate=True`——当组件平台搭建时它们应迁移到组件级契约。
+
+6. **在 `_infer_engine()` 中硬编码引擎名称**。引擎前缀映射完全从 TRACE_KEY_REGISTRY 派生。新引擎注册后自动获得正确的引擎推断，无需改动 file_exporter。
+
+7. **在 AST guardrail 中对 `ast.Name` 使用 ERROR**。这会阻止常见的有效模式如 `trace_context={key: local_var}`。WARNING 保留可见性而不阻断合法代码。
+
+### 对未来 Phase 的指导
+
+1. **Phase 12（自定义汇聚器/可视化）**：文件导出器生产 JSON Lines——任何消费者都能用 `json.loads()` 独立解析。`_registered_keys` / `_unregistered_keys` 分类使下游汇聚器能区分"已知语义"和"未注册"。优先构建汇聚器（聚合 + 查询），而非实时可视化。
+
+2. **Phase 13+（组件平台）**：3 个 `component_candidate=True` 键应迁移到组件级 trace 契约。文件导出器的 JSON Lines 样本为组件平台接口设计提供实证基础——哪些键在不同引擎间结构相同、语义却不同，哪些模式反复出现。
+
+3. **Guardrail 升级路径**：`trace_key_registration` 当前为 WARNING。注册表覆盖度达到 >95% 且稳定后，升级为 ERROR。`trace_context_namespace`（Phase 10）同样目标在裸键迁移后升级为 ERROR。
+
+4. **Last-item → per-item**：当前 DependencyCallTrace.trace_context 捕获最后一个 StreamItem 的上下文。逐项流式 trace（每个 StreamItem 一条 trace 记录）推迟到 Phase 12+。需要评估每项 trace 的存储成本 vs. 调试价值。
+
+5. **Sample rate 调优**：`sample_rate=1.0` 对验证友好，对生产不实际。Phase 12 应添加 sample_rate 配置（按引擎、按环境），在生产负载下进行基准测试后确定合理默认值。
+
+### 交付物
+
+| 文件 | 说明 |
+|------|------|
+| `core/pipeline/tracing.py` | DependencyCallTrace 新增 trace_context 字段 (+4 行) |
+| `core/adapters/stream_adapter.py` | send/receive_stream 捕获 trace_context (~15 行) |
+| `core/observability/__init__.py` | 导出 FileTraceExporter, TraceKeyDef, TRACE_KEY_REGISTRY |
+| `core/observability/trace_registry.py` | 6 键声明式注册表 (3 engine-internal + 3 component_candidate) |
+| `core/observability/file_exporter.py` | JSON Lines 导出器，O(1) 引擎推断，写原子性 |
+| `guardrails/rules/trace_key_serializability.py` | 新规则 (ERROR for Call/Attribute/Set/Tuple/BinOp/UnaryOp, WARNING for Name) |
+| `guardrails/rules/trace_key_registration.py` | 新规则 (WARNING for unregistered keys) |
+| `guardrails/rules/__init__.py` | 导入并导出两条新规则 |
+| `guardrails/checker.py` | 注册两条新规则 (总计 11 条) |
+| `tests/e2e/test_trace_serialization.py` | 19 个测试，5 个测试类 |
+| `.ai_reasoning/chains/phase_11_trace_contract_verification.yaml` | 推理链 |
+| `.ai_reasoning/index.yaml` | 新增 chain entry + 6 个 tags |
+
+### 架构不变量检查
+
+| # | 不变量 | 结果 |
+|---|--------|------|
+| 1 | 零外部依赖 | `grep -rn "import openai\|import opentelemetry" core/observability/` 为空 ✅ |
+| 2 | TraceWriter 协议不变 | `git diff core/pipeline/tracing.py` — 仅 DependencyCallTrace 新增字段 ✅ |
+| 3 | 已有 TraceWriter 实现不受影响 | LocalJSONWriter 仍正常工作（新字段通过 to_dict() 自动包含） ✅ |
+| 4 | 适配器变更 ≤15 行 | `git diff core/adapters/stream_adapter.py` ~15 行 ✅ |
+| 5 | RAG 引擎零变更 | `git diff core/pipeline/engine.py` 为空 ✅ |
+| 6 | StreamItem frozen dataclass 不变 | `git diff core/contracts/generation.py` 为空 ✅ |
+| 7 | 350 个已有测试仍通过 | `pytest tests/ -q` 无回归 ✅ |
+| 8 | Guardrails: 11 条规则 PASSED | `python -m guardrails check --all` PASSED (0 errors, 0 warnings) ✅ |
+| 9 | 1 条新推理链 | index.yaml 含 phase_11_trace_contract_verification ✅ |
+| 10 | Trace Key Registry 只读 | `grep "TRACE_KEY_REGISTRY\[" core/observability/` — 仅定义，无修改 ✅ |
+| 11 | 所有 Planning/RAG trace 键已注册 | Planning stub (4 keys) + RAG (2 keys) 均在 TRACE_KEY_REGISTRY 中 ✅ |
+| 12 | 6 个注册表键，3 个 component_candidate | `len(TRACE_KEY_REGISTRY)` = 6, `sum(1 for v in TRACE_KEY_REGISTRY.values() if v.component_candidate)` = 3 ✅ |
+
+### 验证
+
+1. `pytest tests/e2e/test_trace_serialization.py -v` — 19 个新测试全部通过
+2. `pytest tests/ -q` — 350 个测试, 0 个失败
+3. `python -m guardrails check --all` — 11 条规则 PASSED
+4. `python -c "from core.observability import FileTraceExporter, TraceKeyDef, TRACE_KEY_REGISTRY; print(len(TRACE_KEY_REGISTRY))"` — 6 个注册表条目
+5. `python -c "from core.observability.file_exporter import FileTraceExporter; m=FileTraceExporter._get_engine_prefix_map(); print(m)"` — O(1) 前缀映射 `{'planning': 'planning', 'rag': 'rag'}`
+6. `python -c "from core.pipeline.tracing import DependencyCallTrace; dt=DependencyCallTrace(dependency_name='x', trace_context={'planning.step_index':0}); print(dt.to_dict()['trace_context'])"` — trace_context 在 to_dict() 中存活
