@@ -93,26 +93,26 @@ class TestGeneratorPipelineE2E:
 class TestGeneratorInputCases:
     def test_empty_prompt_produces_result(self):
         step = GeneratorStep(backend=MockGenerationBackend())
-        output = step.run(
+        output = asyncio.run(step.run(
             inputs={"prompt": "", "context": []},
             resources=None,
-        )
+        ))
         assert isinstance(output.result, GenerationResult)
 
     def test_missing_prompt_key_produces_result(self):
         step = GeneratorStep(backend=MockGenerationBackend())
-        output = step.run(
+        output = asyncio.run(step.run(
             inputs={"context": [_chunk("fallback", 0)]},
             resources=None,
-        )
+        ))
         assert isinstance(output.result, GenerationResult)
 
     def test_context_not_a_list_is_normalized(self):
         step = GeneratorStep(backend=MockGenerationBackend())
-        output = step.run(
+        output = asyncio.run(step.run(
             inputs={"prompt": "hello", "context": "not_a_list"},
             resources=None,
-        )
+        ))
         assert isinstance(output.result, GenerationResult)
 
 
@@ -156,10 +156,10 @@ class TestGeneratorBackendFailures:
     def test_backend_exception_produces_graceful_result(self):
         """Anti-pattern check: adapter must NOT let exceptions propagate."""
         step = GeneratorStep(backend=FailingGenerationBackend())
-        output = step.run(
+        output = asyncio.run(step.run(
             inputs={"prompt": "test", "context": []},
             resources=None,
-        )
+        ))
         assert isinstance(output.result, GenerationResult)
         # Graceful degradation: error finish_reason
         assert output.result.finish_reason == "error"
@@ -178,10 +178,10 @@ class TestGeneratorBudget:
     def test_budget_exceeded_returns_graceful_result(self):
         """Anti-pattern check: must not crash on budget exceeded."""
         step = GeneratorStep(backend=MockGenerationBackend(), max_tokens_per_run=0)
-        output = step.run(
+        output = asyncio.run(step.run(
             inputs={"prompt": "test", "context": []},
             resources=None,
-        )
+        ))
         assert output.result.finish_reason == "error"
         assert output.result.model == "budget_exceeded"
 
@@ -192,10 +192,10 @@ class TestGeneratorBudget:
 class TestGeneratorTrace:
     def test_trace_log_includes_token_info(self):
         step = GeneratorStep(backend=MockGenerationBackend(model="echo"))
-        output = step.run(
+        output = asyncio.run(step.run(
             inputs={"prompt": "hello world", "context": []},
             resources=None,
-        )
+        ))
         tl = output.trace_log
         assert "model" in tl
         assert "prompt_tokens" in tl
@@ -205,10 +205,10 @@ class TestGeneratorTrace:
 
     def test_trace_log_present_on_error(self):
         step = GeneratorStep(backend=FailingGenerationBackend())
-        output = step.run(
+        output = asyncio.run(step.run(
             inputs={"prompt": "test", "context": []},
             resources=None,
-        )
+        ))
         assert "generator" in output.trace_log
 
 
@@ -248,10 +248,10 @@ class TestCumulativeTokenTracking:
         step = GeneratorStep(backend=MockGenerationBackend())
         assert step._adapter.cumulative_tokens == 0
 
-        step.run(inputs={"prompt": "first call", "context": []}, resources=None)
+        asyncio.run(step.run(inputs={"prompt": "first call", "context": []}, resources=None))
         after_first = step._adapter.cumulative_tokens
         assert after_first > 0
 
-        step.run(inputs={"prompt": "second call", "context": []}, resources=None)
+        asyncio.run(step.run(inputs={"prompt": "second call", "context": []}, resources=None))
         after_second = step._adapter.cumulative_tokens
         assert after_second > after_first

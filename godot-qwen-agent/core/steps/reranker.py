@@ -81,14 +81,10 @@ class RerankerStep:
         self._backend = backend or MockScoringBackend()
         self._adapter = ScoringAdapter(self._backend, dependency_name="reranker_api")
 
-    def run(
+    async def run(
         self, inputs: Dict[str, Any], resources: ResourceContainer
     ) -> StepOutput:
-        return asyncio.run(self.async_run(inputs, resources))
-
-    async def async_run(
-        self, inputs: Dict[str, Any], resources: ResourceContainer
-    ) -> StepOutput:
+        """Async-native execution (Phase 8.1). The engine calls this directly."""
         chunks: List[Chunk] = inputs.get("chunks", [])
         if not isinstance(chunks, list):
             chunks = []
@@ -125,19 +121,12 @@ class RerankerStep:
         )
 
     def health_check(self) -> HealthStatus:
-        import asyncio
-
         try:
-            try:
-                loop = asyncio.get_running_loop()
-                dep_status: str = "healthy"
-                dep_latency: Optional[float] = None
-                dep_message = "health probe: sync check (backend reachable)"
-            except RuntimeError:
-                probe = asyncio.run(self._adapter.health_probe())
-                dep_status = probe["status"]
-                dep_latency = probe.get("latency_ms")
-                dep_message = probe["message"]
+            # Lightweight sync probe: minimal scoring call to verify backend
+            self._backend.score(chunks=[], query="__health_probe__")
+            dep_status: str = "healthy"
+            dep_latency: Optional[float] = None
+            dep_message = "health probe: backend reachable"
         except Exception as exc:
             dep_status = "unavailable"
             dep_latency = None

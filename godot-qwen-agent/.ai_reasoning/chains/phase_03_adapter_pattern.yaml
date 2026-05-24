@@ -78,6 +78,8 @@ rationale: |
 evidence:
   test_files:
     - tests/integration/test_negative_cases.py
+    - core/adapters/chunker_adapter.py
+    - core/adapters/factory.py
   test_cases:
     - "test_wrong_type_raises_adapter_error (str instead of ContentBlock)"
     - "test_missing_specific_key_raises (content_key not in inputs)"

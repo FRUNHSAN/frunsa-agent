@@ -115,15 +115,10 @@ class RetrieverStep:
         self._adapter = VectorStoreAdapter(self._backend, dependency_name="vector_store")
         self._sentinel_vector = _simple_embedding("__health_probe__")
 
-    def run(
+    async def run(
         self, inputs: Dict[str, Any], resources: ResourceContainer
     ) -> StepOutput:
-        """Synchronous run — delegates to async via asyncio.run."""
-        return asyncio.run(self.async_run(inputs, resources))
-
-    async def async_run(
-        self, inputs: Dict[str, Any], resources: ResourceContainer
-    ) -> StepOutput:
+        """Async-native execution (Phase 8.1). The engine calls this directly."""
         chunks: List[Chunk] = inputs.get("chunks", [])
 
         if not chunks:
@@ -159,28 +154,15 @@ class RetrieverStep:
 
     def health_check(self) -> HealthStatus:
         """Semantic probe: search a known sentinel vector and report DependencyHealth."""
-        import asyncio
-
         try:
-            try:
-                loop = asyncio.get_running_loop()
-                # In async context — run probe synchronously on the backend
-                probe_results = self._backend.search(self._sentinel_vector, top_k=1)
-                dep_status: str = "healthy" if probe_results else "degraded"
-                dep_latency: Optional[float] = None
-                dep_message = (
-                    f"semantic probe: found {len(probe_results)} result(s)"
-                    if probe_results
-                    else "semantic probe: index returned 0 results"
-                )
-            except RuntimeError:
-                # No running event loop — create one for the probe
-                probe = asyncio.run(
-                    self._adapter.health_probe(self._sentinel_vector)
-                )
-                dep_status = probe["status"]
-                dep_latency = probe.get("latency_ms")
-                dep_message = probe["message"]
+            probe_results = self._backend.search(self._sentinel_vector, top_k=1)
+            dep_status: str = "healthy" if probe_results else "degraded"
+            dep_latency: Optional[float] = None
+            dep_message = (
+                f"semantic probe: found {len(probe_results)} result(s)"
+                if probe_results
+                else "semantic probe: index returned 0 results"
+            )
         except Exception as exc:
             dep_status = "unavailable"
             dep_latency = None

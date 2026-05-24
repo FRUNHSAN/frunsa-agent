@@ -13,7 +13,7 @@
 # Schema: schemas/reasoning_chain.schema.json
 
 library_version: 1
-last_updated: "2026-05-24T18:00:00Z"
+last_updated: "2026-05-24T23:59:00Z"
 
 # ── Chains by architectural layer ────────────────────────────────────
 
@@ -80,6 +80,21 @@ chains:
     tags: [llm, reranker, generation, scoring, frozen_dataclass, budget, graceful_degradation, mock_backend]
     status: active
 
+  # ── Engine evolution ──
+  - chain_id: phase_08_async_native_evolution
+    file: chains/phase_08_async_native_evolution.yaml
+    title: "Async-native engine: DAG concurrency, single event loop, zero asyncio.run() pollution"
+    layer: pipeline
+    tags: [async, engine, dag, concurrency, event_loop, health_check, resource_lifecycle]
+    status: active
+
+  - chain_id: phase_08_dag_streaming_semantics
+    file: chains/phase_08_dag_streaming_semantics.yaml
+    title: "DAG streaming semantics: WAIT_ALL merge, N-sentinel convergence, error propagation"
+    layer: pipeline
+    tags: [streaming, dag, merge, sentinel, backpressure, error_propagation, internal_stream]
+    status: active
+
 # ── Tag index for quick lookup ───────────────────────────────────────
 
 tag_index:
@@ -93,7 +108,12 @@ tag_index:
   observability: [phase_04_observability]
   health_check: [phase_04_observability, phase_05_external_io]
   external_io: [phase_05_external_io, phase_07_llm_risks]
-  async: [phase_05_external_io]
+  async: [phase_05_external_io, phase_08_async_native_evolution, phase_08_dag_streaming_semantics]
+  engine: [phase_08_async_native_evolution, phase_08_dag_streaming_semantics]
+  dag: [phase_08_async_native_evolution, phase_08_dag_streaming_semantics]
+  concurrency: [phase_08_async_native_evolution, phase_08_dag_streaming_semantics]
+  event_loop: [phase_08_async_native_evolution]
+  resource_lifecycle: [phase_08_async_native_evolution]
   exception_handling: [phase_05_external_io]
   llm: [phase_07_llm_risks, phase_07_implementation_reality]
   reranker: [phase_07_llm_risks, phase_07_implementation_reality]
@@ -103,3 +123,13 @@ tag_index:
   budget: [phase_07_implementation_reality]
   graceful_degradation: [phase_07_implementation_reality]
   mock_backend: [phase_07_implementation_reality]
+  streaming: [phase_08_async_native_evolution, phase_08_dag_streaming_semantics]
+  merge: [phase_08_dag_streaming_semantics]
+  sentinel: [phase_02_skip_propagation, phase_08_dag_streaming_semantics]
+  backpressure: [phase_08_dag_streaming_semantics]
+  error_propagation: [phase_08_dag_streaming_semantics]
+  internal_stream: [phase_08_dag_streaming_semantics]
+  stream_isolation: [phase_08_dag_streaming_semantics]
+  user_facing_stream: [phase_08_dag_streaming_semantics]
+  auto_merge: [phase_08_dag_streaming_semantics]
+  thread_pool: [phase_08_async_native_evolution]

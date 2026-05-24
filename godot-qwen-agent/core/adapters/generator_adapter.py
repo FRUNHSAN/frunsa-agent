@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, Dict, List, Optional, Protocol
+from typing import Any, AsyncIterator, Dict, Iterator, List, Optional, Protocol
 
-from core.contracts import Chunk, GenerationResult
+from core.contracts import Chunk, GenerationResult, StreamItem
 from core.pipeline.tracing import DependencyCallTrace, SpanType
 
 
@@ -20,6 +20,26 @@ class GenerationBackend(Protocol):
 
     def generate(self, prompt: str, context: List[Chunk], **params: Any) -> GenerationResult:
         """Synchronous generation. The adapter wraps this in an executor."""
+        ...
+
+    def count_tokens(self, text: str) -> int:
+        """Estimate token count for budget tracking."""
+        ...
+
+
+class StreamingBackend(Protocol):
+    """Protocol for streaming LLM backends — yields tokens as they are produced.
+
+    Extends GenerationBackend with a sync generate_stream() that the adapter
+    bridges to an AsyncIterator via Producer-Consumer + Sentinel pattern.
+    """
+
+    def generate(self, prompt: str, context: List[Chunk], **params: Any) -> GenerationResult:
+        """Synchronous generation (non-streaming fallback)."""
+        ...
+
+    def generate_stream(self, prompt: str, context: List[Chunk], **params: Any) -> Iterator[StreamItem]:
+        """Synchronous streaming generation. The adapter bridges this to async."""
         ...
 
     def count_tokens(self, text: str) -> int:
@@ -106,6 +126,63 @@ class GenerationAdapter:
             )
 
         return result
+
+    async def generate_stream(
+        self,
+        prompt: str,
+        context: Optional[List[Chunk]] = None,
+        timeout: Optional[float] = None,
+        **params: Any,
+    ) -> AsyncIterator[StreamItem]:
+        """Async streaming generation with backpressure-aware sync-to-async bridge.
+
+        If the backend implements generate_stream(), bridges it via a
+        Producer-Consumer pattern with asyncio.Queue. Otherwise falls back
+        to generate() and yields a single StreamItem.
+        """
+        ctx = context or []
+
+        if hasattr(self._backend, "generate_stream"):
+            queue: asyncio.Queue = asyncio.Queue(maxsize=32)
+            sentinel = object()
+            loop = asyncio.get_running_loop()
+            producer_error: Optional[Exception] = None
+
+            def _producer() -> None:
+                nonlocal producer_error
+                try:
+                    for item in self._backend.generate_stream(prompt, ctx, **params):
+                        asyncio.run_coroutine_threadsafe(queue.put(item), loop)
+                    asyncio.run_coroutine_threadsafe(queue.put(sentinel), loop)
+                except Exception as exc:
+                    producer_error = exc
+                    asyncio.run_coroutine_threadsafe(queue.put(sentinel), loop)
+
+            task = loop.run_in_executor(None, _producer)
+
+            try:
+                while True:
+                    item = await queue.get()
+                    if item is sentinel:
+                        break
+                    if isinstance(item, StreamItem):
+                        self._cumulative_tokens += len(item.delta) // 4
+                        yield item
+            finally:
+                await task
+                if producer_error is not None:
+                    raise producer_error
+        else:
+            result = await self.generate(
+                prompt=prompt, context=ctx, timeout=timeout, **params
+            )
+            yield StreamItem(
+                delta=result.text,
+                index=0,
+                finish_reason=result.finish_reason,
+                is_terminal=True,
+                model=result.model,
+            )
 
     @property
     def last_trace(self) -> Optional[DependencyCallTrace]:

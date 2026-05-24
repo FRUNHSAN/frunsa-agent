@@ -73,3 +73,36 @@ class GenerationStrategy:
     def health_check(self) -> Any:
         """Optional health probe. Returns HealthStatus if implemented."""
         ...
+
+
+@dataclass(frozen=True)
+class StreamItem:
+    """Single streaming token/chunk emitted during generation.
+
+    Fields:
+      delta: The incremental text (token or multi-token chunk).
+      index: Zero-based sequence number of this item in the stream.
+      finish_reason: None while streaming; set on the terminal item.
+      model: The model producing this token.
+      metadata: Provider-specific metadata (logprobs, token_id, etc.). Immutable.
+      is_terminal: True for the final item in a stream (normal or error).
+      error: Error description if the terminal item signals a failure.
+    """
+
+    delta: str
+    index: int
+    finish_reason: Optional[str] = None
+    model: str = ""
+    is_terminal: bool = False
+    error: Optional[str] = None
+    metadata: MappingProxyType[str, Any] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.metadata, MappingProxyType):
+            from copy import deepcopy
+
+            object.__setattr__(
+                self, "metadata", MappingProxyType(deepcopy(dict(self.metadata)))
+            )

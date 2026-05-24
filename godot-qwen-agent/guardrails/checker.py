@@ -11,6 +11,7 @@ from guardrails.rules import (
     cross_platform_imports,
     frozen_dataclass_integrity,
     reasoning_chain_coverage,
+    user_facing_stream_isolation,
 )
 
 
@@ -25,6 +26,7 @@ class GuardrailChecker:
             "frozen-dataclass-integrity": frozen_dataclass_integrity,
             "component-registration-coverage": component_registration_coverage,
             "reasoning-chain-coverage": reasoning_chain_coverage,
+            "user-facing-stream-isolation": user_facing_stream_isolation,
         }
 
     @staticmethod

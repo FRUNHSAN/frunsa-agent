@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, ClassVar, Dict, List, Optional, Set
+from typing import Any, AsyncIterator, ClassVar, Dict, Iterator, List, Optional, Set
 
 from core.adapters.generator_adapter import GenerationAdapter, GenerationBackend
 from core.contracts import (
     Chunk,
     GenerationResult,
     SemVer,
+    StreamItem,
     ValidationError,
     register_component,
     validate_generation_output,
@@ -48,6 +49,54 @@ class MockGenerationBackend:
         return len(text) // 4
 
 
+class MockStreamingBackend:
+    """Token-by-token streaming backend. Splits prompt by whitespace into words.
+
+    Each word becomes a StreamItem delta. For testing streaming pipelines
+    without an external LLM API.
+    """
+
+    def __init__(self, model: str = "mock/stream", token_delay_ms: float = 0.0) -> None:
+        self._model = model
+        self._token_delay = token_delay_ms
+
+    def generate(self, prompt: str, context: List[Chunk], **params: Any) -> GenerationResult:
+        text = f"[{self._model}] {prompt}"
+        return GenerationResult(
+            text=text,
+            model=self._model,
+            finish_reason="stop",
+            usage={"prompt_tokens": len(prompt) // 4, "completion_tokens": len(text) // 4, "total_tokens": (len(prompt) + len(text)) // 4},
+        )
+
+    def generate_stream(self, prompt: str, context: List[Chunk], **params: Any) -> Iterator[StreamItem]:
+        import time as _time
+
+        words = prompt.split()
+        if not words:
+            yield StreamItem(
+                delta="", index=0, finish_reason="stop", is_terminal=True,
+                model=self._model,
+            )
+            return
+
+        for i, word in enumerate(words):
+            if self._token_delay > 0:
+                _time.sleep(self._token_delay / 1000.0)
+            delta = word if i == 0 else " " + word
+            is_last = i == len(words) - 1
+            yield StreamItem(
+                delta=delta,
+                index=i,
+                finish_reason="stop" if is_last else None,
+                is_terminal=is_last,
+                model=self._model,
+            )
+
+    def count_tokens(self, text: str) -> int:
+        return len(text) // 4
+
+
 # ── GeneratorStep ────────────────────────────────────────────────────
 
 
@@ -71,14 +120,10 @@ class GeneratorStep:
         self._adapter = GenerationAdapter(self._backend, dependency_name="llm_api")
         self._max_tokens_per_run = max_tokens_per_run
 
-    def run(
+    async def run(
         self, inputs: Dict[str, Any], resources: ResourceContainer
     ) -> StepOutput:
-        return asyncio.run(self.async_run(inputs, resources))
-
-    async def async_run(
-        self, inputs: Dict[str, Any], resources: ResourceContainer
-    ) -> StepOutput:
+        """Async-native execution (Phase 8.1). The engine calls this directly."""
         prompt = str(inputs.get("prompt", ""))
         context: List[Chunk] = inputs.get("context", [])
         if not isinstance(context, list):
@@ -122,22 +167,39 @@ class GeneratorStep:
             contract_validation=validation,
         )
 
-    def health_check(self) -> HealthStatus:
-        import asyncio
+    async def run_streaming(
+        self, inputs: Dict[str, Any], resources: ResourceContainer
+    ) -> AsyncIterator[StreamItem]:
+        """Async-native streaming execution (Phase 8.2a).
 
+        Yields StreamItems token-by-token via the adapter's streaming bridge.
+        Falls back to single-item stream if backend doesn't support streaming.
+        """
+        prompt = str(inputs.get("prompt", ""))
+        context: List[Chunk] = inputs.get("context", [])
+        if not isinstance(context, list):
+            context = []
+
+        if self._adapter.cumulative_tokens >= self._max_tokens_per_run:
+            yield StreamItem(
+                delta="",
+                index=0,
+                finish_reason="error",
+                is_terminal=True,
+                model="budget_exceeded",
+            )
+            return
+
+        async for item in self._adapter.generate_stream(prompt=prompt, context=context):
+            yield item
+
+    def health_check(self) -> HealthStatus:
         try:
-            try:
-                loop = asyncio.get_running_loop()
-                # In async context — probe synchronously on the backend
-                dep_status: str = "healthy"
-                dep_latency: Optional[float] = None
-                dep_message = "health probe: sync check (backend reachable)"
-            except RuntimeError:
-                # No running loop — create one for the probe
-                probe = asyncio.run(self._adapter.health_probe())
-                dep_status = probe["status"]
-                dep_latency = probe.get("latency_ms")
-                dep_message = probe["message"]
+            # Lightweight sync probe: minimal generation to verify backend
+            self._backend.generate(prompt="__health_probe__", context=[])
+            dep_status: str = "healthy"
+            dep_latency: Optional[float] = None
+            dep_message = "health probe: backend reachable"
         except Exception as exc:
             dep_status = "unavailable"
             dep_latency = None

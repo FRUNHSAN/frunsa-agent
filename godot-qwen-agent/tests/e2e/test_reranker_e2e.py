@@ -99,27 +99,27 @@ class TestRerankerPipelineE2E:
 class TestRerankerInputCases:
     def test_empty_chunks_returns_empty(self):
         step = RerankerStep(backend=MockScoringBackend())
-        output = step.run(
+        output = asyncio.run(step.run(
             inputs={"chunks": [], "query": "anything"},
             resources=None,
-        )
+        ))
         assert output.result == []
 
     def test_missing_query_falls_back_to_first_chunk(self):
         chunks = [_chunk("fallback query text", 0)]
         step = RerankerStep(backend=MockScoringBackend())
-        output = step.run(
+        output = asyncio.run(step.run(
             inputs={"chunks": chunks},  # no query key
             resources=None,
-        )
+        ))
         assert len(output.result) >= 0
 
     def test_non_list_chunks_is_normalized(self):
         step = RerankerStep(backend=MockScoringBackend())
-        output = step.run(
+        output = asyncio.run(step.run(
             inputs={"chunks": "not_a_list", "query": "test"},
             resources=None,
-        )
+        ))
         assert output.result == []
 
 
@@ -132,39 +132,39 @@ class TestRerankerContractEnforcement:
     def test_output_never_exceeds_input(self):
         chunks = [_chunk(f"doc {i}", i) for i in range(5)]
         step = RerankerStep(backend=MockScoringBackend())
-        output = step.run(
+        output = asyncio.run(step.run(
             inputs={"chunks": chunks, "query": "doc 2"},
             resources=None,
-        )
+        ))
         assert len(output.result) <= len(chunks)
 
     def test_ranks_are_sequential_from_one(self):
         chunks = [_chunk("alpha beta", 0), _chunk("beta gamma", 1), _chunk("gamma delta", 2)]
         step = RerankerStep(backend=MockScoringBackend())
-        output = step.run(
+        output = asyncio.run(step.run(
             inputs={"chunks": chunks, "query": "beta"},
             resources=None,
-        )
+        ))
         for i, r in enumerate(output.result, start=1):
             assert r.rank == i
 
     def test_scores_are_descending(self):
         chunks = [_chunk(f"topic {i}", i) for i in range(10)]
         step = RerankerStep(backend=MockScoringBackend())
-        output = step.run(
+        output = asyncio.run(step.run(
             inputs={"chunks": chunks, "query": "topic 5"},
             resources=None,
-        )
+        ))
         scores = [r.score for r in output.result]
         assert scores == sorted(scores, reverse=True)
 
     def test_scores_in_valid_range(self):
         chunks = [_chunk("sample text", 0)]
         step = RerankerStep(backend=MockScoringBackend())
-        output = step.run(
+        output = asyncio.run(step.run(
             inputs={"chunks": chunks, "query": "sample"},
             resources=None,
-        )
+        ))
         for r in output.result:
             assert -1.0 <= r.score <= 1.0
 
@@ -202,10 +202,10 @@ class TestRerankerBackendFailures:
         """Anti-pattern: adapter must NOT let exceptions propagate — graceful [ ]."""
         step = RerankerStep(backend=FailingScoringBackend())
         chunks = [_chunk("data", 0)]
-        output = step.run(
+        output = asyncio.run(step.run(
             inputs={"chunks": chunks, "query": "data"},
             resources=None,
-        )
+        ))
         assert output.result == []
 
     def test_health_check_unavailable_with_failing_backend(self):
@@ -222,10 +222,10 @@ class TestRerankerTrace:
     def test_trace_log_includes_metadata(self):
         step = RerankerStep(backend=MockScoringBackend())
         chunks = [_chunk("hello world", 0)]
-        output = step.run(
+        output = asyncio.run(step.run(
             inputs={"chunks": chunks, "query": "hello"},
             resources=None,
-        )
+        ))
         tl = output.trace_log
         assert "input_chunks" in tl
         assert "results_count" in tl

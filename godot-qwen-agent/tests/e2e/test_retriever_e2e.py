@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from core.adapters.chunker_adapter import ChunkerAdapter
@@ -154,10 +156,10 @@ class TestInputMappingRouting:
         retriever = RetrieverStep(top_k=2, index_chunks=chunks)
 
         # Direct call simulating what engine does after input_mapping
-        output = retriever.run(
+        output = asyncio.run(retriever.run(
             inputs={"chunks": chunks, "query": "alpha"},
             resources=None,
-        )
+        ))
 
         results = output.result
         assert len(results) > 0
@@ -168,10 +170,10 @@ class TestInputMappingRouting:
         chunks = [_chunk("primary fallback source", 0)]
         retriever = RetrieverStep(top_k=1, index_chunks=chunks)
 
-        output = retriever.run(
+        output = asyncio.run(retriever.run(
             inputs={"chunks": chunks},  # no 'query' key
             resources=None,
-        )
+        ))
 
         results = output.result
         assert len(results) == 1
@@ -212,10 +214,10 @@ class TestRetrieverScoring:
         chunks = [_chunk(f"content {i}", i) for i in range(10)]
         retriever = RetrieverStep(top_k=10, index_chunks=chunks)
 
-        output = retriever.run(
+        output = asyncio.run(retriever.run(
             inputs={"chunks": chunks, "query": "content 5"},
             resources=None,
-        )
+        ))
 
         scores = [r.score for r in output.result]
         assert scores == sorted(scores, reverse=True), f"Scores not descending: {scores}"
@@ -224,10 +226,10 @@ class TestRetrieverScoring:
         chunks = [_chunk(f"doc {i}", i) for i in range(20)]
         retriever = RetrieverStep(top_k=5, index_chunks=chunks)
 
-        output = retriever.run(
+        output = asyncio.run(retriever.run(
             inputs={"chunks": chunks, "query": "doc 7"},
             resources=None,
-        )
+        ))
 
         assert len(output.result) == 5
 
@@ -235,10 +237,10 @@ class TestRetrieverScoring:
         chunks = [_chunk(f"only {i}", i) for i in range(3)]
         retriever = RetrieverStep(top_k=10, index_chunks=chunks)
 
-        output = retriever.run(
+        output = asyncio.run(retriever.run(
             inputs={"chunks": chunks, "query": "only"},
             resources=None,
-        )
+        ))
 
         assert len(output.result) == 3
 
@@ -246,10 +248,10 @@ class TestRetrieverScoring:
         chunks = [_chunk(f"x{i}", i) for i in range(5)]
         retriever = RetrieverStep(top_k=5, index_chunks=chunks)
 
-        output = retriever.run(
+        output = asyncio.run(retriever.run(
             inputs={"chunks": chunks, "query": "x2"},
             resources=None,
-        )
+        ))
 
         for i, r in enumerate(output.result, start=1):
             assert r.rank == i
@@ -258,10 +260,10 @@ class TestRetrieverScoring:
         chunks = [_chunk(f"text {i}", i) for i in range(10)]
         retriever = RetrieverStep(top_k=10, index_chunks=chunks)
 
-        output = retriever.run(
+        output = asyncio.run(retriever.run(
             inputs={"chunks": chunks, "query": "text"},
             resources=None,
-        )
+        ))
 
         for r in output.result:
             assert -1.0 <= r.score <= 1.0, f"Score out of range: {r.score}"

@@ -1,0 +1,168 @@
+# ── Reasoning Chain ───────────────────────────────────────────────────
+chain_id: phase_08_dag_streaming_semantics
+title: "DAG streaming semantics: WAIT_ALL merge, N-sentinel convergence, error propagation"
+created_at: "2026-05-24T23:00:00Z"
+updated_at: "2026-05-24T23:59:00Z"
+tags: [streaming, dag, merge, sentinel, backpressure, error_propagation, internal_stream]
+status: active
+related_chains:
+  - phase_08_async_native_evolution
+
+# ── 1. Context ───────────────────────────────────────────────────────
+
+context: |
+  Phase 8.2a established single-link streaming (Generator→User) with a
+  Producer-Consumer + Sentinel bridge pattern. The engine now has exactly
+  2 asyncio.run() entry points, a dedicated ThreadPoolExecutor, and
+  try/finally resource cleanup.
+
+  Phase 8.2b extends streaming to multi-branch DAG pipelines. The core
+  challenge: when N upstream steps produce internal streams, a downstream
+  step must merge them with well-defined semantics. Without explicit
+  merge contracts, the engine would need to make implicit decisions
+  about ordering, backpressure, and error handling — exactly the kind
+  of ambiguity that leads to production incidents.
+
+  TDD strategy: test_dag_stream_merge.py defines 4 contract scenarios
+  before any engine code changes. All tests start with @pytest.mark.xfail.
+
+# ── 2. Decision ──────────────────────────────────────────────────────
+
+decision: |
+  Four interconnected decisions for Phase 8.2b:
+
+  1. WAIT_ALL merge only (FIRST_N deferred to 8.2c):
+     All N upstream producers must complete before the downstream consumer
+     receives the merged terminal signal. N sentinels are counted; consumer
+     exits only after the N-th sentinel. This is the simplest correct
+     semantics and covers the common RAG pattern (Retriever→Reranker→Generator).
+
+  2. N-Sentinel convergence model:
+     Each upstream producer sends data StreamItems followed by exactly one
+     terminal StreamItem (is_terminal=True). The shared asyncio.Queue
+     accumulates items from all producers. The merge consumer counts
+     terminal items and yields a single merged terminal when count == N.
+
+  3. Error-carrying StreamItem replaces bare Sentinel:
+     Instead of a bare sentinel object, an error is signaled via
+     StreamItem(delta="", finish_reason="error", is_terminal=True, error="...").
+     This keeps the protocol uniform — everything is a StreamItem.
+     On receiving an error terminal, the merge consumer:
+       a) Yields the error terminal immediately
+       b) Cancels all remaining producer tasks via asyncio.Task.cancel()
+       c) Exits the merge loop
+
+  4. UserFacingStream vs InternalStream:
+     StepOutput gains internal_stream: Optional[AsyncIterator] (Phase 8.2a
+     already changed stream to AsyncIterator for UserFacing). Only
+     component_type="generator" steps expose UserFacingStream; all other
+     steps route through internal_stream. The engine guarantees that
+     internal_stream data never reaches SSE/UserFacing serialization.
+
+# ── 3. Rationale ─────────────────────────────────────────────────────
+
+rationale: |
+  Why WAIT_ALL first:
+  - It's the safest merge semantic — no partial results, no ordering
+    ambiguity, no deadlock risk from producers that haven't started.
+  - FIRST_N adds complexity: "which N results?" requires scoring and
+    partial ordering, which leaks into reranker territory. Better to
+    implement FIRST_N as a dedicated MergeStrategy component in 8.2c.
+
+  Why N-sentinel counting:
+  - A single sentinel can't distinguish "all done" from "one done, others
+    still running." Counting sentinels from known N producers gives
+    deterministic termination.
+  - The producer count N is known at DAG-build time from the step's
+    depends_on list.
+
+  Why error-carrying StreamItem over bare sentinel:
+  - Keeps the protocol uniform (no isinstance checks for sentinel vs item).
+  - Frozen StreamItem with is_terminal=True + error=str is self-describing.
+  - No need for a separate error channel — the stream IS the error channel.
+
+  Why separate internal_stream field:
+  - UserFacingStream crosses asyncio.run() boundaries (SSE serialization).
+  - InternalStream stays purely in async memory space.
+  - Static analysis can verify that only generator steps touch UserFacing.
+
+# ── 4. Alternatives ──────────────────────────────────────────────────
+
+alternatives:
+  - option: "Merge at the DAG scheduler level (engine.arun() handles merge)"
+    pros: "No new API; transparent to step authors"
+    cons: "Makes the engine aware of stream semantics — violates the
+      business-agnostic principle from Phase 8.1. The engine should
+      orchestrate steps, not interpret their data."
+
+  - option: "Use a single merged queue with priority (asyncio.PriorityQueue)"
+    pros: "Allows reranker to order results by score as they arrive"
+    cons: "Premature optimization; requires scoring to happen in-stream;
+      breaks the step boundary between retriever and reranker"
+
+  - option: "Make all steps UserFacing (no internal_stream distinction)"
+    pros: "Simpler API — one stream field"
+    cons: "No static guarantee that chunker output won't leak to SSE;
+      harder to reason about memory behavior for large intermediate results"
+
+# ── 5. Evidence ──────────────────────────────────────────────────────
+
+evidence:
+  test_files:
+    - tests/e2e/test_dag_stream_merge.py
+    - tests/e2e/test_streaming_e2e.py (Phase 8.2a streaming tests)
+    - core/contracts/generation.py (StreamItem with is_terminal, error fields)
+    - core/pipeline/engine.py (StepOutput.internal_stream, stream_state, auto-merge)
+    - core/pipeline/streaming.py (merge_streams WAIT_ALL implementation)
+    - guardrails/rules/stream_isolation.py (AST enforcement of UserFacing boundary)
+  test_cases:
+    - "TestNSentinelMerge::test_three_producers_converge_to_single_consumer"
+    - "TestNSentinelMerge::test_consumer_blocks_until_all_sentinels_received"
+    - "TestNSentinelMerge::test_single_producer_merge_is_identity"
+    - "TestErrorPropagation::test_mid_stream_error_yields_error_terminal"
+    - "TestErrorPropagation::test_error_terminal_cancels_remaining_producers"
+    - "TestErrorPropagation::test_no_resource_leak_after_error_termination"
+    - "TestInternalStreamIsolation::test_step_output_internal_stream_field_exists"
+    - "TestInternalStreamIsolation::test_stream_isolation_via_dag_structure"
+    - "TestBackpressure::test_slow_consumer_throttles_fast_producers"
+    - "TestBackpressure::test_queue_never_exceeds_maxsize"
+    - "TestBackpressure::test_multiple_producers_share_backpressure"
+    - "TestMergeStreamsContract::test_merge_streams_function_exists"
+    - "TestMergeStreamsContract::test_empty_streams_list_returns_immediately"
+    - "TestMergeStreamsContract::test_terminal_item_has_is_terminal"
+    - "TestEngineIntegration::test_multi_upstream_merge_combines_streams"
+    - "TestEngineIntegration::test_single_upstream_passthrough"
+    - "TestEngineIntegration::test_no_upstream_stream_no_merge"
+
+# ── 6. Anti-Patterns ─────────────────────────────────────────────────
+
+anti_patterns:
+  - "Using a bare sentinel object instead of StreamItem(is_terminal=True). This forces isinstance() checks and breaks protocol uniformity."
+  - "Merging streams inside a step's run() method. Merge logic belongs in the engine or a dedicated merge helper — steps consume a single merged stream, not N raw streams."
+  - "Forgetting to cancel remaining producer tasks on error. This leaks coroutines and can cause 'Task was destroyed but it is pending' warnings."
+  - "Hardcoding producer count N. The merge function must receive N as a parameter derived from the step's depends_on list."
+  - "Having internal_stream data cross into UserFacing serialization. Guardrails must statically verify this boundary."
+
+# ── 7. Future Guidance ───────────────────────────────────────────────
+
+future_guidance: |
+  1. When adding a new merge strategy (FIRST_N, INCREMENTAL):
+     - Define it as a MergeStrategy Protocol in core/contracts/
+     - Register via @register_component("merge", "first_n")
+     - The engine selects strategy based on StepConfig.merge_strategy field
+
+  2. When adding a new step that produces internal_stream:
+     - run() should set StepOutput.internal_stream = <async_iterator>
+     - Do NOT set StepOutput.stream — that's UserFacing only
+     - Guardrails rule will flag any non-generator step that sets .stream
+
+  3. When extending StreamItem:
+     - All new fields must have backward-compatible defaults
+     - Frozen dataclass integrity must be preserved
+     - Every new field needs a corresponding validate_stream_output() check
+
+  4. Streaming DAG tests must verify:
+     - N-sentinel convergence (correct termination count)
+     - Error propagation (cancellation of siblings)
+     - Backpressure (Queue maxsize honored)
+     - Internal/UserFacing isolation (generator-only UserFacing)

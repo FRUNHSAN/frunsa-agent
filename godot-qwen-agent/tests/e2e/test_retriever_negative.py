@@ -33,36 +33,36 @@ class TestEmptyInputs:
 
     def test_empty_chunks_returns_empty_results(self):
         retriever = RetrieverStep(top_k=5)
-        output = retriever.run(
+        output = asyncio.run(retriever.run(
             inputs={"chunks": [], "query": "anything"},
             resources=None,
-        )
+        ))
         assert output.result == []
 
     def test_empty_query_falls_back_to_first_chunk_text(self):
         chunks = [_chunk("fallback content", 0)]
         retriever = RetrieverStep(top_k=3, index_chunks=chunks)
-        output = retriever.run(
+        output = asyncio.run(retriever.run(
             inputs={"chunks": chunks, "query": ""},
             resources=None,
-        )
+        ))
         assert isinstance(output.result, list)
 
     def test_missing_query_key_falls_back(self):
         chunks = [_chunk("text", 0)]
         retriever = RetrieverStep(top_k=3, index_chunks=chunks)
-        output = retriever.run(
+        output = asyncio.run(retriever.run(
             inputs={"chunks": chunks},  # no 'query' key
             resources=None,
-        )
+        ))
         assert isinstance(output.result, list)
 
     def test_missing_chunks_key_returns_empty(self):
         retriever = RetrieverStep(top_k=5)
-        output = retriever.run(
+        output = asyncio.run(retriever.run(
             inputs={"query": "something"},
             resources=None,
-        )
+        ))
         assert output.result == []
 
 
@@ -109,10 +109,10 @@ class TestBackendFailures:
         """When backend fails, adapter catches error → returns empty results (graceful)."""
         retriever = RetrieverStep(top_k=5, backend=FailingBackend())
         chunks = [_chunk("data", 0)]
-        output = retriever.run(
+        output = asyncio.run(retriever.run(
             inputs={"chunks": chunks, "query": "data"},
             resources=None,
-        )
+        ))
         # Adapter catches error, returns [] — not a crash
         assert output.result == []
 
@@ -205,10 +205,10 @@ class TestLargeScaleInput:
         chunks = [_chunk(f"document number {i} about various topics", i) for i in range(200)]
         retriever = RetrieverStep(top_k=10, index_chunks=chunks)
 
-        output = retriever.run(
+        output = asyncio.run(retriever.run(
             inputs={"chunks": chunks, "query": "topics around number 150"},
             resources=None,
-        )
+        ))
 
         assert len(output.result) == 10
         assert all(isinstance(r, RetrievalResult) for r in output.result)
@@ -217,10 +217,10 @@ class TestLargeScaleInput:
         chunk = _chunk("the only document", 0)
         retriever = RetrieverStep(top_k=10, index_chunks=[chunk])
 
-        output = retriever.run(
+        output = asyncio.run(retriever.run(
             inputs={"chunks": [chunk], "query": "only document"},
             resources=None,
-        )
+        ))
 
         assert len(output.result) == 1
 
@@ -233,10 +233,10 @@ class TestResultInvariants:
         chunks = [_chunk("a", 0), _chunk("b", 1)]
         retriever = RetrieverStep(top_k=5, index_chunks=chunks)
 
-        output = retriever.run(
+        output = asyncio.run(retriever.run(
             inputs={"chunks": chunks, "query": "a"},
             resources=None,
-        )
+        ))
 
         assert output.result[0].rank == 1
 
@@ -244,10 +244,10 @@ class TestResultInvariants:
         chunks = [_chunk("sample text here", 0)]
         retriever = RetrieverStep(top_k=5, index_chunks=chunks)
 
-        output = retriever.run(
+        output = asyncio.run(retriever.run(
             inputs={"chunks": chunks, "query": "sample"},
             resources=None,
-        )
+        ))
 
         for r in output.result:
             assert -1.0 <= r.score <= 1.0
@@ -262,19 +262,19 @@ class TestTraceCompleteness:
         retriever = RetrieverStep(top_k=5, backend=FailingBackend())
         chunks = [_chunk("data", 0)]
 
-        output = retriever.run(
+        output = asyncio.run(retriever.run(
             inputs={"chunks": chunks, "query": "data"},
             resources=None,
-        )
+        ))
 
         assert "retriever" in output.trace_log
 
     def test_trace_log_contains_version(self):
         retriever = RetrieverStep(top_k=5)
-        output = retriever.run(
+        output = asyncio.run(retriever.run(
             inputs={"chunks": [_chunk("x", 0)], "query": "x"},
             resources=None,
-        )
+        ))
         assert "version" in output.trace_log
 
 

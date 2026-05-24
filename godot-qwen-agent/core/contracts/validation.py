@@ -20,7 +20,7 @@ class ValidationError:
     level: Literal["error", "warning", "info"] = "error"
 
 
-@dataclass
+@dataclass(frozen=True)
 class ContractValidationResult:
     """Structured result of runtime contract validation."""
 
@@ -295,4 +295,129 @@ def validate_reranker_output(
         warnings=warnings,
         chunk_count=len(results),
         total_chars=0,
+    )
+
+
+# ── Streaming output validator ───────────────────────────────────────
+
+
+def validate_stream_output(items: list) -> ContractValidationResult:
+    """Runtime validation of streaming generation output.
+
+    Checks:
+      - Every item is a StreamItem
+      - Indices are sequential (0, 1, 2, ...)
+      - Exactly one item has finish_reason != None (the terminal item)
+      - Terminal item has is_terminal=True (warning if not)
+      - No items appear after the terminal item
+      - Total delta text is non-empty (warning)
+    """
+    from .generation import StreamItem as SI
+
+    errors: List[ValidationError] = []
+    warnings: List[ValidationError] = []
+
+    if not isinstance(items, list):
+        return ContractValidationResult(
+            passed=False,
+            errors=[
+                ValidationError(
+                    field="output", code="NOT_A_LIST",
+                    message=f"Expected list, got {type(items).__name__}",
+                )
+            ],
+        )
+
+    if len(items) == 0:
+        return ContractValidationResult(
+            passed=False,
+            errors=[
+                ValidationError(
+                    field="output", code="EMPTY_STREAM",
+                    message="Streaming produced zero items",
+                )
+            ],
+        )
+
+    finished_at: Optional[int] = None
+    total_text = ""
+
+    for i, item in enumerate(items):
+        if not isinstance(item, SI):
+            errors.append(
+                ValidationError(
+                    field=f"items[{i}]", code="TYPE_MISMATCH",
+                    message=f"Expected StreamItem, got {type(item).__name__}",
+                )
+            )
+            continue
+
+        if item.index != i:
+            warnings.append(
+                ValidationError(
+                    field=f"items[{i}].index", code="NON_SEQUENTIAL_INDEX",
+                    message=f"Expected index {i}, got {item.index}",
+                    level="warning",
+                )
+            )
+
+        if item.finish_reason is not None:
+            if finished_at is None:
+                finished_at = i
+            elif finished_at != i:
+                errors.append(
+                    ValidationError(
+                        field=f"items[{i}].finish_reason",
+                        code="MULTIPLE_FINISH",
+                        message=f"Multiple items have finish_reason set. "
+                        f"First at index {finished_at}, also at {i}.",
+                    )
+                )
+
+        if finished_at is not None and i > finished_at:
+            errors.append(
+                ValidationError(
+                    field=f"items[{i}]", code="ITEM_AFTER_FINISH",
+                    message=f"Item at index {i} appears after finish_reason "
+                    f"was set at index {finished_at}.",
+                )
+            )
+
+        total_text += item.delta
+
+    if not total_text.strip():
+        warnings.append(
+            ValidationError(
+                field="items[*].delta", code="EMPTY_STREAM_TEXT",
+                message="Total streamed text is empty or whitespace-only",
+                level="warning",
+            )
+        )
+
+    if finished_at is None:
+        warnings.append(
+            ValidationError(
+                field="items[*].finish_reason", code="NO_FINISH_REASON",
+                message="No item in the stream has a finish_reason set",
+                level="warning",
+            )
+        )
+    else:
+        terminal = items[finished_at]
+        if isinstance(terminal, SI) and not terminal.is_terminal:
+            warnings.append(
+                ValidationError(
+                    field=f"items[{finished_at}].is_terminal",
+                    code="TERMINAL_NOT_MARKED",
+                    message="Terminal item (with finish_reason) should have is_terminal=True",
+                    level="warning",
+                )
+            )
+
+    return ContractValidationResult(
+        passed=len(errors) == 0,
+        errors=errors,
+        warnings=warnings,
+        chunk_count=len(items),
+        total_chars=len(total_text),
     )

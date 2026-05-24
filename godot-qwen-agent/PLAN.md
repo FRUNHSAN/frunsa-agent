@@ -1297,16 +1297,184 @@ core/legacy/
 
 ---
 
-## 后续扩展（Phase 5+）
+## Phase 4: 可观测性 (`core/pipeline/tracing.py`, `engine.py`)
 
-**下一个组件类型：Retriever（检索器）。** Chunking 跑通后立即接入：
-- Retriever 是第一个完整消费 Chunk 数据模型的组件（输入 `List[Chunk]` → 输出 `List[RetrievalResult]`）
-- 验证 Chunk.span 和 metadata 传递在真实检索场景下的完备性——对 Phase 1 契约的终极压力测试
-- 端到端可演示：文档 → chunk → 检索 → top-3 chunks
-- 新增 `core/contracts/retrieval.py`，复用现有 `ComponentRegistry`、`SemVer`、`ValidationError`，零架构调整
+**完成状态**: ✅ 已完成 (Phase 4)
 
-**已预留的扩展点：**
-- `StepOutput.stream: Optional[Iterator[Any]]` — 未来 Tool 组件流式输出接口位，v1 不使用不阻塞
-- `ComponentRegistry.list_types()` / `list_strategies()` — CLI/UI 组件发现功能预留
-- `SnapshotPolicy` 三级策略 — NONE/FULL 已在枚举中，v1 只用 SUMMARY
-- `serialize_tracelog()` msgpack 模式 — 生产环境高性能日志管道已就绪
+### 关键交付
+- `StepTrace` / `TraceLog` — 步骤级追踪，含 pipeline_run_id、duration、snapshot
+- `DependencyCallTrace` / `SpanType` — 外部依赖调用追踪（LLM API、向量数据库）
+- `HealthStatus` / `DependencyHealth` — 分级健康检查（healthy/degraded/unavailable）
+- `SnapshotPolicy` — 三级快照策略（NONE/SUMMARY/FULL）
+- `TraceWriter` — 可插拔的追踪输出接口
+
+### 架构决策
+- 引擎层所有类型（StepTrace、TraceLog）不导入 contracts/ 领域类型
+- DependencyHealth 作为基础设施类型，连接引擎和适配器层
+- 每个外部依赖必须声明 DependencyHealth（链 phase_04_observability）
+
+---
+
+## Phase 5: 外部 I/O 模式 (`core/steps/retriever.py`, `core/adapters/vector_store.py`)
+
+**完成状态**: ✅ 已完成 (Phase 5)
+
+### 关键交付
+- `RetrieverStep` — 第一个外部 I/O 组件（向量检索）
+- `VectorStoreAdapter` — async wrapper + health_probe + DependencyCallTrace
+- `InMemoryVectorBackend` — 余弦相似度内存后端（零外部依赖）
+- `RetrievalResult` frozen dataclass（score、rank、chunk）
+
+### 架构决策
+- Adapter level 统一封装外部调用：run_in_executor + timeout + trace 注入
+- health_check 执行语义探测（search sentinel vector），不依赖虚假返回值
+- 空结果 = `StepOutput(result=[])`，不是 sentinel（链 phase_05_external_io）
+
+---
+
+## Phase 7: LLM / Reranker (`core/steps/generator.py`, `core/steps/reranker.py`)
+
+**完成状态**: ✅ 已完成 (Phase 7)
+
+### 关键交付
+- `GeneratorStep` + `GenerationAdapter` — LLM 生成，token budget 强制
+- `RerankerStep` + `ScoringAdapter` — chunk 重排序，合约强制（输出 ≤ 输入）
+- `MockGenerationBackend` / `MockScoringBackend` — 零 API key 测试后端
+- `validate_generation_output()` / `validate_reranker_output()` — 运行时合约校验
+- 7 个预定义 anti-patterns 全部规避（链 phase_07_llm_risks）
+
+### 架构决策
+- Budget enforcement 两层分拆：adapter 追踪累计 token，step 强制执行上限
+- 每种组件类型有独立的"安全空值"：Generator → GenerationResult(finish_reason="error")，Reranker → []
+- frozen dataclass 不可变：重排序时创建新实例，不原地修改 rank（链 phase_07_implementation_reality）
+
+### 测试覆盖
+- E2E 管道测试（chunker → generator）、健康检查、后端故障、预算超限
+- 49 个测试，覆盖正常 + 负面 + 合约场景
+
+---
+
+## Phase 8.0: 机器强制护栏 (`guardrails/`)
+
+**完成状态**: ✅ 已完成 (Phase 8.0)
+
+### 关键交付
+- `guardrails/checker.py` — AST-based 架构规则引擎
+- 4 条规则：cross_platform、frozen_dataclass、component_registry、chain_coverage
+- `guardrails/cli.py` — `python -m guardrails check [--all] [--rule X] [--json]`
+- `.pre-commit-config.yaml` — git commit 前自动运行
+- `tests/conftest.py` — pytest `--guardrails` 集成
+
+### 架构决策
+- Severity 分级：ERROR（阻止提交）、WARNING（CI 告警）、INFO
+- frozen_dataclass 规则排除 `__post_init__` 中的 `object.__setattr__`（合法模式）
+- "在加速前，先焊死护栏" — Phase 8.0 在 engine 重构之前完成（用户战略指令）
+
+---
+
+## Phase 8.1: Async-Native 引擎重构 (`core/pipeline/engine.py`)
+
+**完成状态**: ✅ 已完成 (Phase 8.1)
+
+### 关键交付
+- DAG-based 并发执行 — 独立分支通过 `asyncio.gather()` 并行
+- 所有 step `run()` 改为 `async def`，引擎 `_dispatch()` 用 `iscoroutine()` 检测
+- 单事件循环 — `asyncio.run()` 仅 1 处（`PipelineRunner.run()`）
+- `resources.close()` 在 `try/finally` 中，保证异常安全
+- 独立 `ThreadPoolExecutor`（默认 4 workers）替代 `asyncio.to_thread()`
+- Sync health_check — 直接调用 backend 同步方法，0 个 `asyncio.run()` 在 steps 中
+
+### Bug 修复
+- DAG 依赖解析：`depends_on` 引用 provided keys（如 "chunks"），不是 step names。修复前所有步骤错误地并行执行导致 retriever 拿空数据（链 phase_08_async_native_evolution）
+
+### 架构决策
+- `PipelineRunner` 支持 context manager（`__enter__`/`__exit__`）
+- Sync 步骤通过 `loop.run_in_executor(executor, ...)` 走独立线程池，不抢占 adapter I/O 线程
+- 209 测试，0 失败，guardrails 通过
+
+---
+
+## Phase 8.2a: Single-Link Streaming (Generator→User)
+
+### Context
+
+Phase 8.1 完成了 async-native 引擎：单事件循环、DAG 并发、独立线程池、try/finally 资源释放。Streaming 是第一个"原生 async 消费者"。
+
+8.2a 范围限定为**单链路**（Generator→User），不涉及多节点 DAG 流式传播（那是 8.2b）。目标：用户能通过 `runner.run_streaming()` 逐 token 拿到生成结果。
+
+### Key Decisions
+
+1. **新增 `run_streaming()` 方法，不重载 `run()`** — Python 不能同时 return 和 yield。PipelineStep 上加可选的 `run_streaming() -> AsyncIterator`
+2. **8.2a 流式路径绕过 DAG 调度器** — 单链路场景：先跑 generator 之前的步骤（批次 DAG），再对 generator 调 `run_streaming()` 逐 token yield
+3. **双入口** — `run_streaming() -> Iterator[Any]`（同步，内部 `asyncio.run()`）+ `arun_streaming() -> AsyncIterator[Any]`（异步，给 FastAPI 直接用 `async for`）。`core/` 中 `asyncio.run()` 从 1 变 2
+4. **Sync Backend → AsyncIterator 桥接** — Producer-Consumer + Sentinel 模式：`asyncio.run_coroutine_threadsafe(queue.put(item), loop)` 替代 `put_nowait`，backpressure 自然传导
+
+### Implementation Steps (10 steps)
+
+| # | 文件 | 改动 | 
+|---|------|------|
+| 1 | `core/contracts/generation.py` | 新增 `StreamItem` frozen dataclass |
+| 2 | `core/contracts/validation.py` | 新增 `validate_stream_output()` |
+| 3 | `core/contracts/__init__.py` | 导出新类型 |
+| 4 | `core/adapters/generator_adapter.py` | `StreamingBackend` Protocol |
+| 5 | `core/adapters/generator_adapter.py` | `GenerationAdapter.generate_stream()` + 桥接逻辑 |
+| 6 | `core/steps/generator.py` | `MockStreamingBackend` |
+| 7 | `core/steps/generator.py` | `GeneratorStep.run_streaming()` |
+| 8 | `core/pipeline/engine.py` | `run_streaming()` + `arun_streaming()` + `_arun_streaming_impl()` |
+| 9 | `core/pipeline/engine.py` | `_dispatch()` async generator 防护 |
+| 10 | `core/pipeline/engine.py` | `StepOutput.stream` 类型修正 `Iterator`→`AsyncIterator` |
+
+### Bridge Pattern (Step 5)
+
+```python
+queue: asyncio.Queue = asyncio.Queue(maxsize=32)  # backpressure 窗口
+sentinel = object()
+
+def _producer():
+    try:
+        for item in backend.generate_stream(prompt, ctx, **params):
+            asyncio.run_coroutine_threadsafe(queue.put(item), loop)
+        asyncio.run_coroutine_threadsafe(queue.put(sentinel), loop)
+    except Exception:
+        asyncio.run_coroutine_threadsafe(queue.put(sentinel), loop)
+
+task = loop.run_in_executor(executor, _producer)
+while True:
+    item = await queue.get()
+    if item is sentinel:
+        break
+    yield item
+await task
+```
+
+### Test Plan — `tests/e2e/test_streaming_e2e.py`
+
+| 测试类 | 用例 |
+|--------|------|
+| `TestStreamItemContract` | frozen 不可变、MappingProxyType 防护 |
+| `TestMockStreamingBackend` | 逐词 yield、空 prompt、序号连续、finish_reason |
+| `TestGenerationAdapterStreaming` | stream backend / 非 stream fallback / 累计 token |
+| `TestGeneratorStepStreaming` | `run_streaming()` yield、预算超限 error item |
+| `TestPipelineRunnerStreaming` | 完整管道、自动检测 generator、无 generator 抛异常 |
+| `TestValidateStreamOutput` | 合法流、空流报错、多项 finish_reason、序号不连续 |
+
+### Files Modified
+
+| 文件 | 行数 |
+|------|------|
+| `core/contracts/generation.py` | ~25 |
+| `core/contracts/validation.py` | ~55 |
+| `core/contracts/__init__.py` | ~3 |
+| `core/adapters/generator_adapter.py` | ~70 |
+| `core/steps/generator.py` | ~55 |
+| `core/pipeline/engine.py` | ~80 |
+| `tests/e2e/test_streaming_e2e.py` | ~250 (新文件) |
+
+### Verification
+
+1. `pytest tests/e2e/test_streaming_e2e.py -v` — 流式测试全通过
+2. `pytest tests/ -q` — 全量不回归（209 → 234+）
+3. `python -m guardrails check --all` — 通过
+4. `grep -rn "asyncio.run(" core/` — 恰好 2 处
+5. 同步：`for item in runner.run_streaming(...):` 逐 token 输出
+6. 异步：`async for item in runner.arun_streaming(...):` 逐 token 输出

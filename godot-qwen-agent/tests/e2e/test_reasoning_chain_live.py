@@ -232,23 +232,22 @@ class TestAntiPatternInterception:
                             f"factory.py line {node.lineno}: {func.id}() call — FORBIDDEN"
                         )
 
-    def test_health_check_uses_get_running_loop_not_get_event_loop(self):
-        """Invariant: health_check() must use get_running_loop(), not deprecated get_event_loop()."""
-        # Check retriever.py specifically (the pattern setter)
+    def test_health_check_is_sync_no_asyncio_run(self):
+        """Phase 8.1 invariant: health_check() uses direct sync backend probe, no asyncio."""
         retriever_path = ROOT / "core" / "steps" / "retriever.py"
         content = retriever_path.read_text(encoding="utf-8")
-        assert "get_running_loop()" in content, (
-            "retriever.py must use get_running_loop() (the Phase 5.3 fix)"
-        )
-        # get_event_loop should NOT appear as the primary call
-        # (it may appear in comments, so check for the function call pattern)
+        # Must NOT use deprecated get_event_loop()
         lines_with_get_event_loop = [
             line for line in content.split("\n")
             if "get_event_loop()" in line and not line.strip().startswith("#")
         ]
         assert len(lines_with_get_event_loop) == 0, (
-            "retriever.py must not call get_event_loop() — use get_running_loop():\n"
+            "retriever.py must not call get_event_loop() — use direct sync probe:\n"
             + "\n".join(lines_with_get_event_loop)
+        )
+        # Must NOT use asyncio.run() in health_check (Phase 8.1: sync-only)
+        assert "asyncio.run(" not in content, (
+            "retriever.py health_check must use direct sync backend probe, not asyncio.run()"
         )
 
 

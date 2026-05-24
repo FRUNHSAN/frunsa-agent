@@ -1,0 +1,188 @@
+# ── Reasoning Chain ───────────────────────────────────────────────────
+chain_id: phase_08_async_native_evolution
+title: "Async-native engine: DAG concurrency, single event loop, zero asyncio.run() pollution"
+created_at: "2026-05-24T22:00:00Z"
+updated_at: "2026-05-24T23:59:00Z"
+tags: [async, engine, dag, concurrency, event_loop, health_check, resource_lifecycle]
+status: active
+related_chains:
+  - phase_05_external_io
+  - phase_02_skip_propagation
+  - phase_04_observability
+  - phase_01_three_platform
+
+# ── 1. Context ───────────────────────────────────────────────────────
+
+context: |
+  Before Phase 8.1, every step's run() method was synchronous but internally
+  called asyncio.run() to bridge to async adapter methods. This meant:
+
+  1. Each step created/destroyed its own event loop — 3 steps = 3 loops
+     created and torn down in a single pipeline run
+  2. The engine executed steps sequentially, even when independent branches
+     could run concurrently
+  3. Resource lifecycles (managed connections, thread pools) were untethered
+     from pipeline lifecycles — no close() guarantee
+  4. Health checks had a fragile dual-path: try get_running_loop() for sync
+     probe, fall back to asyncio.run() for async probe
+
+  The old pattern violated a core principle: the engine should own the event
+  loop, not individual steps. Each asyncio.run() call is a mini event-loop
+  lifecycle — expensive, opaque to tracing, and impossible to coordinate.
+
+  Phase 8.1 replaced this with a single event loop owned by PipelineRunner.run(),
+  async-native step.run() methods, DAG-based concurrent execution, and
+  purely synchronous health checks.
+
+# ── 2. Decision ──────────────────────────────────────────────────────
+
+decision: |
+  Three interconnected changes:
+
+  1. Async-native steps: All step.run() methods changed from `def run()` to
+     `async def run()`. The engine's _dispatch() detects coroutines via
+     asyncio.iscoroutine() and awaits them directly. Sync components
+     (ChunkerAdapter) still work — their run() returns StepOutput directly,
+     and _dispatch wraps the result in asyncio.to_thread() for non-blocking
+     event-loop integration.
+
+  2. DAG-based concurrent execution: arun() builds a dependency graph from
+     StepConfig.provides keys (NOT step names — a critical distinction).
+     Steps with no unsatisfied dependencies execute in parallel waves via
+     asyncio.gather(). Skip propagation is preserved: if a dependency was
+     skipped, dependents skip too.
+
+  3. Sync health checks: health_check() methods now use direct synchronous
+     backend calls (generate/score/search) instead of the async
+     get_running_loop() + asyncio.run() dual path. This eliminates 3
+     asyncio.run() calls from core/steps/ and simplifies health probe logic.
+
+  The only asyncio.run() in core/ is PipelineRunner.run() — the single
+  sync entry point that owns the event loop.
+
+# ── 3. Rationale ─────────────────────────────────────────────────────
+
+rationale: |
+  Why this order (DAG concurrency before streaming):
+  - Per the user's strategic directive: "在加速前，先焊死护栏" (weld the
+    guardrails before accelerating). Phase 8.0 machine-enforced invariants
+    came first, then Phase 8.1 engine refactoring.
+  - A single event loop is prerequisite for streaming (Phase 8.2) — you
+    can't stream tokens through per-step asyncio.run() boundaries.
+  - DAG concurrency is prerequisite for multi-branch pipelines (Phase 9+).
+
+  Why provided_to_idx, not name_to_idx:
+  - depends_on references provided KEYS (like "chunks"), not step names
+    (like "chunk_docs"). The original DAG scheduler incorrectly used
+    name_to_idx for dependency resolution, causing all steps to appear
+    independent and execute concurrently — breaking pipelines where
+    retriever depends on chunker output.
+  - Fix: build provided_to_idx mapping {provides_key: step_index} and
+    resolve dependencies through that.
+
+  Why sync health checks:
+  - health_check() is called synchronously by the engine at init and by
+    external monitoring. Forcing an async probe here requires either
+    get_running_loop() (fragile, context-dependent) or asyncio.run()
+    (creates unnecessary event loops).
+  - All backends expose sync methods (generate, score, search) — the
+    health check can call them directly. The adapter's async health_probe()
+    remains available for external CLI/API use, but the core step's
+    health_check() is now purely sync.
+
+# ── 4. Alternatives ──────────────────────────────────────────────────
+
+alternatives:
+  - option: "Keep sync step.run() with internal asyncio.run() — only refactor engine"
+    pros: "Less test churn; backward compatible with all existing steps"
+    cons: "Per-step event loops destroy the observability model (no shared
+      tracing context); streaming is impossible across asyncio.run()
+      boundaries; each asyncio.run() is ~0.5ms overhead; violates the
+      architectural principle that the engine owns execution context"
+
+  - option: "Make health_check() async too"
+    pros: "Consistent with async run(); adapter health_probe() could be
+      called directly with native await"
+    cons: "Engine calls health_check() synchronously at init — making it
+      async would require asyncio.run() in the engine or a separate
+      health-check entry point; adds complexity for no performance gain
+      since health probes are infrequent and lightweight"
+
+  - option: "Use name_to_idx for DAG dependency resolution"
+    pros: "Simpler — step names are already unique and known"
+    cons: "WRONG: depends_on names are provided keys, not step names.
+      'chunks' (a provided key) would never match 'chunk_docs' (a step
+      name). This was the actual bug that caused 2 E2E test failures."
+
+# ── 5. Evidence ──────────────────────────────────────────────────────
+
+evidence:
+  test_files:
+    - core/pipeline/engine.py
+    - core/pipeline/streaming.py
+    - core/steps/retriever.py
+    - core/steps/generator.py
+    - core/steps/reranker.py
+    - core/adapters/generator_adapter.py
+    - tests/conformance/test_async_native_engine.py
+    - tests/e2e/test_streaming_e2e.py
+    - tests/e2e/test_dag_stream_merge.py
+    - tests/e2e/test_retriever_e2e.py
+    - tests/e2e/test_retriever_negative.py
+    - tests/e2e/test_reasoning_chain_live.py
+  test_cases:
+    - "TestAsyncNativeEngine::test_independent_branches_run_concurrently"
+    - "TestAsyncNativeEngine::test_concurrent_execution_faster_than_sequential"
+    - "TestAsyncNativeEngine::test_dag_diamond_executes_correctly"
+    - "TestResourceLifecycle::test_resources_not_closed_between_steps"
+    - "TestSkipPropagation::test_dependent_skips_when_upstream_fails"
+    - "TestTraceLogConcurrency::test_concurrent_steps_have_distinct_traces"
+    - "TestRetrieverPipelineE2E::test_full_pipeline_returns_retrieval_results"
+    - "TestRetrieverPipelineE2E::test_pipeline_with_more_specific_query_yields_results"
+    - "TestHealthCheckIsSyncNoAsyncioRun (reasoning chain live test)"
+    - "TestPipelineRunnerStreaming (6 tests for run_streaming/arun_streaming)"
+    - "TestNSentinelMerge (3 tests for multi-producer convergence)"
+    - "TestErrorPropagation (3 tests for error cancellation)"
+    - "TestBackpressure (3 tests for queue throttling)"
+
+# ── 6. Anti-Patterns ─────────────────────────────────────────────────
+
+anti_patterns:
+  - "Calling asyncio.run() inside a step method. The engine already runs inside asyncio.run(). Nested loops cause 'Event loop is already running' errors or degrade to sequential execution. Rule: grep for asyncio.run() in core/ must return exactly 2 matches — PipelineRunner.run() (line ~218) and PipelineRunner.run_streaming() (line ~499). These are the ONLY two sync→async entry points."
+  - "Resolving DAG dependencies by step name instead of provided key. depends_on references output keys (e.g. 'chunks'), not step names (e.g. 'chunk_docs'). Using name_to_idx causes all steps to appear independent, breaking pipeline ordering. Use provided_to_idx instead."
+  - "Using get_event_loop() in any core/ code. This is deprecated in Python 3.12 and can create new loops inappropriately. Phase 8.1 makes health_check entirely sync so neither get_running_loop nor get_event_loop is needed there. The engine uses iscoroutine() + await, not manual loop management."
+  - "Not calling resources.close() at pipeline end. Managed resources (connections, thread pools) must be cleaned up. arun() now calls res.close() before returning. Conformance test C4 enforces this."
+
+# ── 7. Future Guidance ───────────────────────────────────────────────
+
+future_guidance: |
+  1. When adding a new step type (tool, classifier, etc.):
+     - run() MUST be `async def` — the engine expects this
+     - health_check() MUST be sync — call backend methods directly
+     - Do NOT import asyncio in health_check() — it's not needed
+     - Use StepOutput for return values, not raw data
+
+  2. When adding a new pipeline:
+     - depends_on values are PROVIDED KEYS, not step names
+     - Use input_mapping to route upstream keys to step parameter names
+     - Independent branches execute concurrently — ensure thread safety
+       if sharing mutable state (prefer immutable state)
+
+  3. Streaming (Phase 8.2 — COMPLETE):
+     - Phase 8.2a: Single-link streaming (Generator→User) via run_streaming()
+       and arun_streaming() dual entry points. Producer-Consumer + Sentinel
+       bridge with asyncio.Queue(maxsize=32) for backpressure.
+     - Phase 8.2b: DAG stream merge via merge_streams() — WAIT_ALL semantics,
+       N-sentinel convergence, error-carrying StreamItem for cancellation.
+       InternalStream stays in async memory space; UserFacingStream crosses
+       SSE boundary (generator-only). Engine auto-merges upstream streams
+       when a step has multiple streaming dependencies.
+     - StepOutput has two stream fields: .stream (UserFacing, generator-only)
+       and .internal_stream (DAG-internal, any step).
+
+  4. Guardrails enforcement:
+     - Rule: grep -c "asyncio.run(" in core/ must equal 2
+       (PipelineRunner.run() + PipelineRunner.run_streaming())
+     - Rule: grep -c "get_event_loop()" in core/steps/ must equal 0
+     - Machine-enforced via guardrails/rules/stream_isolation.py:
+       only generator steps may set StepOutput.stream (UserFacing)

@@ -1,7 +1,7 @@
 """Component contracts: data models, protocols, validation, and unified registry."""
 
 from .chunking import Chunk, ChunkingStrategy, ContentBlock, SemVer
-from .generation import GenerationResult, GenerationStrategy
+from .generation import GenerationResult, GenerationStrategy, StreamItem
 from .identity_chunker import IdentityChunker
 from .registry import (
     COMPONENT_REGISTRY,
@@ -18,6 +18,7 @@ from .validation import (
     validate_chunk_output,
     validate_generation_output,
     validate_reranker_output,
+    validate_stream_output,
 )
 
 __all__ = [
@@ -27,6 +28,7 @@ __all__ = [
     "SemVer",
     "RetrievalResult",
     "GenerationResult",
+    "StreamItem",
     # Strategy protocols
     "ChunkingStrategy",
     "RetrievalStrategy",
@@ -38,6 +40,7 @@ __all__ = [
     "validate_chunk_output",
     "validate_generation_output",
     "validate_reranker_output",
+    "validate_stream_output",
     # Registry
     "COMPONENT_REGISTRY",
     "ComponentRegistry",
