@@ -160,7 +160,7 @@ class TestOrchestrationSeedCount:
             sink = SQLiteTraceSink(path)
             try:
                 all_keys = sink.query_keys()
-                assert len(all_keys) == 15
+                assert len(all_keys) == 16  # Phase 15: +agent.identity
             finally:
                 sink.close()
 

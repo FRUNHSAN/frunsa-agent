@@ -2,6 +2,7 @@
 
 Phase 11: N=2 engine stubs only. NOT a cross-engine semantic standard.
 Phase 14: orchestration engine keys added (N=3 engines).
+Phase 15: agent.identity key added (first agent.* namespace key).
 ENGINE_TO_COMPONENT_MAP resolves engine-specific keys to canonical
 component-level keys defined in the component platform.
 """
@@ -110,6 +111,16 @@ TRACE_KEY_REGISTRY: Dict[str, TraceKeyDef] = {
         type=str,
         semantics="Resource pool identifier for capacity tracking",
         engine="orchestration",
+    ),
+
+    # ── Agent identity key (Phase 15) ─────────────────────────────────
+    # First agent.* namespace key. component_candidate=False: agent identity
+    # describes WHO is running, not WHAT component capability is provided.
+    "agent.identity": TraceKeyDef(
+        type=dict,
+        semantics="Structured agent identity carrying id, role, version, and capabilities manifest",
+        engine="planning",
+        component_candidate=False,
     ),
 }
 

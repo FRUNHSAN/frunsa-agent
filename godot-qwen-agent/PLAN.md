@@ -2761,3 +2761,117 @@ ENGINE_TO_COMPONENT_MAP: Dict[str, str] = {
 4. `python -c "from core.observability import ENGINE_TO_COMPONENT_MAP; assert len(ENGINE_TO_COMPONENT_MAP) == 3; print('OK')"` — 映射加载正常
 5. `python scripts/analyze_component_candidates.py --per-engine` — 3/3 READY, 0 FIX
 6. Ad-hoc: `SQLiteTraceSink.query_component_keys()` — 3 component keys, `query_component_keys('retrieval')` — 2 keys
+
+---
+
+## Phase 14: 编排引擎 — 6 个 orchestration.* trace key + Stub
+
+**完成状态**: ✅ 已完成 (Phase 14)
+
+### 背景
+
+Phase 12 预设计了 6 个 `orchestration.*` trace key（文档阶段标记为 "NOT FOR IMPLEMENTATION"）。Phase 14 将其物化：注册到 TRACE_KEY_REGISTRY、植入 SQLiteTraceSink、通过 StubOrchestrationEngine 产出、由 `orchestration_trace_completeness` guardrail (ERROR) 强制校验。
+
+这 6 个 key 是**假设**，不是已验证的合约——Phase 15 将用真实消费者对其进行反向压力测试。
+
+### 关键交付
+
+| 交付物 | 说明 |
+|--------|------|
+| `engines/orchestration/stub.py` | StubOrchestrationEngine: N=2 并行分支 (fast_path 3 items + full_rerank 2 items) |
+| `engines/orchestration/__init__.py` | 引擎包导出 |
+| 6 个 orchestration.* keys | TRACE_KEY_REGISTRY 注册，component_candidate=False |
+| `orchestration_trace_completeness` guardrail | ERROR 级别，双检查（缺失 key + 未注册 key） |
+| `trace_context_namespace` 扩展 | 新增 "orchestration" 前缀 |
+| Reasoning chain | `phase_14_orchestration_engine.yaml` + index 更新 |
+| 测试 | conformance (33 tests) + integration (7) + E2E (11) + 现有测试更新 |
+
+### 测试覆盖
+
+| 文件 | 测试数 | 验证点 |
+|------|--------|--------|
+| `tests/conformance/test_orchestration_engine.py` | 33 | Stub 产出、key 类型、merge_ordinal 顺序、分支计数 |
+| `tests/integration/test_orchestration_sink.py` | 7 | SQLiteSink 种子、查询、component_candidate 排除 |
+| `tests/e2e/test_orchestration_e2e.py` | 11 | 全链：stub → StreamingTraceRecord → Sink → query |
+
+### 架构决策
+
+- **orchestration key 不入 COMPONENT_TRACE_KEYS**：编排描述引擎行为，非组件能力
+- **ERROR 从 day one**：6-key 合约是预定义的，非探索性的——任何偏离都是真实错误
+- **N=2 并行分支**：最小场景验证 merge_ordinal 跨分支顺序
+- 468 tests, 14 guardrails, 0 failures
+
+```
+48dc1a3 feat: Phase 14 — Orchestration engine stub, 6 trace keys, completeness guardrail (468 tests, 14 guardrails)
+```
+
+---
+
+## Phase 15: Planning Engine + Agent Identity — 编排合约反向压力测试
+
+**完成状态**: ✅ 已完成 (Phase 15)
+
+### 背景
+
+Phase 14 的 6 个 orchestration.* key 是假设——StubOrchestrationEngine 产出，但没有真实消费者。Phase 15 构建第一个消费者：增强的 Planning Engine，验证 (或证伪) 这 6 个 key 的充分性。
+
+**这不是功能开发，是一次架构压力测试。** 主要交付物是 Sufficiency Report，不是代码。
+
+### 关键交付
+
+| 交付物 | 文件 | 说明 |
+|--------|------|------|
+| AgentIdentity | `engines/planning/identity.py` (NEW) | Frozen dataclass: {id, role, version, capabilities}。首个 agent.* namespace key，6 点注册约定 |
+| PlanningContext | `engines/planning/interface.py` (MODIFY) | 替代裸 `goal: str`，包装 goal + agent_identity + sub_tasks + max_parallel_branches |
+| 增强 Stub | `engines/planning/stub.py` (REWRITE) | 5 步场景：analyze → decompose → 并行调度 (via StubOrchestrationEngine) → merge → synthesize。8 items，含 agent.identity + orchestration passthrough |
+| Trace key 注册 | `core/observability/trace_registry.py` | +agent.identity (type=dict, engine=planning, component_candidate=False)。15→16 keys |
+| planning_engine_contract guardrail | `guardrails/rules/planning_engine_contract.py` (NEW) | ERROR 双检查：缺失 planning.* + agent.* key、未注册 key |
+| Namespace 扩展 | `guardrails/rules/trace_context_namespace.py` | +"agent" prefix |
+| Sufficiency Report | `.ai_reasoning/sufficiency/phase_15_orchestration_sufficiency.yaml` (NEW) | 结构化 YAML：每 key 评估 (verified/insufficient/missing + evidence + recommendation) |
+| Reasoning chain | `phase_15_planning_engine.yaml` (NEW) | 完整推理链含实现后 bug fix 分析 |
+
+### Sufficiency Report 结论
+
+| Key | 状态 | 证据 |
+|-----|------|------|
+| `orchestration.dag_node_id` | ✅ verified | Planning stub 透传 dag_node_id from orchestration output |
+| `orchestration.parallel_depth` | ✅ verified | depth=1 确认于两个分支的所有 item |
+| `orchestration.merge_ordinal` | ✅ verified | 跨 2 分支 5 item 的顺序 0..4 |
+| `orchestration.branch_taken` | ✅ verified | "fast_path" vs "full_rerank" 正确标签 |
+| `orchestration.retry_count` | ⚠️ insufficient | Stub 中始终为 0 — 无重试场景 |
+| `orchestration.resource_pool_key` | ⚠️ insufficient | 全程 "default" pool — 多 pool 路由未测试 |
+
+**总体评估**: 4/6 verified, 2/6 insufficient。编排合约**经受住了第一次消费者压力测试**。retry_count 和 resource_pool_key 的缺口是 Phase 16 的精确任务输入。
+
+### 测试覆盖
+
+| 文件 | 测试数 | 验证点 |
+|------|--------|--------|
+| `tests/conformance/test_planning_engine.py` | 29 | Stub 产出、key 类型、agent.identity round-trip、merge_ordinal、并行分支 |
+| `tests/integration/test_planning_sink.py` | 8 | agent.identity 种子、查询、component_candidate=0 |
+| `tests/e2e/test_planning_e2e.py` | 8 | 全链：stub → StreamingTraceRecord → Sink → query |
+| `tests/e2e/test_trace_serialization.py` | +4 | PlanningEngineContractGuardrail 负面测试 |
+| 现有测试更新 | 多个文件 | Key count 15→16 |
+
+### 实现后 Bug Fix 分析
+
+5 个修复揭示了系统的免疫系统在应对新维度时的自我完善：
+
+| 修复 | 深层含义 |
+|------|---------|
+| `_ast_utils.py` 路径过滤 | Guardrail 必须适应 CI/CD 真实环境，不能依赖脆弱的绝对路径匹配 |
+| `reasoning_chain.schema.json` | 推理链从纯文本升级为支持结构化元数据（oneOf 加法演进） |
+| 3 处硬编码 key count | 注册表驱动架构的胜利——彻底消除硬编码，让测试动态读取 len(TRACE_KEY_REGISTRY) |
+| `test_registry_covers_all_stub_outputs` | 跨引擎透传改变了完备性检查的范围：必须是 TRACE_KEY_REGISTRY ∪ COMPONENT_TRACE_KEYS |
+| prefix ≠ engine 模式 | agent.* keys 有 prefix="agent" 但 engine="planning"——打破了 prefix==engine 的思维模型 |
+
+### 架构意义
+
+- **引擎轴**: Planning Engine 不再空壳，有了真实身份 (AgentIdentity) 和行为模式 (串行分解 → 并行调度 → 合并)
+- **编排轴**: Orchestration Contract 经历了第一次压力测试。未被击穿，但暴露了边缘地带 (retry / resource pool)
+- **观测完备性**: 跨域 (trace + component) 契约的完整映射得到验证
+- **Phase 16 方向**: Sufficiency Report 精确导航——补齐 retry/resource_pool 验证，或在 Multi-Room 推进时同步注入
+
+```
+517 tests, 15 guardrails, 0 failures
+```

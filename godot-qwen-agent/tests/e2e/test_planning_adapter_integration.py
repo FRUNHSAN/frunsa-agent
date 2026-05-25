@@ -288,8 +288,14 @@ class TestDeadlineTimeout:
         pace_config = PaceConfig(adaptive_strategy="jitter")
 
         async def _test():
-            stream = engine.plan(
+            from engines.planning.identity import AgentIdentity
+            from engines.planning.interface import PlanningContext
+            ctx = PlanningContext(
                 goal="test goal",
+                agent_identity=AgentIdentity(id="test", role="test", version="1.0.0"),
+            )
+            stream = engine.plan(
+                context=ctx,
                 deadline=0.0,  # expired immediately — stub uses perf_counter (μs resolution)
                 pace_config=pace_config,
             )
@@ -313,14 +319,20 @@ class TestDeadlineTimeout:
         pace_config = PaceConfig(adaptive_strategy="jitter")
 
         async def _test():
-            stream = engine.plan(
+            from engines.planning.identity import AgentIdentity
+            from engines.planning.interface import PlanningContext
+            ctx = PlanningContext(
                 goal="test goal",
+                agent_identity=AgentIdentity(id="test", role="test", version="1.0.0"),
+            )
+            stream = engine.plan(
+                context=ctx,
                 deadline=60.0,  # generous
                 pace_config=pace_config,
             )
             await adapter.send_stream(stream)
 
-            assert len(transport.sent) == 3  # 3 hardcoded steps
+            assert len(transport.sent) == 8  # 8 items (2 serial + 5 orchestration + 1 terminal)
             assert adapter.last_trace is not None
             assert adapter.last_trace.status == "success"
 

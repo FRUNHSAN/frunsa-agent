@@ -31,8 +31,7 @@ def collect_trace_keys_from_engine(engine_dir: Path) -> Set[str]:
     keys: Set[str] = set()
 
     for py_file in sorted(engine_dir.glob("**/*.py")):
-        rel = str(py_file)
-        if "test" in rel.lower():
+        if "test" in py_file.name.lower():
             continue
         if py_file.name == "interface.py":
             continue

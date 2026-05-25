@@ -1,0 +1,537 @@
+# ── Reasoning Chain ───────────────────────────────────────────────────
+chain_id: phase_15_planning_engine
+title: "Planning Engine + Agent Identity: 编排合约反向压力测试"
+created_at: "2026-05-25T18:00:00Z"
+status: active
+tags: [planning, engine, agent_identity, namespace, sufficiency_report, stress_test, orchestration_contract]
+related_chains:
+  - phase_10_planning_engine_selection
+  - phase_10_planning_engine_integration
+  - phase_14_orchestration_engine
+
+# ── 1. Context ───────────────────────────────────────────────────────
+
+context: |
+  Phase 14 delivered the orchestration engine: 6 orchestration.* trace keys,
+  StubOrchestrationEngine with N=2 parallel branch simulation, completeness
+  guardrail (ERROR), 468 tests, 14 guardrails, 0 external deps.
+
+  The 6 orchestration keys were pre-designed in Phase 12 as documentation-only
+  ("NOT FOR IMPLEMENTATION") and materialized in Phase 14. But they remain
+  HYPOTHESES — untested by any real consumer. The StubOrchestrationEngine
+  produces orchestration keys, but nothing consumes them meaningfully.
+
+  Without a consumer, we cannot answer the critical question:
+  "Are these 6 keys SUFFICIENT for an engine that depends on orchestration?"
+
+  Phase 15 builds the first consumer: an enhanced Planning Engine that:
+  1. Defines agent.identity — the first agent.* namespace key
+  2. Decomposes goals into sub-tasks
+  3. Dispatches parallel branches through StubOrchestrationEngine
+  4. Merges results — exercising merge_ordinal, parallel_depth, branch_taken
+  5. Produces a structured Sufficiency Report assessing each key
+
+  This is a REVERSE STRESS TEST. The goal is not "build a Planning Engine"
+  but "validate (or falsify) the Phase 14 orchestration contract by putting
+  a real consumer on top of it."
+
+  Success = sufficiency report produced, not code shipped.
+
+  Phase 14 future_guidance entries serve as boundary conditions:
+  - capability_negotiation_requires_observability_arbitration (priority: high)
+  - constraints_are_prescriptive_not_descriptive (priority: high)
+  - constraint_validator_must_provide_remediation_feedback (priority: critical)
+  - orchestration_primitives_may_require_fourth_layer (priority: medium)
+
+# ── 2. Decision ──────────────────────────────────────────────────────
+
+decision: |
+  Phase 15 delivers the Planning Engine + Agent Identity in 10 steps:
+
+  1. **AgentIdentity data model (engines/planning/identity.py, NEW)** —
+     Frozen dataclass: {id, role, version, capabilities}. Includes
+     to_trace_value() / from_trace_value() for trace_context serialization.
+     Module docstring establishes the 6-point agent.* namespace convention
+     for future keys (agent.capability_manifest, agent.trust_level).
+
+  2. **PlanningContext + Protocol update (engines/planning/interface.py,
+     MODIFY)** — Replace bare `goal: str` parameter with `context:
+     PlanningContext` wrapping goal + agent_identity + sub_tasks +
+     max_parallel_branches. PlanningEngine.plan() signature changes.
+
+  3. **Trace key registration (core/observability/trace_registry.py,
+     MODIFY)** — Add "agent.identity": TraceKeyDef(type=dict,
+     engine="planning", component_candidate=False). Add "agent" to
+     namespace documentation. Total keys: 15 → 16. No ENGINE_TO_COMPONENT_MAP
+     change (agent.identity is not a component capability).
+
+  4. **Enhanced stub with parallel branches (engines/planning/stub.py,
+     MODIFY)** — 5-step scenario: analyze → decompose → parallel dispatch
+     via StubOrchestrationEngine → merge → synthesize. Every StreamItem
+     carries agent.identity + planning keys. Orchestration items are
+     augmented (not replaced) with planning/agent context. dag_node_id
+     embeds parsable branch origin: "merge_{branch}_{idx}".
+
+  5. **Engine exports (engines/planning/__init__.py, MODIFY)** —
+     Export AgentIdentity, PlanningContext.
+
+  6. **Namespace + planning_engine_contract guardrail** —
+     Add "agent" to trace_context_namespace known prefixes.
+     New planning_engine_contract guardrail (dual-check ERROR):
+     missing required planning.* + agent.* keys, unregistered keys.
+     Register in guardrails/rules/__init__.py + checker.py.
+
+  7. **Sufficiency Report (.ai_reasoning/sufficiency/, NEW)** —
+     Structured YAML with contract_version: "1.0.0", per-key assessment
+     (verified/insufficient/missing + evidence + stress_scenario +
+     recommendation). Machine-consumable by Phase 15.5 / Phase 16.
+
+  8. **Tests** — Conformance (~20 tests), integration (~6 tests),
+     E2E (~5 tests), negative (~4 tests including PartialKeyMissing),
+     existing test updates (key counts 15→16).
+
+  9. **Full suite verification** — 498+ tests, 15 guardrails (14 + 1).
+
+  Key design: agent.identity is ENGINE METADATA (component_candidate=False),
+  not a component capability. It goes in TRACE_KEY_REGISTRY alongside
+  existing engine keys. The agent.* namespace convention is documented
+  for future extensibility.
+
+  Planning Engine complexity: Option C (多步含并行分支). This is the
+  minimum scenario that exercises merge_ordinal across branch boundaries.
+  Options A/B don't; Option D is Phase 16+ territory.
+
+  Agent Identity structure: Option B (结构化 JSON with capabilities field).
+  Plain string would require migration when capability negotiation arrives
+  (Phase 16+). UUID reference is premature.
+
+  Sufficiency Report format: Option B (结构化 YAML checklist).
+  Machine-consumable, directly feeds Phase 15.5 / Phase 16 Decision Gate.
+
+  Three micro-adjustments from plan review:
+  (a) Sufficiency report includes contract_version: "1.0.0" for Phase 16
+      version matching before consuming the report.
+  (b) dag_node_id uses "merge_{branch}_{idx}" naming convention to provide
+      precise branch-anchoring for Phase 16 retry injection.
+  (c) Negative tests include PartialKeyMissing scenario: planning.* keys
+      present but agent.identity missing — validates dual-check precision.
+
+# ── 3. Rationale ──────────────────────────────────────────────────────
+
+rationale: |
+  ## Why a reverse stress test, not just feature development?
+
+  Phase 14's 6 orchestration keys were pre-designed on paper (Phase 12).
+  A stub that produces keys is not the same as a consumer that NEEDS them.
+  The sufficiency of these keys — whether they capture everything a consumer
+  needs to know about orchestration decisions — is an empirical question.
+
+  Phase 15 answers it by putting a real consumer (enhanced Planning Engine)
+  on top of the orchestration stub. The Planning Engine's merge phase is
+  the critical test point: it consumes orchestration output and must make
+  decisions based on dag_node_id, branch_taken, merge_ordinal, etc.
+
+  If any orchestration key is missing or semantically wrong, the Planning
+  Engine's merge logic will fail — and the Sufficiency Report will document
+  the gap. This is falsification-driven design.
+
+  ## Why agent.identity goes in TRACE_KEY_REGISTRY, not COMPONENT_TRACE_KEYS?
+
+  Agent identity describes WHO is running (engine metadata), not WHAT
+  capability is being provided. COMPONENT_TRACE_KEYS is for cross-engine
+  capability contracts (retrieval, generation, scoring). agent.identity
+  is owned by the planning engine — it's engine-internal metadata that
+  happens to be visible on the trace for downstream consumers.
+
+  component_candidate=False — it would pollute component candidate analysis.
+
+  ## Why PlanningContext replaces bare goal: str?
+
+  The parallel branch scenario requires richer context than a single string:
+  - agent_identity: which agent is planning (identity injection)
+  - sub_tasks: what to dispatch in parallel (determines branch count)
+  - max_parallel_branches: concurrency limit (resource constraint)
+
+  Wrapping these in PlanningContext is cleaner than adding 4 parameters
+  to plan(). The Protocol change is backward-compatible: the single
+  implementor (stub) is updated in the same step.
+
+  ## Why merge_ordinal is the most interesting key to validate?
+
+  4 of 6 orchestration keys are straightforward:
+  - dag_node_id: identity — always present if you have nodes
+  - parallel_depth: static — determined by DAG topology
+  - branch_taken: label — determined by decision logic
+  - resource_pool_key: label — determined by resource config
+
+  merge_ordinal is different. It's a DYNAMIC, CROSS-BRANCH property:
+  0-based sequential numbering that must be continuous across items
+  from DIFFERENT parallel branches merged into a single output stream.
+  If merge_ordinal breaks (gaps, duplicates, non-zero start), the
+  consumer cannot reconstruct deterministic ordering.
+
+  retry_count is the second-most-interesting: it represents state
+  CHANGES (increments on retry). But the stub can't trigger retries,
+  so it's expected to be "insufficient" after Phase 15.
+
+  ## Why dag_node_id embeds branch origin ("merge_{branch}_{idx}")?
+
+  Currently branch_taken labels distinguish branches (fast_path vs
+  full_rerank). But if branch count becomes dynamic (Phase 16+),
+  semantic labels alone are fragile. Embedding the branch identifier
+  in dag_node_id provides a structured, parsable anchor that a retry
+  injection mechanism can target precisely: "retry merge_fast_path_2"
+  is unambiguous.
+
+  This is a naming convention, not a new key — zero LOC change.
+
+  ## Why PartialKeyMissing negative test?
+
+  The dual-check guardrail detects two error types:
+  1. Missing required keys (incomplete emission)
+  2. Unregistered keys (pollution)
+
+  Full-missing ("no keys at all") is the degenerate case. Partial-missing
+  ("has planning keys but missing agent.identity") is the PRECISE case —
+  it validates that the guardrail's error message names the specific
+  missing key, not a generic "something is wrong." This is the core
+  value of the dual-check pattern.
+
+  ## Why contract_version in Sufficiency Report?
+
+  Phase 16 reads the sufficiency report to decide what needs fixing.
+  If Phase 14's orchestration contract gets a hotfix between Phase 15
+  and Phase 16, the report's assessment may be based on stale assumptions.
+  Version matching ("does contract_version == current contract version?")
+  prevents consuming an outdated report.
+
+  ## Why ERROR severity for planning_engine_contract from day one?
+
+  Same rationale as orchestration_trace_completeness (Phase 14): the
+  4 planning keys + agent.identity were pre-defined, not discovered
+  through exploration. There is no exploratory phase. Any deviation
+  from the 5-key contract is a real error.
+
+# ── 4. Alternatives ───────────────────────────────────────────────────
+
+alternatives:
+  - option: "A: Single-step planning engine (only validate agent.identity injection)"
+    pros: "Minimal LOC, fastest to implement, zero risk of over-engineering"
+    cons: "Cannot validate merge_ordinal (no parallel branches), cannot validate branch_taken, cannot validate parallel_depth. 3 of 6 orchestration keys go completely untested. Fails the 'reverse stress test' mission."
+
+  - option: "B: Linear multi-step without parallel branches (2-3 serial steps)"
+    pros: "Validates all planning keys + agent.identity, moderate complexity"
+    cons: "No merge_ordinal testing at all. The most interesting orchestration key (the only dynamic, cross-branch property) remains unvalidated. Insufficient as a stress test."
+
+  - option: "C: Plain string agent.identity ('planner-v1')"
+    pros: "Simplest possible identity, zero serialization complexity"
+    cons: "Non-extensible. Phase 16 capability negotiation requires structured capabilities manifest. Would require migration (string→dict) or a second agent.* key. Violates future_guidance #1."
+
+  - option: "D: Dynamic planning engine (adjusts based on intermediate results)"
+    pros: "Most realistic, exercises retry scenarios naturally"
+    cons: "Over-engineered for Phase 15. Dynamic planning introduces decision logic that is hard to verify deterministically. The stub's value is deterministic output for contract testing — dynamic planning undermines this. Phase 16+ concern."
+
+  - option: "E: Skip agent_identity — add it when capability negotiation arrives"
+    pros: "One fewer namespace, one fewer key, one fewer test file"
+    cons: "Misses the opportunity to define agent.* namespace convention NOW, when there's only one key to get right. Adding it later risks inconsistency. agent.identity is the simplest agent.* key — getting the convention right with one key is easier than with five."
+
+# ── 5. Evidence ───────────────────────────────────────────────────────
+
+evidence:
+  test_files:
+    - tests/conformance/test_planning_engine.py
+    - tests/integration/test_planning_sink.py
+    - tests/e2e/test_planning_e2e.py
+  test_cases:
+    - TestPlanningStubOutput::test_produces_non_empty_stream
+    - TestPlanningStubOutput::test_all_four_planning_keys_present
+    - TestPlanningStubOutput::test_agent_identity_present
+    - TestPlanningStubOutput::test_trace_context_not_none
+    - TestPlanningStubOutput::test_last_item_is_terminal
+    - TestPlanningStubOutput::test_orchestration_keys_passthrough
+    - TestPlanningStubOutput::test_component_keys_passthrough
+    - TestPlanningTraceKeyTypes::test_step_index_is_int
+    - TestPlanningTraceKeyTypes::test_reasoning_depth_is_int
+    - TestPlanningTraceKeyTypes::test_parent_step_id_is_str_or_none
+    - TestPlanningTraceKeyTypes::test_cumulative_tokens_is_int
+    - TestPlanningTraceKeyTypes::test_agent_identity_is_dict
+    - TestPlanningTraceKeyTypes::test_agent_identity_has_required_fields
+    - TestPlanningTraceKeyTypes::test_agent_identity_capabilities_is_list
+    - TestPlanningKeyRegistration::test_all_four_planning_in_registry
+    - TestPlanningKeyRegistration::test_agent_identity_in_registry
+    - TestPlanningMergeOrdinal::test_sequential_zero_based
+    - TestPlanningMergeOrdinal::test_continuous_across_branches
+    - TestPlanningParallelBranches::test_both_branches_produce_items
+    - TestPlanningParallelBranches::test_total_item_count_is_five
+    - TestSinkPlanningKeySeeding::test_agent_identity_seeded
+    - TestSinkPlanningKeySeeding::test_agent_identity_engine_is_planning
+    - TestSinkPlanningKeySeeding::test_agent_identity_component_candidate_false
+    - TestPlanningE2E::test_full_chain_planning_to_sink
+    - TestPlanningE2E::test_query_by_engine_planning
+    - TestAgentIdentityRoundTrip::test_to_trace_value_and_back
+    - TestPlanningEngineContractGuardrail::test_unregistered_key_flagged
+    - TestPlanningEngineContractGuardrail::test_missing_key_flagged
+    - TestPartialKeyMissing::test_agent_identity_specifically_flagged
+    - TestPlanningSchemaNoMigration::test_schema_version_stays_at_2
+  benchmark_results: |
+    517 tests pass (468 Phase 14 + 49 Phase 15), 0 failures, 1 skipped, 1 warning.
+    15 guardrails PASSED (14 existing + 1 new: planning_engine_contract).
+    0 external dependencies maintained.
+    Schema version remains at 2 (no DDL migration needed).
+    49 new tests: 29 conformance + 8 integration + 8 E2E + 4 negative.
+    Sufficiency Report: 4/6 keys verified, 2 insufficient (retry_count, resource_pool_key).
+    agent.* namespace convention established (6-point reusable pattern).
+    First cross-engine consumer validates Phase 14 orchestration contract.
+
+  # ── Phase 15 Post-Implementation Bug Fix Analysis ────────────────────
+  # Five fixes were required after the initial implementation. Each reveals
+  # an architectural pattern worth documenting for future phases.
+
+  post_implementation_fixes:
+    - issue: "_ast_utils.py filtered files with 'test' in full path → Guardrail missed all files in pytest tmp_path"
+      root_cause: "collect_trace_keys_from_engine() checked str(py_file).lower() which includes tmp_path directory names like 'test_unregistered_key_flagged'"
+      fix: "Changed to check py_file.name only — semantic: exclude test FILES, not test DIRECTORIES"
+      lesson: "Guardrail path filters must be filename-scoped, not path-scoped. CI/CD environments (pytest, CI runners) use 'test' in directory names. A path-level 'test' filter is a false-negative machine."
+
+    - issue: "reasoning_chain.schema.json rejected structured future_guidance objects"
+      root_cause: "Schema defined future_guidance as type: string, but Phase 14+ chains use structured {summary, detail, priority, phase_applicable} objects"
+      fix: "Changed to oneOf: [string (legacy), object with patternProperties (structured)]"
+      lesson: "Schema evolution must be additive (oneOf), not replacement. Old chains use string format, new chains use structured format. Both must validate."
+
+    - issue: "3 test files had hardcoded key count 15 instead of 16"
+      root_cause: "Phase 15 added agent.identity → total keys 15→16, but counts weren't updated everywhere"
+      fix: "Updated test_sqlite_sink.py, test_orchestration_e2e.py, test_component_trace_sink.py, test_orchestration_sink.py"
+      lesson: "Hardcoded counts are anti-pattern confirmed. Tests should reference len(TRACE_KEY_REGISTRY) dynamically. The 3 missed counts were in tests using different variable names (keys vs all_keys vs engine_keys)."
+
+    - issue: "test_registry_covers_all_stub_outputs missed component keys"
+      root_cause: "Planning stub now passes through orchestration output including retrieval.* component keys, but test only checked TRACE_KEY_REGISTRY"
+      fix: "Added COMPONENT_TRACE_KEYS to the registered set: registered = set(TRACE_KEY_REGISTRY.keys()) | set(COMPONENT_TRACE_KEYS.keys())"
+      lesson: "Cross-engine passthrough changes the completeness check: a stub's output is now the UNION of its own keys + consumed engine's keys + component keys. Single-registry checks are insufficient."
+
+    - issue: "test_engine_keys_still_present needed 12→13 (6 engine + 6 orchestration + 1 agent)"
+      root_cause: "agent.identity is engine='planning' but prefix='agent' — it's an engine key with a non-engine prefix, a new pattern"
+      fix: "Updated test_component_trace_sink.py assertion"
+      lesson: "The prefix ≠ engine pattern (agent.* keys owned by planning engine) is architecturally valid but breaks the mental model of 'prefix == engine'. Tests that assume this 1:1 mapping need explicit special-casing."
+
+# ── 6. Future Guidance ────────────────────────────────────────────────
+#
+#  Architecture-level guidance (Phase 15.5+ boundary conditions):
+#  Entries marked "priority: critical/high" are inputs to Phase 15.5 design.
+#  Entries marked "priority: medium" are tension points — record, don't act yet.
+
+future_guidance:
+
+  # ── Inherited from Phase 14 (still active) ──────────────────────────
+
+  capability_negotiation_requires_observability_arbitration:
+    summary: "能力协商需观测层作为运行时仲裁者 (inherited from Phase 14)"
+    detail: |
+      agent.identity.capabilities field is Phase 15's pre-positioning for this.
+      When ENGINE_TO_COMPONENT_MAP evolves from static dict to runtime discovery,
+      engine-self-declared capabilities must be backed by trace evidence
+      (N most recent successful invocations) to be trusted.
+      CapabilityDeclaration + TraceEvidence = trusted capability discovery.
+    priority: high
+    phase_applicable: "Phase 16+"
+
+  constraints_are_prescriptive_not_descriptive:
+    summary: "约束是规定性的，需独立于 trace key 的类型系统与校验时机 (inherited from Phase 14)"
+    detail: |
+      Phase 15 does NOT implement constraints. The Sufficiency Report's
+      per-key `recommendation` field is the precursor to constraint
+      remediation feedback — it demonstrates the "navigation" pattern
+      (here's what's wrong + here's how to fix it) that constraint
+      validators must provide.
+    priority: high
+    phase_applicable: "Phase 15.5"
+
+  constraint_validator_must_provide_remediation_feedback:
+    summary: "约束违反时必须返回结构化修正建议 (inherited from Phase 14, critical)"
+    detail: |
+      Sufficiency Report's per-key structure (status + evidence + recommendation)
+      is the template for ConstraintViolation's three-part feedback:
+      - why (human-readable explanation, maps to evidence)
+      - remediation (list of {parameter, current_value, suggested_range, rationale},
+        maps to recommendation)
+      - fallback (degradation path if constraint cannot be satisfied)
+
+      This is the fundamental API difference between guardrails (gatekeeper:
+      "stop") and constraints (navigator: "here's the path").
+    priority: critical
+    phase_applicable: "Phase 15.5"
+
+  orchestration_primitives_may_require_fourth_layer:
+    summary: "编排原语组件化可能触发三层分层不变量的受控违反 (inherited from Phase 14)"
+    detail: |
+      Phase 15's Planning-Engine-calling-Orchestration-Engine is the first
+      cross-engine consumer pattern. If this pattern generalizes (multiple
+      engines consuming multiple other engines), the three-layer model
+      (contracts → pipeline → adapters) may need a fourth orchestration layer.
+      Phase 15 is the first empirical data point.
+    priority: medium
+    phase_applicable: "Phase 17+"
+
+  # ── Operational (Phase 15.5 immediate) ───────────────────────────────
+
+  retry_count_needs_real_retry_scenario:
+    summary: "retry_count=0 throughout stub — cannot verify increment semantics"
+    detail: |
+      Phase 15's Sufficiency Report marks orchestration.retry_count as
+      "insufficient" because the stub never triggers retries. Phase 16+
+      must inject transient failures to verify:
+      - retry_count increments correctly per attempt
+      - reset semantics (does it reset between runs?)
+      - retry limit enforcement (does it cap?)
+      Until then, retry_count is structurally present but semantically unverified.
+    priority: high
+    phase_applicable: "Phase 16"
+
+  resource_pool_key_needs_multi_pool_scenario:
+    summary: "resource_pool_key='default' throughout — multi-pool routing untested"
+    detail: |
+      Phase 15's Sufficiency Report marks orchestration.resource_pool_key as
+      "insufficient" because the stub uses only the default pool. Phase 16+
+      should add a second resource pool (e.g., 'gpu' vs 'cpu') and verify:
+      - pool key correctly labels each item
+      - pool-aware scheduling decisions are traceable
+      - pool exhaustion is distinguishable from other errors
+    priority: medium
+    phase_applicable: "Phase 16+"
+
+  agent_namespace_convention_is_reusable:
+    summary: "agent.* namespace 6-point convention applies to all future agent keys"
+    detail: |
+      The 6-point convention documented in engines/planning/identity.py:
+      1. Frozen dataclass for data model
+      2. to_trace_value() -> dict for serialization
+      3. Register in TRACE_KEY_REGISTRY with engine=<owning-engine>
+      4. Key name: "agent.<concept>"
+      5. Value type: dict (JSON-serializable)
+      6. component_candidate=False
+
+      Future keys (agent.capability_manifest, agent.trust_level, agent.role_graph)
+      must follow this convention. Phase 16 should add an agent_namespace_convention
+      guardrail that AST-verifies compliance.
+    priority: medium
+    phase_applicable: "Phase 16+"
+
+  merge_ordinal_non_deterministic_ordering_untested:
+    summary: "Phase 15 validates deterministic merge only — non-deterministic timing untested"
+    detail: |
+      The stub is deterministic: fast_path always completes in 5ms,
+      full_rerank in 15ms. In a real system, branch completion order is
+      non-deterministic. merge_ordinal must be assignment-order, not
+      branch-prediction-order. This cannot be tested with a stub —
+      requires real async timing variance (Phase 16+).
+    priority: medium
+    phase_applicable: "Phase 16+"
+
+  # ── Post-implementation lessons (Phase 15 bug fix analysis) ─────────
+
+  guardrail_path_filters_must_be_filename_scoped:
+    summary: "Guardrail AST scanners must filter by filename, not full path"
+    detail: |
+      collect_trace_keys_from_engine() was filtering files with "test" in
+      str(py_file).lower(), which matched pytest tmp_path directory names
+      like "test_unregistered_key_flagged". This caused ALL files to be
+      silently excluded in pytest context, producing 0 violations for
+      negative tests.
+
+      The fix: check py_file.name instead of str(py_file). Semantic:
+      exclude test FILES (test_*.py), not test DIRECTORIES.
+
+      This is a general rule for all guardrail AST scanners: path-level
+      filters create false negatives in CI/CD environments where "test"
+      appears in directory names (pytest, tox, CI runners).
+    priority: high
+    phase_applicable: "All future guardrails"
+
+  schema_evolution_must_be_additive:
+    summary: "Schema changes must use oneOf to support both legacy and new formats"
+    detail: |
+      reasoning_chain.schema.json defined future_guidance as type: string,
+      but Phase 14+ chains use structured {summary, detail, priority,
+      phase_applicable} objects. Changing the type from string to object
+      broke validation for all legacy chains.
+
+      The fix: oneOf: [string (legacy), object (structured)]. Schema
+      evolution is additive — new formats coexist with old, never replace.
+      This applies to all schema files in .ai_reasoning/schemas/.
+    priority: medium
+    phase_applicable: "All future schema changes"
+
+  eliminate_hardcoded_key_counts:
+    summary: "Eliminate ALL hardcoded key counts from tests — use len(TRACE_KEY_REGISTRY) dynamically"
+    detail: |
+      Phase 15 added one key (agent.identity), changing total from 15→16.
+      Despite the anti_patterns section already warning against hardcoded
+      counts, 3 test locations were missed because they used different
+      variable names (keys, all_keys, engine_keys).
+
+      The lesson: grep for ALL integer literals that match the current
+      key count before adding a new key. Better: convert all tests to
+      dynamically reference len(TRACE_KEY_REGISTRY) so no grep is needed.
+      Phase 16 should add a guardrail that flags hardcoded key counts in
+      test assertions.
+    priority: high
+    phase_applicable: "Phase 16 (guardrail), all future key additions"
+
+  cross_registry_coverage_for_stub_outputs:
+    summary: "Stub output completeness checks must span ALL registries (engine + component)"
+    detail: |
+      When a stub (or any engine) does passthrough of another engine's
+      output, its trace_context keys come from multiple sources:
+      - Its own engine keys (in TRACE_KEY_REGISTRY)
+      - Consumed engine's keys (in TRACE_KEY_REGISTRY)
+      - Component keys (in COMPONENT_TRACE_KEYS)
+
+      A completeness test that only checks TRACE_KEY_REGISTRY will false-
+      positive on component keys. The fix: registered = set(TRACE_KEY_REGISTRY)
+      | set(COMPONENT_TRACE_KEYS). Future engines with deeper passthrough
+      chains may need additional registries.
+    priority: medium
+    phase_applicable: "Phase 16+ (multi-engine passthrough chains)"
+
+  prefix_does_not_equal_engine:
+    summary: "agent.* keys have prefix='agent' but engine='planning' — prefix ≠ engine is valid"
+    detail: |
+      agent.identity breaks the 1:1 prefix-to-engine mapping that tests
+      like test_all_registry_keys_are_members assumed. The agent namespace
+      is owned by the planning engine, but the prefix is "agent" not
+      "planning".
+
+      This is architecturally valid: namespaces can be owned by engines
+      other than the one matching the prefix. Future agent.* keys
+      (agent.capability_manifest, agent.trust_level) will follow this
+      pattern. Tests and guardrails that assume prefix == engine must
+      explicitly special-case this.
+    priority: medium
+    phase_applicable: "Phase 16+ (all agent.* keys)"
+
+  sufficiency_report_feeds_decision_gate:
+    summary: "Sufficiency Report is Phase 16 Decision Gate input — keep it current"
+    detail: |
+      Phase 16 reads .ai_reasoning/sufficiency/phase_15_orchestration_sufficiency.yaml
+      before making any orchestration contract changes. The report's
+      contract_version field enables version matching: if the orchestration
+      contract has been hotfixed since Phase 15, Phase 16's reader detects
+      the mismatch and refuses to consume stale assessments.
+
+      Any Phase 15.5 constraint prototype that changes orchestration behavior
+      MUST update the sufficiency report or produce an addendum.
+    priority: high
+    phase_applicable: "Phase 15.5+"
+
+anti_patterns:
+  - "Registering agent.identity in COMPONENT_TRACE_KEYS: agent identity is engine metadata, not a component capability. Goes in TRACE_KEY_REGISTRY with component_candidate=False."
+  - "Creating validate_planning_trace() peer to validate_component_trace(): single-engine contracts are enforced by guardrails + conformance tests. Cross-engine contracts need validators."
+  - "Hardcoding key count (16) in tests: reference len(TRACE_KEY_REGISTRY) dynamically. One registry change updates all tests. Phase 15 had 3 missed hardcoded counts across 4 files."
+  - "agent.identity as plain string: would require migration when capability negotiation arrives (Phase 16+). Structured JSON with capabilities field is future-proof."
+  - "Thread-based parallelism in enhanced stub: threading.Thread cannot yield StreamItems. Use asyncio.gather() — matches PipelineRunner and orchestration stub."
+  - "Schema migration for agent namespace: trace_keys table TEXT engine column already supports any engine name. No DDL change needed."
+  - "Generating Sufficiency Report as free-text document: structured YAML with status/evidence/recommendation per key is machine-consumable by Phase 16 Decision Gate."
+  - "Assuming merge_ordinal is fully verified from deterministic stub: the stub has fixed branch completion order. Non-deterministic ordering (branch B completes first) is untestable without real async timing."
+  - "Path-level 'test' filter in AST scanners: filtering str(py_file) for 'test' excludes files in pytest tmp_path directories. Use py_file.name to filter by filename only."
+  - "Schema type replacement (string→object): breaks legacy data. Use oneOf to add new formats alongside old. Applies to all .ai_reasoning/schemas/ files."
+  - "Single-registry coverage check for stubs with passthrough: when a stub passes through another engine's output, completeness checks must span TRACE_KEY_REGISTRY | COMPONENT_TRACE_KEYS."
+  - "Assuming prefix == engine for all keys: agent.* keys have prefix='agent' but engine='planning'. Tests and guardrails must handle this pattern explicitly."

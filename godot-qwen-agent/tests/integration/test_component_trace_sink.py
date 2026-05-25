@@ -64,7 +64,7 @@ class TestSinkComponentKeySeeding:
         try:
             all_keys = sink.query_keys()
             engine_keys = [k for k in all_keys if k["component_type"] is None]
-            assert len(engine_keys) == 12  # 6 engine + 6 orchestration (all non-component keys)
+            assert len(engine_keys) == 13  # 6 engine + 6 orchestration + 1 agent (all non-component keys)
         finally:
             sink.close()
 
@@ -89,7 +89,7 @@ class TestSinkComponentKeySeeding:
         sink = SQLiteTraceSink(sink_path)
         try:
             all_keys = sink.query_keys()
-            assert len(all_keys) == 15  # Phase 14: 6 engine + 3 component + 6 orchestration
+            assert len(all_keys) == 16  # Phase 15: 6 engine + 3 component + 6 orchestration + 1 agent
         finally:
             sink.close()
 

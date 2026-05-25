@@ -134,6 +134,6 @@ class TestSinkOrchestrationKeyQueries:
         sink = SQLiteTraceSink(sink_path)
         try:
             all_keys = sink.query_keys()
-            assert len(all_keys) == 15  # 6 engine + 3 component + 6 orchestration
+            assert len(all_keys) == 16  # 6 engine + 3 component + 6 orchestration + 1 agent
         finally:
             sink.close()

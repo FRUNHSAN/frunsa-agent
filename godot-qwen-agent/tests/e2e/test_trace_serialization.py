@@ -478,13 +478,25 @@ class TestTraceRegistryIntegrity:
     """TRACE_KEY_REGISTRY is well-formed and covers all stub outputs."""
 
     def test_all_registry_keys_are_members(self):
-        """Every key in TRACE_KEY_REGISTRY parses as engine.suffix with dot separator."""
+        """Every key in TRACE_KEY_REGISTRY parses as engine.suffix with dot separator.
+
+        Phase 15: agent.* keys have prefix="agent" but engine="planning" —
+        the agent namespace is owned by the planning engine. This is valid.
+        Namespace prefixes (agent, planning, orchestration, rag) and the engine
+        field are related but not 1:1 — a namespace can be owned by a different engine.
+        """
         for key, defn in TRACE_KEY_REGISTRY.items():
             assert "." in key, f"Registry key '{key}' lacks dot separator"
             prefix, suffix = key.split(".", 1)
-            assert prefix == defn.engine, (
-                f"Key '{key}' has prefix '{prefix}' but engine field is '{defn.engine}'"
-            )
+            if prefix == "agent":
+                # agent.* keys: namespace="agent", owned by planning engine
+                assert defn.engine == "planning", (
+                    f"Key '{key}' has agent prefix but engine='{defn.engine}', expected 'planning'"
+                )
+            else:
+                assert prefix == defn.engine, (
+                    f"Key '{key}' has prefix '{prefix}' but engine field is '{defn.engine}'"
+                )
             assert len(suffix) > 0, f"Key '{key}' has empty suffix after prefix"
 
     def test_registry_defs_are_complete(self):
@@ -495,8 +507,16 @@ class TestTraceRegistryIntegrity:
             assert defn.engine, f"Key '{key}' has empty engine"
 
     def test_registry_covers_all_stub_outputs(self):
-        """Every trace_context key produced by N=2 stubs is registered."""
+        """Every trace_context key produced by N=3 stubs is registered.
+
+        Phase 15: planning stub now passes through orchestration output,
+        which includes component keys (retrieval.*). Check both
+        TRACE_KEY_REGISTRY (engine keys) and COMPONENT_TRACE_KEYS.
+        """
+        from engines.planning.identity import AgentIdentity
+        from engines.planning.interface import PlanningContext
         from engines.planning.stub import StubPlanningEngine
+        from core.contracts.trace_keys import COMPONENT_TRACE_KEYS
 
         transport = _FakeTransport()
         serializer = JsonRpc20Serializer()
@@ -505,8 +525,12 @@ class TestTraceRegistryIntegrity:
         engine = StubPlanningEngine()
 
         async def _test():
-            stream = engine.plan(
+            ctx = PlanningContext(
                 goal="test coverage goal",
+                agent_identity=AgentIdentity(id="test", role="test", version="1.0.0"),
+            )
+            stream = engine.plan(
+                context=ctx,
                 deadline=60.0,
                 pace_config=PaceConfig(adaptive_strategy="jitter"),
             )
@@ -521,11 +545,11 @@ class TestTraceRegistryIntegrity:
 
             assert all_keys, "Stub produced no trace_context keys"
 
-            registered = set(TRACE_KEY_REGISTRY.keys())
+            registered = set(TRACE_KEY_REGISTRY.keys()) | set(COMPONENT_TRACE_KEYS.keys())
             missing = all_keys - registered
             assert not missing, (
                 f"Stub produced unregistered keys: {missing}. "
-                f"Add to TRACE_KEY_REGISTRY or mark as component_candidate."
+                f"Add to TRACE_KEY_REGISTRY or COMPONENT_TRACE_KEYS."
             )
 
         asyncio.run(_test())
@@ -778,3 +802,122 @@ class TestAdapterPerItemCapture:
             assert len(adapter.streaming_traces) == 2  # replaced, not appended
 
         asyncio.run(_test())
+
+
+# ── TestPlanningEngineContractGuardrail ───────────────────────────────
+
+
+class TestPlanningEngineContractGuardrail:
+    """planning_engine_contract guardrail validates planning.* + agent.* key completeness."""
+
+    def test_all_registered_keys_pass(self, tmp_path: Path):
+        """Source with all 5 planning-engine keys → no violations."""
+        planning_dir = tmp_path / "engines" / "planning"
+        planning_dir.mkdir(parents=True)
+        good_file = planning_dir / "stub.py"
+        good_file.write_text('''
+from core.contracts.generation import StreamItem
+StreamItem(
+    delta="ok", index=0, model="test",
+    trace_context={
+        "planning.step_index": 0,
+        "planning.reasoning_depth": 0,
+        "planning.parent_step_id": None,
+        "planning.cumulative_tokens": 100,
+        "agent.identity": {"id": "test", "role": "test", "version": "1.0.0", "capabilities": []},
+    },
+)
+''', encoding="utf-8")
+
+        from guardrails.rules.planning_engine_contract import planning_engine_contract
+        violations = planning_engine_contract(tmp_path)
+        assert len(violations) == 0, f"Unexpected violations: {[v.message for v in violations]}"
+
+    def test_unregistered_key_flagged(self, tmp_path: Path):
+        """Unknown planning key → ERROR with key name in message."""
+        planning_dir = tmp_path / "engines" / "planning"
+        planning_dir.mkdir(parents=True)
+        bad_file = planning_dir / "stub.py"
+        bad_file.write_text('''
+from core.contracts.generation import StreamItem
+StreamItem(
+    delta="bad", index=0, model="test",
+    trace_context={
+        "planning.step_index": 0,
+        "planning.reasoning_depth": 0,
+        "planning.parent_step_id": None,
+        "planning.cumulative_tokens": 100,
+        "agent.identity": {"id": "t", "role": "t", "version": "1.0.0", "capabilities": []},
+        "planning.unknown_extra_key": 42,
+    },
+)
+''', encoding="utf-8")
+
+        from guardrails.rules.planning_engine_contract import planning_engine_contract
+        violations = planning_engine_contract(tmp_path)
+
+        errors = [v for v in violations if v.severity.value == "error"]
+        assert len(errors) >= 1, f"Expected ERROR for unregistered key, got {len(errors)}"
+        assert any("planning.unknown_extra_key" in v.message for v in errors), (
+            f"Message should name the unregistered key: {[v.message for v in errors]}"
+        )
+
+    def test_partial_key_missing_agent_identity(self, tmp_path: Path):
+        """Planning keys present but agent.identity missing → ERROR naming agent.identity."""
+        planning_dir = tmp_path / "engines" / "planning"
+        planning_dir.mkdir(parents=True)
+        partial_file = planning_dir / "stub.py"
+        partial_file.write_text('''
+from core.contracts.generation import StreamItem
+StreamItem(
+    delta="partial", index=0, model="test",
+    trace_context={
+        "planning.step_index": 0,
+        "planning.reasoning_depth": 0,
+        "planning.parent_step_id": None,
+        "planning.cumulative_tokens": 100,
+        # agent.identity intentionally omitted
+    },
+)
+''', encoding="utf-8")
+
+        from guardrails.rules.planning_engine_contract import planning_engine_contract
+        violations = planning_engine_contract(tmp_path)
+
+        errors = [v for v in violations if v.severity.value == "error"]
+        assert len(errors) >= 1, (
+            f"Expected ERROR for missing agent.identity, got {len(errors)} violations"
+        )
+        assert any("agent.identity" in v.message for v in errors), (
+            f"Message should name the specific missing key 'agent.identity': "
+            f"{[v.message for v in errors]}"
+        )
+
+    def test_missing_planning_key_also_flagged(self, tmp_path: Path):
+        """All 5 keys must be present — missing planning.step_index → ERROR."""
+        planning_dir = tmp_path / "engines" / "planning"
+        planning_dir.mkdir(parents=True)
+        partial_file = planning_dir / "stub.py"
+        partial_file.write_text('''
+from core.contracts.generation import StreamItem
+StreamItem(
+    delta="partial", index=0, model="test",
+    trace_context={
+        # planning.step_index intentionally omitted
+        "planning.reasoning_depth": 0,
+        "planning.parent_step_id": None,
+        "planning.cumulative_tokens": 100,
+        "agent.identity": {"id": "t", "role": "t", "version": "1.0.0", "capabilities": []},
+    },
+)
+''', encoding="utf-8")
+
+        from guardrails.rules.planning_engine_contract import planning_engine_contract
+        violations = planning_engine_contract(tmp_path)
+
+        errors = [v for v in violations if v.severity.value == "error"]
+        assert len(errors) >= 1
+        assert any("planning.step_index" in v.message for v in errors), (
+            f"Message should name the specific missing key: "
+            f"{[v.message for v in errors]}"
+        )

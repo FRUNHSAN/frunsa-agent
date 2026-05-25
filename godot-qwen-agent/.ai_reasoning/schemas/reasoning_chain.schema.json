@@ -103,9 +103,31 @@
       "description": "Concrete artifacts that validate this decision"
     },
     "future_guidance": {
-      "type": "string",
-      "minLength": 20,
-      "description": "Rules for future AI agents: what patterns to follow, what anti-patterns to avoid"
+      "oneOf": [
+        { "type": "string", "minLength": 20 },
+        {
+          "type": "object",
+          "minProperties": 1,
+          "patternProperties": {
+            "^[a-z_][a-z0-9_]*$": {
+              "oneOf": [
+                { "type": "string" },
+                {
+                  "type": "object",
+                  "required": ["summary", "detail"],
+                  "properties": {
+                    "summary": { "type": "string" },
+                    "detail": { "type": "string" },
+                    "priority": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+                    "phase_applicable": { "type": "string" }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "description": "Rules for future AI agents. Either a plain string (legacy) or a structured object with named entries, each being a string or an object with summary, detail, priority, and phase_applicable fields."
     },
     "anti_patterns": {
       "type": "array",

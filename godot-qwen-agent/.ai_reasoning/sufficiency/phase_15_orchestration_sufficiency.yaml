@@ -1,0 +1,159 @@
+# ── Phase 15 Sufficiency Report ─────────────────────────────────────
+# Phase 14 orchestration contract under reverse stress test.
+# Phase 16 reads this report before making orchestration contract changes.
+# contract_version enables version matching to prevent consuming stale assessments.
+
+report_id: phase_15_orchestration_sufficiency
+contract_version: "1.0.0"
+generated_by: "Planning Engine v1.0.0 (stub)"
+phase_14_contract_under_test: phase_14_orchestration_engine
+assessment_date: "2026-05-25"
+namespace_registered: "agent"
+
+# ── Stress test scenario ──────────────────────────────────────────────
+
+scenario:
+  description: >
+    Enhanced Planning Engine (Phase 15) decomposes a goal into N=2 parallel
+    sub-tasks and dispatches them via StubOrchestrationEngine. The planning
+    stub augments orchestration StreamItems with planning keys + agent.identity,
+    producing 8 items total (2 serial + 5 orchestration passthrough + 1 terminal).
+  item_count: 8
+  parallel_branches: 2
+  branch_a: { name: "fast_path", items: 3, latency_ms: [5.2, 4.8, 6.1] }
+  branch_b: { name: "full_rerank", items: 2, latency_ms: [14.3, 15.7] }
+  concurrency_model: "asyncio.gather()"
+  merge_ordinal_range: [0, 4]
+  retry_scenario: false
+  multi_pool_scenario: false
+
+# ── Per-key assessment ─────────────────────────────────────────────────
+
+keys:
+  orchestration.dag_node_id:
+    status: verified
+    evidence: >
+      Present on all 5 orchestration passthrough items. Value "merge_c83afa05"
+      (SHA256-derived hash). Same value across all items from both branches.
+    stress_scenario: "N=2 parallel branches, 5 merged items, deterministic merge"
+    limitation: >
+      Generic hash-derived identifier — does not embed branch origin or per-item
+      index. For Phase 16 retry injection, consider per-item naming convention:
+      "merge_{branch}_{idx}" (e.g. "merge_fast_path_0").
+    recommendation: null  # structurally verified, naming is Phase 16 concern
+
+  orchestration.parallel_depth:
+    status: verified
+    evidence: >
+      depth=1 on all 5 orchestration passthrough items. Correct: single-level
+      fan-out from planning engine (depth 0) to parallel branches (depth 1).
+    stress_scenario: "Single-level parallel fan-out (depth 0→1)"
+    limitation: >
+      Only single-level parallelism tested. Multi-level fan-out (depth > 1)
+      requires nested orchestration calls — deferred to Phase 16+.
+    recommendation: null
+
+  orchestration.merge_ordinal:
+    status: verified
+    evidence: >
+      Sequential 0..4 across all 5 merged items from 2 parallel branches.
+      Items 0-2 from fast_path (ordinals 0,1,2), items 3-4 from full_rerank
+      (ordinals 3,4). No gaps, no duplicates, zero-based start confirmed.
+    stress_scenario: "3+2 item merge from fast_path + full_rerank branches"
+    limitation: >
+      Stub is deterministic (fast_path always completes first due to 5ms vs
+      15ms latency). Non-deterministic ordering (branch B completes before
+      branch A) is NOT tested — requires real async timing variance (Phase 16+).
+    recommendation: null
+
+  orchestration.branch_taken:
+    status: verified
+    evidence: >
+      "fast_path" on items 0-2, "full_rerank" on items 3-4. Correctly labels
+      which branch produced each merged item.
+    stress_scenario: "Binary branch decision based on retrieval strategy"
+    limitation: >
+      Only two branches with static labels. Dynamic branch count or runtime-
+      generated branch identifiers not tested.
+    recommendation: null
+
+  orchestration.retry_count:
+    status: insufficient
+    evidence: >
+      Always 0 on all items. The stub never triggers retries — every branch
+      call succeeds on the first attempt.
+    stress_scenario: "None — no retry scenario exercised"
+    gap: >
+      Cannot verify: increment behavior (retry_count = 1 on second attempt),
+      reset semantics (does it reset between runs?), retry limit enforcement
+      (does it cap at max_retries?). The key is structurally present and
+      correctly typed (int), but its behavioral semantics are unverified.
+    recommendation: >
+      Phase 16: inject a transient failure into one branch (e.g., raise
+      asyncio.TimeoutError on first attempt for chunk c003). Verify retry_count
+      increments from 0→1 on the retried item and does NOT increment on
+      non-retried items.
+
+  orchestration.resource_pool_key:
+    status: insufficient
+    evidence: >
+      "default" on all items. Single resource pool used throughout.
+    stress_scenario: "None — single-pool scenario only"
+    gap: >
+      Cannot verify: pool-aware scheduling (does the engine route to the
+      correct pool?), pool exhaustion distinguishability (can we tell
+      'pool full' from 'pool down'?), cross-pool isolation (does one pool's
+      saturation affect another?).
+    recommendation: >
+      Phase 16+: add a second resource pool scenario (e.g., "gpu" for
+      full_rerank, "cpu" for fast_path). Verify pool_key correctly labels
+      each item and pool exhaustion is distinguishable from other errors.
+
+# ── Missing keys ──────────────────────────────────────────────────────
+
+missing_keys: []
+# No required orchestration key is completely missing from the contract.
+# All 6 keys are structurally present and correctly typed.
+
+# ── Overall assessment ─────────────────────────────────────────────────
+
+overall_assessment:
+  verdict: "SUFFICIENT with caveats"
+  verified_count: 4
+  insufficient_count: 2
+  missing_count: 0
+  total_keys: 6
+
+  summary: |
+    The 6-key orchestration contract SURVIVES the first consumer stress test.
+    The Planning Engine successfully consumed orchestration services for a
+    parallel branch scenario without discovering any missing or mis-typed keys.
+
+    4/6 keys are fully verified through the parallel branch scenario:
+      - dag_node_id: structurally present, naming is Phase 16 concern
+      - parallel_depth: correct for single-level fan-out
+      - merge_ordinal: sequential 0-based across branches (deterministic only)
+      - branch_taken: correct per-item branch labeling
+
+    2/6 keys are structurally present but semantically unverified:
+      - retry_count: always 0, no retry scenario exercised
+      - resource_pool_key: always "default", single-pool scenario only
+
+    These 2 gaps are inherent to stub-based testing. The stub cannot trigger
+    retries or provision multiple resource pools. Both gaps are Phase 16
+    concerns, not Phase 14 contract design flaws.
+
+  limitations: |
+    1. Deterministic merge ordering: the stub's fixed latency (5ms vs 15ms)
+       guarantees fast_path always completes first. Non-deterministic ordering
+       is untestable without real async timing variance.
+    2. No retry injection: the stub never fails, so retry_count is always 0.
+    3. Single resource pool: only "default" pool exercised.
+    4. Single-level parallelism: depth never exceeds 1.
+
+  feeds_into:
+    - phase_15.5_constraint_prototype: "Sufficiency report per-key recommendations
+      are the precursor to ConstraintViolation.remediation feedback."
+    - phase_16_decision_gate: "Phase 16 reads this report before modifying the
+      orchestration contract. contract_version matching prevents consuming
+      stale assessments."
