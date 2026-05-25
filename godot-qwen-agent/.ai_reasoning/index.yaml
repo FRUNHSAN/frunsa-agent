@@ -224,7 +224,7 @@ tag_index:
   planning: [phase_10_planning_engine_selection, phase_15_planning_engine]
   agent_identity: [phase_15_planning_engine]
   namespace: [phase_15_planning_engine]
-  sufficiency_report: [phase_15_planning_engine, phase_16_chaos_multi_agent]
+  sufficiency_report: [phase_15_planning_engine, phase_16_chaos_multi_agent, phase_17_first_real_engine]
   stress_test: [phase_15_planning_engine]
   orchestration_contract: [phase_15_planning_engine]
   chaos: [phase_16_chaos_multi_agent]
