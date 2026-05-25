@@ -1,0 +1,245 @@
+# ── Phase 16 Sufficiency Report v2 ──────────────────────────────────
+# Orchestration contract re-assessment after chaos injection + multi-agent validation.
+# Phase 17 reads this report before replacing stubs with real engines.
+
+report_id: phase_16_orchestration_sufficiency
+contract_version: "1.0.0"
+generated_by: "Phase 16 Chaos Injection + StubCriticEngine v1.0.0"
+phase_14_contract_under_test: phase_14_orchestration_engine
+previous_report: phase_15_orchestration_sufficiency
+assessment_date: "2026-05-25"
+
+# ── Phase 15 → 16 Gap Resolution ─────────────────────────────────────
+
+gaps_resolved:
+  - key: orchestration.retry_count
+    phase_15_status: insufficient
+    resolution: >
+      FailureInjectionConfig enables deterministic transient failure injection.
+      fail_on_attempts=(("c003", 1),) → c003 fails on attempt 1, succeeds on
+      attempt 2 → retry_count = 1 on c003, 0 on all other items.
+      exhaust_retries=("c005",) → c005 fails on all 3 attempts → error terminal
+      with finish_reason="retry_exhausted".
+      Verified: increment behavior, non-retried items stay 0, exhaust path.
+
+  - key: orchestration.resource_pool_key
+    phase_15_status: insufficient
+    resolution: >
+      OrchestrationConfig.resource_pools enables multi-pool routing.
+      {"fast_path": "cpu", "full_rerank": "gpu"} → items 0-2 get "cpu",
+      items 3-4 get "gpu". Missing branch falls back to "default".
+      Verified: per-branch pool labeling, fallback behavior.
+
+# ── Stress test scenarios (Phase 16 expanded) ─────────────────────────
+
+scenario:
+  description: >
+    Phase 16 expands Phase 15's stress test with three new scenarios:
+    1. retry_injection: transient failure on c003 attempt 1
+    2. exhaust_retries: permanent failure on c005 (all 3 attempts)
+    3. multi_pool: cpu pool for fast_path, gpu pool for full_rerank
+  item_count: 8 (retry) / 8 (multi-pool) / varies (exhaust)
+  parallel_branches: 2
+  branch_a: { name: "fast_path", items: 3, pool: "cpu", latency_ms: [5.2, 4.8, 6.1] }
+  branch_b: { name: "full_rerank", items: 2, pool: "gpu", latency_ms: [14.3, 15.7] }
+  concurrency_model: "asyncio.gather()"
+  retry_scenario: true
+  multi_pool_scenario: true
+  multi_agent_scenario: true
+
+# ── Per-key assessment ─────────────────────────────────────────────────
+
+keys:
+  orchestration.dag_node_id:
+    status: verified
+    evidence: >
+      Present on all items. Same value across all items from both branches.
+      Unchanged from Phase 15 — chaos injection does not affect node identity.
+    stress_scenario: "Retry + multi-pool scenarios, identity stability under chaos"
+    limitation: >
+      Naming convention ("merge_{goal_hash}") is generic. Phase 15 noted this.
+      Not a Phase 16 concern.
+    recommendation: null
+
+  orchestration.parallel_depth:
+    status: verified
+    evidence: >
+      depth=1 on all items. Unchanged from Phase 15.
+      Chaos injection does not affect DAG topology.
+    stress_scenario: "Single-level fan-out survives retry + multi-pool"
+    limitation: >
+      Multi-level parallelism (depth > 1) still untested. Phase 17+ concern.
+    recommendation: null
+
+  orchestration.merge_ordinal:
+    status: verified
+    evidence: >
+      Sequential 0..4 across all merged items. Retry injection does not
+      disrupt merge ordering — items still arrive in deterministic order
+      (fast_path completes first due to 5ms vs 15ms latency).
+      exhaust_retries: the error item replaces the normal item for c005,
+      maintaining merge_ordinal continuity.
+    stress_scenario: "Merge ordering preserved under transient + permanent failure"
+    limitation: >
+      Non-deterministic ordering (branch B completes before A) still untested.
+      Requires real async timing variance — not achievable with stub.
+    recommendation: null
+
+  orchestration.branch_taken:
+    status: verified
+    evidence: >
+      "fast_path" on items 0-2, "full_rerank" on items 3-4. Unchanged.
+      Chaos injection does not affect branch identity labeling.
+    stress_scenario: "Branch labels stable under retry + multi-pool"
+    limitation: >
+      Still only 2 static branches. Dynamic branch count untested.
+    recommendation: null
+
+  orchestration.retry_count:
+    status: verified
+    evidence: >
+      fail_on_attempts=(("c003", 1),): c003 shows retry_count=1, all other
+      items show retry_count=0. Correct: only the injected item retries,
+      and retry_count = attempts - 1.
+
+      exhaust_retries=("c005",): c005 shows retry_count=2 (3 attempts, all
+      failed → 3-1=2), finish_reason="retry_exhausted", is_terminal=False
+      (error item within branch, not stream terminal).
+
+      Without config: retry_count=0 on all items (Phase 15 behavior preserved).
+    stress_scenario: >
+      Transient: (c003, 1) fails → retry succeeds on attempt 2 → retry_count=1.
+      Permanent: c005 fails all 3 attempts → retry_count=2, error terminal.
+      Non-targeted: c001, c002, c004 → retry_count=0 throughout.
+    limitation: >
+      Max retries hardcoded to 3 in stub. Real engine may have configurable
+      max_retries — Phase 17+ concern. Retry backoff uses simple exponential
+      (10ms * 2^(n-1)), not jittered — matches stub patterns.
+    recommendation: null
+
+  orchestration.resource_pool_key:
+    status: verified
+    evidence: >
+      resource_pools={"fast_path": "cpu", "full_rerank": "gpu"}:
+      items 0-2 → "cpu", items 3-4 → "gpu". Correct per-branch labeling.
+
+      Missing branch fallback: {"full_rerank": "gpu"} (no fast_path entry) →
+      fast_path items get "default", full_rerank items get "gpu".
+
+      Without config: "default" on all items (Phase 15 behavior preserved).
+    stress_scenario: >
+      Dual-pool: cpu/gpu routing verified. Single-pool fallback verified.
+      Partial config (one branch only) verified.
+    limitation: >
+      Pool exhaustion semantics (pool full vs pool down) untestable with stub.
+      Requires real resource provisioning — Phase 17+ concern.
+    recommendation: null
+
+# ── Multi-Agent Coexistence Observation ───────────────────────────────
+
+multi_agent_coexistence:
+  status: verified
+  description: >
+    Planning engine produces agent.identity = {role: "planning", ...}
+    Critic engine produces agent.identity = {role: "critic", ...}
+
+    Both identities appear in the same sink, partitioned by engine.
+    Querying by engine="planning" returns planning identities.
+    Querying by engine="critic" returns critic identities.
+    Zero key collisions: trace_context is per-StreamItem, not global.
+
+    This validates that the agent.identity key name is safe for multi-engine
+    use. The registration model (single engine="planning") is a registry
+    concern, not a runtime concern.
+
+  observation: >
+    Two agents with different identities coexist cleanly in the same
+    orchestration context. No namespace conflicts, no guardrail violations,
+    no schema migration needed.
+
+  engine_count: 3
+  agent_count: 2  # planning + critic (orchestration does not carry agent.identity)
+
+# ── Technical Debt ────────────────────────────────────────────────────
+
+technical_debt:
+  - item: agent.identity multi-engine registration model
+    severity: medium
+    description: >
+      agent.identity is registered in TRACE_KEY_REGISTRY with engine="planning"
+      (Phase 15), but is produced by BOTH planning and critic engines (Phase 16).
+
+      The current model WORKS: no runtime errors, no guardrail violations.
+      TraceKeyDef.engine is a documentation field, not a runtime constraint.
+
+      However, it is semantically inaccurate: engine="planning" implies
+      exclusive ownership, but agent.identity is generic agent metadata.
+
+      The critic_engine_contract guardrail deliberately does NOT check for
+      agent.* keys — it only checks critic.* keys. This means the critic's
+      agent.identity emission is not guardrail-enforced.
+    deferred_to: "Phase 17+"
+    required_fix: >
+      Change TraceKeyDef.engine: str → engines: list[str], allowing a single
+      key to be registered for multiple producing engines. Update all guardrails
+      that filter by v.engine to check list membership instead of equality.
+    justification_for_deferral: >
+      1. Current model works correctly at runtime
+      2. One key (agent.identity) doesn't justify the migration cost
+      3. Phase 17+ will add agent.capability_manifest, agent.trust_level —
+         at 3+ keys, the migration is clearly justified
+      4. Registry schema change requires coordinated guardrail updates
+    workaround: >
+      critic_engine_contract checks only critic.* prefix keys. agent.identity
+      is verified by planning_engine_contract + cross-engine E2E tests.
+
+# ── Missing keys ──────────────────────────────────────────────────────
+
+missing_keys: []
+# All 6 orchestration keys are now SEMANTICALLY verified, not just structurally
+# present. Phase 15's 2 insufficient keys (retry_count, resource_pool_key) are
+# now verified through chaos injection.
+
+# ── Overall assessment ─────────────────────────────────────────────────
+
+overall_assessment:
+  verdict: "FULLY SUFFICIENT"
+  verified_count: 6
+  insufficient_count: 0
+  missing_count: 0
+  total_keys: 6
+
+  summary: |
+    The 6-key orchestration contract is now FULLY VERIFIED. Phase 15's two
+    insufficient keys (retry_count, resource_pool_key) have been validated
+    through deterministic chaos injection and multi-pool routing.
+
+    Phase 16 completes the first full sufficiency loop:
+      Phase 14: 6 keys defined (hypothesis)
+      Phase 15: 4/6 verified, 2 insufficient (measurement)
+      Phase 16: 6/6 verified (validation)
+
+    The loop transforms trace keys from "structurally present" to
+    "behaviorally verified." This is the template for all future contract
+    validation phases.
+
+    Additionally, Phase 16 validates multi-agent coexistence: two agents
+    (planning + critic) with different agent.identity values coexist
+    cleanly in the same sink, proving the agent.* namespace is safe for
+    multi-engine use.
+
+  limitations: |
+    1. Deterministic merge ordering: stub latency guarantees fast_path first.
+       Non-deterministic ordering remains untestable with stubs.
+    2. Max retries hardcoded to 3. Real engine may use configurable limits.
+    3. Pool exhaustion semantics (full vs down) untestable with stub.
+    4. agent.identity multi-engine registration is documented technical debt.
+    5. Single-level parallelism only (depth=1). Multi-level DAG is Phase 17+.
+
+  feeds_into:
+    - phase_17_real_orchestration: "Phase 17 replaces stubs with real engines.
+      The 6-key contract is now fully validated — real engines must implement
+      all 6 keys with the semantics verified in Phase 16."
+    - phase_17_agent_registry_refactor: "Resolve agent.identity registration
+      model (engine: str → engines: list[str]) when agent.* namespace
+      expands to 3+ keys."

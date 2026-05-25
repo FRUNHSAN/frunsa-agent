@@ -6,8 +6,10 @@ import tempfile
 
 import pytest
 
+from core.contracts.trace_keys import COMPONENT_TRACE_KEYS
 from core.observability.sink_schema import CURRENT_SCHEMA_VERSION, TRACE_KEYS_TABLE_NAME
 from core.observability.sqlite_sink import SQLiteTraceSink
+from core.observability.trace_registry import TRACE_KEY_REGISTRY
 
 
 @pytest.fixture
@@ -64,7 +66,7 @@ class TestSinkComponentKeySeeding:
         try:
             all_keys = sink.query_keys()
             engine_keys = [k for k in all_keys if k["component_type"] is None]
-            assert len(engine_keys) == 13  # 6 engine + 6 orchestration + 1 agent (all non-component keys)
+            assert len(engine_keys) == len(TRACE_KEY_REGISTRY)
         finally:
             sink.close()
 
@@ -89,7 +91,7 @@ class TestSinkComponentKeySeeding:
         sink = SQLiteTraceSink(sink_path)
         try:
             all_keys = sink.query_keys()
-            assert len(all_keys) == 16  # Phase 15: 6 engine + 3 component + 6 orchestration + 1 agent
+            assert len(all_keys) == len(TRACE_KEY_REGISTRY) + len(COMPONENT_TRACE_KEYS)
         finally:
             sink.close()
 

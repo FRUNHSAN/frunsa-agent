@@ -5,6 +5,7 @@ import tempfile
 
 import pytest
 
+from core.contracts.trace_keys import COMPONENT_TRACE_KEYS
 from core.observability.sqlite_sink import SQLiteTraceSink
 from core.observability.trace_registry import TRACE_KEY_REGISTRY
 
@@ -134,6 +135,6 @@ class TestSinkOrchestrationKeyQueries:
         sink = SQLiteTraceSink(sink_path)
         try:
             all_keys = sink.query_keys()
-            assert len(all_keys) == 16  # 6 engine + 3 component + 6 orchestration + 1 agent
+            assert len(all_keys) == len(TRACE_KEY_REGISTRY) + len(COMPONENT_TRACE_KEYS)
         finally:
             sink.close()

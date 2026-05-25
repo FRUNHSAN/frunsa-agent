@@ -3,6 +3,7 @@
 Phase 11: N=2 engine stubs only. NOT a cross-engine semantic standard.
 Phase 14: orchestration engine keys added (N=3 engines).
 Phase 15: agent.identity key added (first agent.* namespace key).
+Phase 16: critic.score + critic.verdict added (N=4 engines, 18 keys).
 ENGINE_TO_COMPONENT_MAP resolves engine-specific keys to canonical
 component-level keys defined in the component platform.
 """
@@ -116,11 +117,26 @@ TRACE_KEY_REGISTRY: Dict[str, TraceKeyDef] = {
     # ── Agent identity key (Phase 15) ─────────────────────────────────
     # First agent.* namespace key. component_candidate=False: agent identity
     # describes WHO is running, not WHAT component capability is provided.
+    # NOTE: agent.identity is registered with engine="planning" (historical)
+    # but is also produced by the critic engine (Phase 16). This is documented
+    # as technical debt in .ai_reasoning/sufficiency/phase_16_orchestration_sufficiency.yaml.
     "agent.identity": TraceKeyDef(
         type=dict,
         semantics="Structured agent identity carrying id, role, version, and capabilities manifest",
         engine="planning",
         component_candidate=False,
+    ),
+
+    # ── Critic engine keys (Phase 16) ─────────────────────────────────
+    "critic.score": TraceKeyDef(
+        type=float,
+        semantics="Quality score assigned by critic agent (0.0-1.0)",
+        engine="critic",
+    ),
+    "critic.verdict": TraceKeyDef(
+        type=str,
+        semantics="Critic verdict: accept, reject, or rework",
+        engine="critic",
     ),
 }
 

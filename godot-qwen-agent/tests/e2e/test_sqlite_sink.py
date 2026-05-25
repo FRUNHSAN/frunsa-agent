@@ -13,6 +13,9 @@ from pathlib import Path
 
 import pytest
 
+from core.contracts.trace_keys import COMPONENT_TRACE_KEYS
+from core.observability.trace_registry import TRACE_KEY_REGISTRY
+
 from core.observability.sink_schema import (
     CURRENT_SCHEMA_VERSION,
     SCHEMA_VERSION_TABLE_NAME,
@@ -20,7 +23,6 @@ from core.observability.sink_schema import (
     TRACE_RECORDS_TABLE_NAME,
 )
 from core.observability.sqlite_sink import SQLiteTraceSink
-from core.observability.trace_registry import TRACE_KEY_REGISTRY
 from core.pipeline.tracing import (
     DependencyCallTrace,
     StepTrace,
@@ -105,8 +107,7 @@ class TestSQLiteTraceSink:
                 count = sink._conn.execute(
                     f"SELECT COUNT(*) FROM {TRACE_KEYS_TABLE_NAME}"
                 ).fetchone()[0]
-                # Phase 15: 6 engine + 3 component + 6 orchestration + 1 agent = 16 total
-                assert count == 16  # Phase 15: +agent.identity
+                assert count == len(TRACE_KEY_REGISTRY) + len(COMPONENT_TRACE_KEYS)
             finally:
                 sink.close()
 
@@ -121,8 +122,7 @@ class TestSQLiteTraceSink:
                 count = sink2._conn.execute(
                     f"SELECT COUNT(*) FROM {TRACE_KEYS_TABLE_NAME}"
                 ).fetchone()[0]
-                # Phase 15: 6 engine + 3 component + 6 orchestration + 1 agent = 16 total
-                assert count == 16  # Phase 15: +agent.identity
+                assert count == len(TRACE_KEY_REGISTRY) + len(COMPONENT_TRACE_KEYS)
             finally:
                 sink2.close()
 
@@ -351,7 +351,7 @@ class TestSQLiteTraceSink:
                 all_keys = sink.query_keys(component_candidate_only=False)
                 cc_keys = sink.query_keys(component_candidate_only=True)
 
-                assert len(all_keys) == 16  # 6 engine + 3 component + 6 orchestration + 1 agent (Phase 15)
+                assert len(all_keys) == len(TRACE_KEY_REGISTRY) + len(COMPONENT_TRACE_KEYS)
                 assert len(cc_keys) == 6  # 3 engine + 3 component (all component_candidate=1)
                 cc_names = {k["key_name"] for k in cc_keys}
                 # Phase 13: 3 engine component_candidate + 3 component keys
@@ -415,7 +415,7 @@ class TestSQLiteTraceSink:
             with SQLiteTraceSink(path) as sink:
                 assert sink.max_items_per_call == 100
                 keys = sink.query_keys()
-                assert len(keys) == 16  # Phase 15: +agent.identity
+                assert len(keys) == len(TRACE_KEY_REGISTRY) + len(COMPONENT_TRACE_KEYS)
             # After __exit__, connection is closed
             with pytest.raises(Exception):
                 sink.query_keys()

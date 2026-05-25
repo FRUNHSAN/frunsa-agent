@@ -2875,3 +2875,115 @@ Phase 14 的 6 个 orchestration.* key 是假设——StubOrchestrationEngine �
 ```
 517 tests, 15 guardrails, 0 failures
 ```
+
+---
+
+## Phase 16: 混沌注入 + 多 Agent 协作 — 编排合约语义验证闭环
+
+**完成状态**: ✅ 已完成 (Phase 16)
+
+### 背景
+
+Phase 15 的 Sufficiency Report 给出了精确的攻击坐标：6 个 orchestration.* key 中 4 个 verified，2 个 insufficient。两个 insufficient key 暴露的是同一种缺口——**stub 太干净了**。
+
+- `orchestration.retry_count` 永远是 0 → stub 从不失败
+- `orchestration.resource_pool_key` 永远是 "default" → stub 只有一个池
+
+Phase 16 通过**混沌注入**给 stub 注入"真实世界的混乱"，同时推进**多 Agent 协作雏形**——第三个引擎 (Critic) 落地，验证引擎 Protocol 的可复用性。
+
+这不是两个独立任务，而是一个统一交付：混沌注入验证编排合约的异常路径语义，Multi-Agent 验证引擎协议的可复用性和 agent.* 命名空间的多引擎安全性。
+
+### 四轴演化
+
+| 轴线 | Phase 15 状态 | Phase 16 深化 |
+|------|-------------|-------------|
+| **引擎轴** | Planning + Orchestration (2 engines) | +Critic (3 engines)，Protocol 复用性得证 |
+| **编排轴** | 确定性合并，0 retry，1 pool | 故障注入 + 多池路由，异常行为被合约覆盖 |
+| **观测轴** | 记录"成功"的 trace | 记录"挣扎"的 trace — retry、failover、pool contention |
+| **组件轴** | 3 component keys | 不变（刻意的克制） |
+
+### Sufficiency 闭环
+
+这是整个架构方法论的核心证明：
+
+```
+Phase 14: 6 keys 定义（假设）
+    ↓
+Phase 15: 反向压力测试 → 4/6 verified, 2 insufficient（测量）
+    ↓
+Phase 16: 混沌注入 + 多 Agent → 6/6 verified（验证）
+    ↓
+合约闭环：定义 → 压测 → 修复 → 再压测 → FULLY SUFFICIENT
+```
+
+**合约不是设计出来的，是被真实场景压测出来的。**
+
+### 关键交付
+
+| 交付物 | 文件 | 说明 |
+|--------|------|------|
+| FailureInjectionConfig | `engines/orchestration/config.py` (NEW) | Frozen dataclass: `fail_on_attempts` (transient) + `exhaust_retries` (permanent)。确定性注入，相同 config → 相同输出 |
+| OrchestrationConfig | `engines/orchestration/config.py` (NEW) | 可选构造参数：failure_injection + resource_pools。不传 = Phase 15 行为不变 |
+| Enhanced StubOrchestrationEngine | `engines/orchestration/stub.py` (MODIFY) | Retry loop (max 3 attempts)、failure injection 检查、multi-pool routing、exponential backoff |
+| CriticAgent | `engines/critic/identity.py` (NEW) | Frozen dataclass: {id, role="critic", version, capabilities}。遵循 6 点 agent.* 约定 |
+| StubCriticEngine | `engines/critic/stub.py` (NEW) | 3 串行步骤：receive → evaluate → terminal。产出 critic.score (float) + critic.verdict (str) + agent.identity |
+| Trace key 注册 | `core/observability/trace_registry.py` (MODIFY) | +critic.score + critic.verdict。15→18 keys (TRACE_KEY_REGISTRY)。N=4 engines |
+| critic_engine_contract guardrail | `guardrails/rules/critic_engine_contract.py` (NEW) | ERROR 双检查：缺失 critic.* key + 未注册 critic key。15→16 guardrails |
+| Namespace 扩展 | `guardrails/rules/trace_context_namespace.py` (MODIFY) | +"critic" prefix |
+| Sufficiency Report v2 | `.ai_reasoning/sufficiency/phase_16_orchestration_sufficiency.yaml` (NEW) | 6/6 verified，multi-agent coexistence 观测，technical_debt 段 |
+| Reasoning chain | `phase_16_chaos_multi_agent.yaml` (NEW) | 完整推理链含实现后 fix 分析 |
+| Engine exports | `engines/orchestration/__init__.py` + `engines/critic/__init__.py` | 导出新类型 |
+
+### Sufficiency Report v2 结论
+
+| Key | Phase 15 | Phase 16 | 验证方式 |
+|-----|---------|---------|---------|
+| `orchestration.dag_node_id` | ✅ verified | ✅ verified | 混沌注入不影响节点标识 |
+| `orchestration.parallel_depth` | ✅ verified | ✅ verified | DAG 拓扑不受故障影响 |
+| `orchestration.merge_ordinal` | ✅ verified | ✅ verified | 故障下合并顺序保持连续 |
+| `orchestration.branch_taken` | ✅ verified | ✅ verified | 分支标签在重试下稳定 |
+| `orchestration.retry_count` | ⚠️ insufficient | ✅ **verified** | fail_on_attempts → 0→1；exhaust_retries → error terminal |
+| `orchestration.resource_pool_key` | ⚠️ insufficient | ✅ **verified** | cpu/gpu 双池路由 + fallback to default |
+
+**总体评估**: **FULLY SUFFICIENT** — 6/6 keys 语义验证完毕。Phase 17 可以安心用真实引擎替换 stub。
+
+### 多 Agent 共存验证
+
+- Planning engine: `agent.identity = {role: "planning", ...}`
+- Critic engine: `agent.identity = {role: "critic", ...}`
+- 两个 identity 在同一 sink 中按 engine 分区，无 key 冲突
+- `agent.identity` 作为共享 key name 对多引擎使用是安全的——trace_context 是 per-StreamItem，非全局
+
+### Technical Debt (显式记录)
+
+| 债务 | 严重度 | 推迟到 | 说明 |
+|------|--------|--------|------|
+| agent.identity 多引擎注册模型 | medium | Phase 17+ | 注册为 engine="planning" 但被 planning 和 critic 双引擎产出。修复：TraceKeyDef.engine: str → engines: list[str]。当前可用，1 个 key 不值得迁移成本 |
+
+### 测试覆盖
+
+| 文件 | 测试数 | 验证点 |
+|------|--------|--------|
+| `tests/conformance/test_orchestration_chaos.py` | 14 | retry injection、exhaust_retries、multi-pool routing、backward compat |
+| `tests/conformance/test_critic_engine.py` | 15 | Stub 产出、key 类型、critic identity round-trip、key registration |
+| `tests/integration/test_critic_sink.py` | 5 | critic.* key 种子、类型、total keys=18 |
+| `tests/e2e/test_chaos_e2e.py` | 9 | retry_count 全链、multi-pool 全链、multi-agent 共存、schema 不变 |
+| 现有测试更新 | 7 files | 硬编码 16 → 动态 `len(TRACE_KEY_REGISTRY) + len(COMPONENT_TRACE_KEYS)` |
+
+### 实现后 Fix 分析
+
+| 修复 | 深层含义 |
+|------|---------|
+| Sink total = TRACE_KEY_REGISTRY + COMPONENT_TRACE_KEYS | 动态引用必须匹配实际计数对象。sink.query_keys() 是两个注册表的 UNION——单注册表引用产生 11 个失败 |
+| replace_all 匹配特定变量名遗漏 2 个断言 | 相同语义的断言有不同语法形式 (`count` vs `len(all_keys)` vs `len(keys)`)。消除硬编码时需要 grep 所有整数文字匹配当前总数 |
+
+### 架构意义
+
+- **引擎轴**: Planning → Orchestration → Critic，3 引擎 Protocol 复用性得到实证。添加第 4 个引擎只需遵循 identity.py + stub.py + guardrail 模式，无需架构变更
+- **编排轴**: 从"永远成功"到"会挣扎"，retry_count 和 resource_pool_key 从装饰性字段变成真正的语义契约
+- **观测轴**: trace 的价值密度大幅提升——不仅记录"发生了什么"，还记录"如何挣扎过来的"
+- **方法论**: 第一个完整的合约验证闭环闭合。这套节奏（定义→压测→修复→再压测→闭环）比任何单一功能都更有价值，会持续到 Phase 17、18、19...
+
+```
+560 tests, 16 guardrails, 0 failures
+```

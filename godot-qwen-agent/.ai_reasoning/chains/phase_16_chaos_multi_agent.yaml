@@ -1,0 +1,528 @@
+# ── Reasoning Chain ───────────────────────────────────────────────────
+chain_id: phase_16_chaos_multi_agent
+title: "Chaos Injection + Multi-Agent Foundation: 编排合约语义验证闭环"
+created_at: "2026-05-25T20:00:00Z"
+updated_at: "2026-05-25T22:00:00Z"
+status: active
+tags: [orchestration, chaos, retry, multi_pool, multi_agent, critic, engine, sufficiency_report]
+related_chains:
+  - phase_14_orchestration_engine
+  - phase_15_planning_engine
+
+# ── 1. Context ───────────────────────────────────────────────────────
+
+context: |
+  Phase 15 used the Planning Engine to reverse stress-test Phase 14's 6
+  orchestration trace keys. Result: 4/6 verified, 2/6 insufficient.
+
+  The two insufficient keys expose the SAME gap: the stub is too clean.
+
+  - orchestration.retry_count is always 0 — the stub never fails
+  - orchestration.resource_pool_key is always "default" — the stub has one pool
+
+  Phase 15's sufficiency report is unambiguous:
+    "These 2 gaps are inherent to stub-based testing. The stub cannot trigger
+     retries or provision multiple resource pools."
+
+  Phase 16 closes this gap by injecting "real-world chaos" into the stub:
+  transient failures (retry_count 0→1), exhaust-retries (error terminal),
+  multi-pool routing (cpu vs gpu). Same stub, same deterministic model —
+  but with a FailureInjectionConfig parameter that makes it stumble
+  realistically.
+
+  Simultaneously, Phase 15 proved that a single Agent (planning) can carry
+  structured identity (agent.identity). Phase 16 pushes one step further:
+  when TWO agents with different identities coexist in the same orchestration
+  context, does the system handle it cleanly?
+
+  This is NOT a full multi-agent system. It is a FOUNDATION VALIDATION:
+  - Two engines (Planning + Critic), each with agent.identity
+  - Two engine-specific trace key sets (planning.* + critic.*)
+  - One shared orchestration context
+  - Zero cross-agent communication (that's Phase 17+)
+
+  The Critic is the minimal third engine: 3 serial steps, 2 trace keys
+  (critic.score, critic.verdict), 1 agent.identity. It evaluates planning
+  output — the simplest possible multi-agent interaction.
+
+  Success = Sufficiency Report v2 with 6/6 verified + multi-agent coexistence
+  observed without key collisions or guardrail violations.
+
+  ## Why these two thrusts together?
+
+  Separately, each thrust is ~200 LOC. Together they share infrastructure:
+  - Both touch trace_registry.py (critic.* keys + key count update)
+  - Both need guardrail updates (critic_engine_contract)
+  - Both feed into the same Sufficiency Report v2
+  - Both are verified by the same test suite run
+
+  Splitting them into Phase 16a + 16b would duplicate the verification
+  overhead (full suite run, guardrail check, index update) for minimal
+  isolation benefit.
+
+  ## Four-axis深化
+
+  | Axis | Phase 15 State | Phase 16 Deepening |
+  |------|---------------|-------------------|
+  | Engine | Planning + Orchestration (2 engines) | +Critic (3 engines), validating engine protocol reusability |
+  | Orchestration | Deterministic merge, 0 retry, 1 pool | Fault injection + multi-pool routing, verifying exception-path behavior |
+  | Observability | Recording "success" traces | Recording "struggle" traces — retry, failover, pool contention |
+  | Component | 3 component keys (retrieval + generation) | Unchanged — Phase 16 adds no component types |
+
+# ── 2. Decision ──────────────────────────────────────────────────────
+
+decision: |
+  Phase 16 delivers Chaos Injection + Multi-Agent Foundation in 10 steps:
+
+  1. **OrchestrationConfig dataclasses (engines/orchestration/config.py, NEW)**
+     — FailureInjectionConfig: frozen dataclass with `fail_on_attempts`
+     (tuple of (chunk_id, attempt)) and `exhaust_retries` (tuple of chunk_ids
+     that fail ALL attempts, producing error terminal). OrchestrationConfig:
+     wraps optional failure_injection + resource_pools Mapping.
+
+  2. **Enhanced stub (engines/orchestration/stub.py, MODIFY)** —
+     _simulate_branch gains retry loop (max 3 attempts). Before each attempt,
+     checks FailureInjectionConfig: if (chunk_id, attempt) matches → raises
+     RuntimeError("injected failure"). exhaust_retries → fails on all 3
+     attempts → error terminal StreamItem. retry_count = attempts - 1.
+     resource_pool_key from config or "default". Backward compatible:
+     no config → Phase 15 behavior unchanged.
+
+  3. **CriticAgent identity (engines/critic/identity.py + __init__.py, NEW)**
+     — Frozen dataclass: {id, role, version, capabilities}. Follows the
+     6-point agent.* namespace convention from Phase 15. to_trace_value() /
+     from_trace_value() pattern reused. Role="critic", capabilities include
+     "result_evaluation" and "quality_scoring".
+
+  4. **StubCriticEngine (engines/critic/stub.py, NEW)** —
+     3 serial steps: receive → evaluate (produce critic.score + critic.verdict)
+     → terminal. 3 StreamItems, each carrying critic.* keys + agent.identity
+     (critic version). No external dependencies. Pure async generator.
+
+  5. **Trace key registration (core/observability/trace_registry.py, MODIFY)**
+     — Add critic.score (float, engine="critic") + critic.verdict (str,
+     engine="critic"). Total keys: 16 → 18. No ENGINE_TO_COMPONENT_MAP change
+     (critic keys are engine-internal metadata, not component capabilities).
+
+  6. **Engine exports (MODIFY + NEW)** —
+     orchestratation/__init__.py exports OrchestrationConfig, FailureInjectionConfig.
+     engines/critic/__init__.py exports CriticAgent, StubCriticEngine.
+
+  7. **Namespace + critic_engine_contract guardrail** —
+     Add "critic" to _KNOWN_ENGINES in trace_context_namespace.py.
+     New critic_engine_contract guardrail (dual-check ERROR):
+     missing required critic.* keys, unregistered critic keys.
+     Register in guardrails/rules/__init__.py + checker.py.
+     Guardrails: 15 → 16.
+
+  8. **Sufficiency Report v2 (.ai_reasoning/sufficiency/, NEW)** —
+     All 6 orchestration keys re-assessed: retry_count verified (retry
+     injection 0→1, exhaust_retries terminal), resource_pool_key verified
+     (cpu/gpu multi-pool). Multi-agent coexistence observation: two
+     agent.identity values in same sink, different engine partitions,
+     zero key collisions. technical_debt section documents agent.identity
+     registration model decision (engine="planning" but multi-engine output).
+
+  9. **Tests** — Conformance: test_orchestration_chaos.py (~12 tests),
+     test_critic_engine.py (~12 tests). Integration: test_critic_sink.py
+     (~5 tests). E2E: test_chaos_e2e.py (~8 tests). Existing test updates
+     (key counts 16→18 in 4 files).
+
+  10. **Full suite verification** — 551+ tests, 16 guardrails, 0 failures.
+
+  ## Three micro-decisions from plan review
+
+  (a) exhaust_retries field: separate from fail_on_attempts because the
+      semantics differ — fail_on_attempts targets specific (chunk, attempt)
+      pairs, exhaust_retries targets chunk_ids that fail ALL attempts.
+      Mixing them would require sentinel values (e.g. attempt=0 for "all").
+      Separate tuple is cleaner.
+
+  (b) technical_debt section in sufficiency report: documents that
+      agent.identity is registered with engine="planning" but produced by
+      BOTH planning and critic engines. This is deliberate — the key is
+      generic agent metadata, the registration is historical. Deferred to
+      Phase 17+ when agent.* namespace expands to 3+ keys.
+
+  (c) FailureInjectionConfig uses constructor parameter, not separate class.
+      StubOrchestrationEngine.__init__ accepts config: OrchestrationConfig |
+      None = None. No config = Phase 15 behavior unchanged. This preserves
+      backward compatibility and avoids duplicating 100 lines of stub code.
+
+# ── 3. Rationale ──────────────────────────────────────────────────────
+
+rationale: |
+  ## Why FailureInjectionConfig is a constructor parameter, not a separate class?
+
+  Creating a `FaultyOrchestrationEngine` subclass would duplicate ~100 lines
+  of _simulate_branch logic. The only difference is "sometimes fail" — a
+  boolean flag and a retry loop. A config parameter is the minimum change
+  that achieves the goal: same stub, same determinism, configurable chaos.
+
+  Determinism is critical: FailureInjectionConfig uses explicit (chunk_id,
+  attempt) tuples, not random failure rates. Same config → same output.
+  This makes tests repeatable and debugging tractable.
+
+  ## Why exhaust_retries is a separate field from fail_on_attempts?
+
+  fail_on_attempts: "chunk c003 fails on attempt 1, succeeds on attempt 2"
+  exhaust_retries: "chunk c005 fails on ALL attempts (1, 2, 3)"
+
+  These are semantically different operations. Merging them would require
+  a sentinel (e.g. attempt=-1 meaning "all") which is less explicit.
+  Separate fields make the config self-documenting: you can see at a glance
+  which items will recover and which will exhaust.
+
+  exhaust_retries is essential for testing the error terminal path. Without
+  it, every failure eventually succeeds — we can't verify that the system
+  handles permanent failure gracefully.
+
+  ## Why a separate Critic engine, not embedded critic logic in orchestration?
+
+  Three reasons:
+  1. Engine protocol reusability: if we can add a third engine by following
+     the established pattern (identity.py + stub.py + __init__.py + guardrail),
+     the engine protocol is validated as reusable. Embedding critic logic in
+     orchestration tests nothing about engine extensibility.
+  2. Independent guardrail: critic_engine_contract follows the same dual-check
+     pattern as planning_engine_contract. Each engine's contract is independently
+     verifiable — no cross-engine coupling in guardrails.
+  3. Clean namespace: critic.* keys are owned by the critic engine. Embedding
+     them in orchestration would blur the ownership boundary.
+
+  ## Why critic.score + critic.verdict (not more, not fewer)?
+
+  Two keys is the minimum to establish a critic.* namespace:
+  - critic.score (float): quantitative assessment
+  - critic.verdict (str): qualitative decision
+
+  One key would be a degenerate namespace (no disambiguation needed).
+  Three+ keys would be over-designing before we know what the critic needs.
+  Two keys prove the pattern without over-committing.
+
+  ## Why agent.identity stays registered as engine="planning"?
+
+  This is explicit technical debt. The key is generic agent metadata —
+  any engine can produce it. But TRACE_KEY_REGISTRY requires a single
+  engine value. Changing it to engine="" or engine="*" would break the
+  guardrail's engine-based filtering. Adding a second registration for
+  the same key name would be a duplicate key error.
+
+  The cleanest fix (multi-engine key registration) requires a registry
+  schema change: engine: str → engines: list[str]. This is worth doing
+  when agent.* namespace has 3+ keys (Phase 17+), not for one key.
+
+  Phase 16 documents this decision in the sufficiency report's
+  technical_debt section so Phase 17 knows exactly what to refactor.
+
+  ## Why ERROR severity for critic_engine_contract from day one?
+
+  Same rationale as orchestration_trace_completeness (Phase 14) and
+  planning_engine_contract (Phase 15): the critic.* keys are pre-defined,
+  not discovered through exploration. There is no exploratory phase.
+  Any deviation from the 2-key contract is a real error.
+
+  ## Why retry uses asyncio.sleep() with exponential backoff?
+
+  The stub uses asyncio.sleep() for latency simulation (Phase 14 pattern).
+  Retry backoff uses the same mechanism: asyncio.sleep(0.01 * 2^(attempt-1)).
+  This matches the existing concurrency model (asyncio.gather) and avoids
+  introducing threading or synchronous time.sleep().
+
+# ── 4. Alternatives ───────────────────────────────────────────────────
+
+alternatives:
+  - option: "A: Separate FaultyOrchestrationEngine class instead of config parameter"
+    pros: "No change to existing StubOrchestrationEngine, zero risk of breaking Phase 14/15 tests"
+    cons: "Duplicates ~100 lines of _simulate_branch logic. Two classes to maintain. Adding a third variant (e.g. timeout injection) would require a fourth class. Violates DRY."
+
+  - option: "B: Random failure injection (e.g. 20% failure rate per chunk)"
+    pros: "More 'realistic' — matches production failure patterns"
+    cons: "Non-deterministic tests. CI flakiness. Cannot assert specific retry_count values. Debugging hell: 'it passed last time'. Explicit tuples are testable, random rates are not."
+
+  - option: "C: Embed critic logic in StubOrchestrationEngine (no separate engine)"
+    pros: "Fewer files, simpler dependency graph, no new engine registration"
+    cons: "Doesn't validate engine protocol reusability. No independent guardrail. Critics.* keys would be orchestration-owned — semantically wrong. Misses the multi-agent coexistence validation."
+
+  - option: "D: Full Multi-Agent System with cross-agent communication"
+    pros: "Most realistic, exercises agent-to-agent protocol"
+    cons: "Over-engineered for Phase 16. Cross-agent communication requires message passing, routing, capability discovery — 500+ LOC. Premature without first validating that two agents can simply coexist."
+
+  - option: "E: Skip exhaust_retries — only test recoverable failures"
+    pros: "Simpler FailureInjectionConfig (one field instead of two)"
+    cons: "Cannot test the error terminal path. retry_count would always recover — we'd never verify that permanent failure produces correct error metadata. Half the retry semantics remain untested."
+
+  - option: "F: Change agent.identity registration to engine='' or add duplicate entry"
+    pros: "Accurate representation of multi-engine usage"
+    cons: "Empty engine breaks guardrail filtering. Duplicate key name in registry is invalid. Both are hacks. Proper fix (engine: list[str]) requires schema migration — Phase 17 concern."
+
+# ── 5. Evidence ───────────────────────────────────────────────────────
+
+evidence:
+  test_files:
+    - tests/conformance/test_orchestration_chaos.py
+    - tests/conformance/test_critic_engine.py
+    - tests/integration/test_critic_sink.py
+    - tests/e2e/test_chaos_e2e.py
+  test_cases:
+    - TestRetryInjection::test_retry_count_increments_on_injected_failure
+    - TestRetryInjection::test_non_failing_items_retry_count_stays_zero
+    - TestRetryInjection::test_exhaust_retries_produces_error_terminal
+    - TestRetryInjection::test_max_retries_enforced
+    - TestRetryInjection::test_deterministic_injection_same_config_same_output
+    - TestRetryInjection::test_fail_on_attempts_specific_attempt_only
+    - TestMultiPoolRouting::test_resource_pool_key_cpu_on_fast_path
+    - TestMultiPoolRouting::test_resource_pool_key_gpu_on_full_rerank
+    - TestMultiPoolRouting::test_default_pool_when_no_config
+    - TestMultiPoolRouting::test_missing_branch_falls_back_to_default
+    - TestOrchestrationConfigBackwardCompat::test_no_config_same_as_phase_15
+    - TestOrchestrationConfigBackwardCompat::test_retry_count_zero_without_injection
+    - TestOrchestrationConfigBackwardCompat::test_pool_key_default_without_config
+    - TestCriticStubOutput::test_produces_three_items
+    - TestCriticStubOutput::test_critic_score_present_on_all_items
+    - TestCriticStubOutput::test_critic_verdict_present_on_all_items
+    - TestCriticStubOutput::test_agent_identity_present
+    - TestCriticStubOutput::test_last_item_is_terminal
+    - TestCriticTraceKeyTypes::test_score_is_float
+    - TestCriticTraceKeyTypes::test_verdict_is_valid_string
+    - TestCriticTraceKeyTypes::test_agent_identity_is_dict
+    - TestCriticTraceKeyTypes::test_agent_identity_role_is_critic
+    - TestCriticKeyRegistration::test_critic_score_in_registry
+    - TestCriticKeyRegistration::test_critic_verdict_in_registry
+    - TestCriticKeyRegistration::test_both_critic_keys_engine_is_critic
+    - TestSinkCriticKeySeeding::test_critic_keys_seeded_with_correct_engine
+    - TestSinkCriticKeySeeding::test_critic_keys_component_candidate_false
+    - TestSinkCriticKeySeeding::test_total_keys_after_phase_16_is_18
+    - TestRetryCountE2E::test_retry_count_survives_full_chain_to_sink
+    - TestMultiPoolE2E::test_pool_keys_survive_full_chain
+    - TestMultiAgentE2E::test_planning_and_critic_identities_both_in_sink
+    - TestMultiAgentE2E::test_no_key_collision_between_engines
+    - TestSchemaNoMigration::test_schema_version_stays_at_2
+  benchmark_results: |
+    560 tests pass (517 Phase 15 + 43 Phase 16), 0 failures, 1 skipped, 1 warning.
+    16 guardrails PASSED (15 existing + 1 new: critic_engine_contract).
+    0 external dependencies maintained.
+    Schema version remains at 2 (no DDL migration needed).
+    43 new tests: 14 conformance chaos + 15 conformance critic + 5 integration critic sink + 9 E2E chaos.
+    Sufficiency Report v2: 6/6 keys verified (2 insufficient → verified).
+    First multi-agent coexistence validated (2 agent.identity values, 0 collisions).
+    First full contract validation loop closed: define → stress-test → fix → re-verify.
+
+  # ── Phase 16 Post-Implementation Findings ────────────────────────────
+  # Two issues were fixed during test suite verification. Both reveal
+  # patterns worth documenting for future phases.
+
+  post_implementation_fixes:
+    - issue: "Sink.query_keys() total ≠ len(TRACE_KEY_REGISTRY) — 11 tests failed with 'assert 18 == 15'"
+      root_cause: >
+        SQLiteSink._seed_trace_keys() seeds from BOTH TRACE_KEY_REGISTRY AND
+        COMPONENT_TRACE_KEYS. My initial dynamic reference used only
+        len(TRACE_KEY_REGISTRY), missing the 3 component keys. Historical
+        comments in tests (e.g. "6 engine + 3 component + 6 orchestration
+        + 1 agent = 16") had been encoding this dual-registry total for phases
+        but I replaced them with single-registry references.
+      fix: >
+        Changed all sink.query_keys() total assertions to
+        len(TRACE_KEY_REGISTRY) + len(COMPONENT_TRACE_KEYS).
+        Added COMPONENT_TRACE_KEYS imports to 7 test files.
+        For engine_keys count (component_type IS NULL filter), used
+        len(TRACE_KEY_REGISTRY) alone — correct since component keys have
+        component_type set.
+      lesson: >
+        Dynamic references are better than hardcoded counts, but the reference
+        must match what's actually being counted. sink.query_keys() returns
+        the UNION of two registries — the reference must reflect that.
+        When converting hardcoded counts to dynamic references, verify what
+        the count actually represents (single registry vs union).
+
+    - issue: "replace_all matched only specific variable names — 2 tests still failed with 'assert 18 == 15'"
+      root_cause: >
+        My first replace_all used 'assert count == len(TRACE_KEY_REGISTRY)'
+        as old_string. This matched tests using variable name 'count' but
+        missed tests using 'len(all_keys)' and 'len(keys)'. The same semantic
+        assertion had three different syntactic forms.
+      fix: "Targeted each remaining occurrence individually by surrounding context."
+      lesson: >
+        When doing bulk replacements of hardcoded counts, grep for ALL integer
+        literals matching the current total, not just one variable name pattern.
+        Better: write a helper like _total_keys() that returns the correct
+        sum, so all tests use one reference point.
+
+# ── 6. Future Guidance ────────────────────────────────────────────────
+
+future_guidance:
+
+  # ── Chaos injection patterns ────────────────────────────────────────
+
+  failure_injection_is_config_not_subclass:
+    summary: "Fault injection belongs in constructor config, not separate subclasses"
+    detail: |
+      Creating a FaultyXxxEngine subclass for every variant duplicates
+      engine logic. A FailureInjectionConfig parameter achieves the same
+      goal with minimal code change. This pattern generalizes: any engine
+      stub that needs to simulate failure modes should accept an optional
+      config, not require a parallel class hierarchy.
+
+      The config must be deterministic (explicit tuples, not random rates)
+      to keep tests repeatable.
+    priority: high
+    phase_applicable: "All future stub engines (Phase 17+)"
+
+  exhaust_retries_is_separate_from_fail_on_attempts:
+    summary: "Permanent failure (exhaust_retries) is semantically distinct from transient failure (fail_on_attempts)"
+    detail: |
+      fail_on_attempts: specific (chunk_id, attempt_number) pairs that fail,
+      succeeding on the next attempt. Tests retry recovery.
+
+      exhaust_retries: chunk_ids that fail on ALL attempts, producing error
+      terminal. Tests permanent failure handling.
+
+      These are different test scenarios. Merging them into one field
+      (with sentinel values like attempt=-1) is less explicit and harder
+      to read. Keep them separate.
+    priority: medium
+    phase_applicable: "All future failure injection configs"
+
+  deterministic_injection_over_random_failure:
+    summary: "Failure injection for testing MUST be deterministic — explicit tuples, not probability"
+    detail: |
+      Random failure rates (e.g. "20% chance per chunk") produce non-
+      deterministic tests. CI flakiness, unreproducible failures, unable
+      to assert specific retry_count values. Explicit (chunk_id, attempt)
+      tuples guarantee: same config → same output → same assertions.
+      This is non-negotiable for conformance tests.
+    priority: critical
+    phase_applicable: "All test infrastructure"
+
+  # ── Multi-agent patterns ────────────────────────────────────────────
+
+  stub_engine_protocol_is_reusable:
+    summary: "The engine protocol (identity.py + stub.py + guardrail) is validated as reusable across 3 engine types"
+    detail: |
+      Phase 14: Orchestration engine (6 keys, 2 parallel branches)
+      Phase 15: Planning engine (4 keys + agent.identity, cross-engine consumer)
+      Phase 16: Critic engine (2 keys + agent.identity, result evaluator)
+
+      All three follow the same pattern: frozen identity dataclass, async
+      stub with StreamItems, trace key registration, dual-check guardrail.
+      Adding a fourth engine type should follow the same pattern without
+      architectural changes.
+
+      The pattern's reusability is now evidence-backed, not hypothetical.
+    priority: medium
+    phase_applicable: "Phase 17+ (new engine types)"
+
+  two_agents_coexist_without_key_collision:
+    summary: "Two agents with different agent.identity values coexist cleanly in trace_context — no global namespace conflict"
+    detail: |
+      Planning produces agent.identity = {role: "planning", ...}
+      Critic produces agent.identity = {role: "critic", ...}
+
+      Since trace_context is per-StreamItem (not global), there is no
+      key collision. Each StreamItem carries ONE agent.identity belonging
+      to the engine that produced it. The sink correctly partitions by
+      engine, so querying by engine="planning" returns planning identities
+      and engine="critic" returns critic identities.
+
+      This validates that agent.identity as a shared key name is safe
+      for multi-engine use. The "ownership" question (who registered it)
+      is a registry concern, not a runtime concern.
+    priority: medium
+    phase_applicable: "Phase 17+ (multi-agent communication)"
+
+  # ── Technical debt tracking ─────────────────────────────────────────
+
+  agent_identity_multi_engine_registration_deferred:
+    summary: "agent.identity multi-engine registration model is deferred to Phase 17+"
+    detail: |
+      Current state: agent.identity registered with engine="planning" in
+      TRACE_KEY_REGISTRY, but produced by BOTH planning and critic engines.
+
+      This is explicit technical debt, documented in the Phase 16
+      sufficiency report's technical_debt section. The proper fix:
+      change TraceKeyDef.engine: str → engines: list[str], allowing
+      a single key to be registered for multiple producing engines.
+
+      Deferred because:
+      1. The current model WORKS — no runtime errors, no guardrail violations
+      2. The fix requires registry schema migration + guardrail update
+      3. One key (agent.identity) doesn't justify the migration cost
+      4. Phase 17+ will add agent.capability_manifest, agent.trust_level —
+         at 3+ keys, the migration is justified
+
+      Do NOT add duplicate registry entries or change engine="" as a
+      workaround. Both are hacks that create more problems than they solve.
+    priority: high
+    phase_applicable: "Phase 17+"
+
+  # ── Cross-phase lessons ─────────────────────────────────────────────
+
+  sufficiency_report_loop_is_now_closed:
+    summary: "Phase 15→16 completes the first full sufficiency loop: identify gaps → inject chaos → re-verify → 6/6"
+    detail: |
+      Phase 14: 6 orchestration keys defined (hypothesis)
+      Phase 15: Reverse stress test → 4/6 verified, 2 insufficient (measurement)
+      Phase 16: Chaos injection → 6/6 verified (validation)
+
+      This is the template for all future contract validation:
+      1. Define keys on paper (pre-design phase)
+      2. Implement stub producing those keys
+      3. Build a consumer that stress-tests the contract
+      4. Produce sufficiency report identifying gaps
+      5. Inject the missing scenarios (chaos, multi-pool, multi-agent)
+      6. Re-verify → all keys semantically validated
+
+      The loop transforms trace keys from "structurally present" to
+      "behaviorally verified." This is the difference between a key
+      that EXISTS and a key that has been PROVEN to capture the right
+      information under stress.
+    priority: medium
+    phase_applicable: "All future contract validation phases"
+
+  # ── Post-implementation operational lessons ─────────────────────────
+
+  dual_registry_reference_for_sink_totals:
+    summary: "sink.query_keys() returns UNION of TRACE_KEY_REGISTRY + COMPONENT_TRACE_KEYS — dynamic references must reflect this"
+    detail: |
+      SQLiteSink._seed_trace_keys() populates the trace_keys table from
+      TWO sources: TRACE_KEY_REGISTRY (engine keys) and COMPONENT_TRACE_KEYS
+      (component contract keys). Therefore:
+
+      - sink.query_keys() total = len(TRACE_KEY_REGISTRY) + len(COMPONENT_TRACE_KEYS)
+      - engine-only count (component_type IS NULL) = len(TRACE_KEY_REGISTRY)
+      - component_candidate count = unchanged by engine key additions
+
+      When converting hardcoded counts to dynamic references, first verify
+      WHAT is being counted. Historical comments in tests often encode this
+      distinction (e.g. "6 engine + 3 component + 6 orchestration + 1 agent").
+    priority: high
+    phase_applicable: "All future key additions"
+
+  critic_namespace_minimum_viable_two_keys:
+    summary: "Two keys (score + verdict) is the minimum viable namespace — one key is degenerate, three is over-design"
+    detail: |
+      A namespace with one key needs no disambiguation (you always know
+      which key "critic.*" refers to). Two keys proves the namespace
+      pattern works: both share the "critic." prefix, both are owned by
+      the same engine, both are validated by the same guardrail.
+
+      Future critic.* keys (critic.rubric, critic.confidence, critic.dissent)
+      can be added without architectural changes — just register in
+      TRACE_KEY_REGISTRY and the guardrail auto-detects them.
+    priority: low
+    phase_applicable: "Phase 17+ (critic expansion)"
+
+anti_patterns:
+  - "Creating a separate FaultyOrchestrationEngine class: duplicates 100 lines. Use OrchestrationConfig constructor parameter instead."
+  - "Hardcoding retry_count > 0 assertions without failure injection: the test must actually trigger a failure. Mocking retry_count without a failure path is self-deception."
+  - "Registering agent.identity twice for critic engine: currently registered with engine='planning'. Phase 16 accepts this as technical debt — the key is generic, the registration is historical."
+  - "Creating validate_critic_trace() peer: single-engine contracts use guardrails + conformance tests. Cross-engine contracts need validators."
+  - "Random failure injection: non-deterministic tests are debugging hell. Use FailureInjectionConfig with explicit (chunk_id, attempt) tuples."
+  - "Thread-based retry simulation: use asyncio.sleep() — matches existing stub patterns and asyncio.gather() concurrency model."
+  - "Hardcoded key counts (18) in tests: reference len(TRACE_KEY_REGISTRY) dynamically. Phase 15 lesson confirmed by 3 missed hardcoded counts."
+  - "Schema migration for critic engine: trace_keys table TEXT engine column supports any engine name. No DDL change needed."
+  - "Embedding critic logic in orchestration stub: misses the multi-agent coexistence validation and engine protocol reusability proof."
+  - "Merging exhaust_retries into fail_on_attempts with sentinel values: the two failure modes are semantically distinct. Separate fields are self-documenting."
+  - "Adding agent.identity duplicate entry in TRACE_KEY_REGISTRY for critic: dict keys must be unique. Proper fix is engine: list[str] in Phase 17+."
+  - "Using len(TRACE_KEY_REGISTRY) alone for sink.query_keys() total: the sink seeds from BOTH registries. Use len(TRACE_KEY_REGISTRY) + len(COMPONENT_TRACE_KEYS)."
+  - "Assuming replace_all with one variable name catches all hardcoded counts: tests use different variable names (count, len(all_keys), len(keys)) for the same value. Grep for all integer literals matching the current total."

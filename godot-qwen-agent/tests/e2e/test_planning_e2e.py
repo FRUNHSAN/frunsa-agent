@@ -13,6 +13,7 @@ import tempfile
 
 import pytest
 
+from core.contracts.trace_keys import COMPONENT_TRACE_KEYS
 from core.observability.sink_schema import CURRENT_SCHEMA_VERSION
 from core.observability.sqlite_sink import SQLiteTraceSink
 from core.observability.trace_registry import TRACE_KEY_REGISTRY
@@ -157,7 +158,7 @@ class TestPlanningSchemaNoMigration:
 
 
 class TestPlanningSeedCount:
-    """Seed count: 16 total (6 engine + 3 component + 6 orchestration + 1 agent)."""
+    """Seed count is dynamic — all keys from TRACE_KEY_REGISTRY."""
 
     def test_total_seed_count_is_16(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -165,7 +166,7 @@ class TestPlanningSeedCount:
             sink = SQLiteTraceSink(path)
             try:
                 all_keys = sink.query_keys()
-                assert len(all_keys) == 16
+                assert len(all_keys) == len(TRACE_KEY_REGISTRY) + len(COMPONENT_TRACE_KEYS)
             finally:
                 sink.close()
 

@@ -13,7 +13,7 @@
 # Schema: schemas/reasoning_chain.schema.json
 
 library_version: 1
-last_updated: "2026-05-25T16:00:00Z"
+last_updated: "2026-05-25T20:00:00Z"
 
 # ── Chains by architectural layer ────────────────────────────────────
 
@@ -162,6 +162,14 @@ chains:
     tags: [planning, engine, agent_identity, namespace, sufficiency_report, stress_test, orchestration_contract]
     status: active
 
+  # ── Chaos injection + Multi-agent foundation ──
+  - chain_id: phase_16_chaos_multi_agent
+    file: chains/phase_16_chaos_multi_agent.yaml
+    title: "Chaos Injection + Multi-Agent Foundation: 编排合约语义验证闭环"
+    layer: engine
+    tags: [orchestration, chaos, retry, multi_pool, multi_agent, critic, engine, sufficiency_report]
+    status: active
+
 # ── Tag index for quick lookup ───────────────────────────────────────
 
 tag_index:
@@ -208,9 +216,14 @@ tag_index:
   planning: [phase_10_planning_engine_selection, phase_15_planning_engine]
   agent_identity: [phase_15_planning_engine]
   namespace: [phase_15_planning_engine]
-  sufficiency_report: [phase_15_planning_engine]
+  sufficiency_report: [phase_15_planning_engine, phase_16_chaos_multi_agent]
   stress_test: [phase_15_planning_engine]
   orchestration_contract: [phase_15_planning_engine]
+  chaos: [phase_16_chaos_multi_agent]
+  retry: [phase_16_chaos_multi_agent]
+  multi_pool: [phase_16_chaos_multi_agent]
+  multi_agent: [phase_16_chaos_multi_agent]
+  critic: [phase_16_chaos_multi_agent]
   engine_selection: [phase_10_planning_engine_selection]
   adapter_validation: [phase_10_planning_engine_selection]
   contract_testing: [phase_10_planning_engine_selection]
@@ -231,7 +244,7 @@ tag_index:
   component_analysis: [phase_12_observability_closed_loop]
   orchestration_pre_design: [phase_12_observability_closed_loop, phase_12_orchestration_trace_pre_design]
   observability_closed_loop: [phase_12_observability_closed_loop, phase_12_orchestration_trace_pre_design]
-  orchestration: [phase_12_orchestration_trace_pre_design, phase_14_orchestration_engine]
+  orchestration: [phase_12_orchestration_trace_pre_design, phase_14_orchestration_engine, phase_16_chaos_multi_agent]
   trace_keys: [phase_12_orchestration_trace_pre_design, phase_13_component_trace_contracts]
   pre_design: [phase_12_orchestration_trace_pre_design]
   schema_planning: [phase_12_orchestration_trace_pre_design]

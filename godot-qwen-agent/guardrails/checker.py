@@ -9,6 +9,7 @@ from guardrails.report import CheckReport, Severity, Violation
 from guardrails.rules import (
     component_registration_coverage,
     component_trace_completeness,
+    critic_engine_contract,
     cross_platform_imports,
     engine_interface_purity,
     frozen_dataclass_integrity,
@@ -45,6 +46,7 @@ class GuardrailChecker:
             "component-trace-completeness": component_trace_completeness,
             "orchestration-trace-completeness": orchestration_trace_completeness,
             "planning-engine-contract": planning_engine_contract,
+            "critic-engine-contract": critic_engine_contract,
             "trace-key-registration": trace_key_registration,
             "sink-schema-consistency": sink_schema_consistency,
         }

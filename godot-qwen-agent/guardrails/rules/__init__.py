@@ -15,6 +15,7 @@ from guardrails.rules.component_trace_completeness import component_trace_comple
 from guardrails.rules.orchestration_trace_completeness import orchestration_trace_completeness
 from guardrails.rules.trace_key_registration import trace_key_registration
 from guardrails.rules.planning_engine_contract import planning_engine_contract
+from guardrails.rules.critic_engine_contract import critic_engine_contract
 
 __all__ = [
     "cross_platform_imports",
@@ -31,5 +32,6 @@ __all__ = [
     "orchestration_trace_completeness",
     "trace_key_registration",
     "planning_engine_contract",
+    "critic_engine_contract",
     "sink_schema_consistency",
 ]
