@@ -1,0 +1,54 @@
+{
+  "_description": "Sample chunks from Godot Engine documentation — 5 entries for schema demonstration only. Full dataset available upon request.",
+  "_source": "Godot Engine 4.x Official Documentation (https://docs.godotengine.org/)",
+  "_license": "MIT (Godot Documentation)",
+  "_chunking_strategy": "level1_hierarchical__fixed_length_512_overlap_64",
+  "_chunk_key": "godot_en__level1__a5770051",
+  "samples": [
+    {
+      "chunk_id": "godot_en__level1__a5770051_0000",
+      "source": "godot-docs/getting_started/step_by_step",
+      "level": 1,
+      "char_offset": 0,
+      "chunk_size": 512,
+      "overlap": 64,
+      "text": "Nodes are Godot's building blocks. They can be assigned as the child of another node, resulting in a tree arrangement. A given node can contain any number of nodes as children. All nodes in a tree act as a group, so modifications to a parent node affect all its children."
+    },
+    {
+      "chunk_id": "godot_en__level1__a5770051_0001",
+      "source": "godot-docs/getting_started/step_by_step",
+      "level": 1,
+      "char_offset": 512,
+      "chunk_size": 512,
+      "overlap": 64,
+      "text": "Scenes are collections of nodes. They are the templates from which all gameplay objects are created. A scene is a tree of nodes. Once saved to disk, scenes can be instanced into other scenes. This allows for very high flexibility in the architecture of your projects."
+    },
+    {
+      "chunk_id": "godot_en__level1__a5770051_0002",
+      "source": "godot-docs/tutorials/scripting/gdscript",
+      "level": 1,
+      "char_offset": 0,
+      "chunk_size": 512,
+      "overlap": 64,
+      "text": "GDScript is a high-level, object-oriented programming language built specifically for Godot. Its syntax is heavily inspired by Python. It is designed to be tightly integrated with Godot's scene system and provides direct access to engine internals with minimal overhead."
+    },
+    {
+      "chunk_id": "godot_en__level1__a5770051_0003",
+      "source": "godot-docs/classes/class_@globalscope",
+      "level": 1,
+      "char_offset": 0,
+      "chunk_size": 512,
+      "overlap": 64,
+      "text": "The @GlobalScope class contains global functions and enumerations available in every script. This includes mathematical functions like sin(), cos(), and randf(), as well as type conversion utilities like int(), float(), and str(). These functions do not require any import or object reference."
+    },
+    {
+      "chunk_id": "godot_en__level1__a5770051_0004",
+      "source": "godot-docs/tutorials/physics/physics_introduction",
+      "level": 1,
+      "char_offset": 256,
+      "chunk_size": 512,
+      "overlap": 64,
+      "text": "Godot provides several physics bodies: StaticBody2D/3D for non-moving objects, RigidBody2D/3D for physics-driven objects, CharacterBody2D/3D for player-controlled characters, and Area2D/3D for detection zones. Each body type serves a specific use case and has different performance characteristics."
+    }
+  ]
+}

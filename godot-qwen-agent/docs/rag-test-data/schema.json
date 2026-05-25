@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://frunsa-agent.local/schemas/rag-chunk.schema.json",
+  "title": "RAG Chunk & Mapping Schema",
+  "description": "Data contract for the RAG embedding benchmark pipeline: defines chunk structure, mapping format, and embedding metadata.",
+
+  "definitions": {
+    "Chunk": {
+      "type": "object",
+      "required": ["chunk_id", "source", "text"],
+      "properties": {
+        "chunk_id": {
+          "type": "string",
+          "description": "Unique identifier: {source_id}__{strategy}__{hash}_{seq}",
+          "examples": ["godot_en__level1__a5770051_0000"]
+        },
+        "source": {
+          "type": "string",
+          "description": "Document source path relative to knowledge root"
+        },
+        "level": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Document hierarchy level (0=root, 1=top-level section)"
+        },
+        "char_offset": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Character offset within source document"
+        },
+        "chunk_size": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Chunk size in characters"
+        },
+        "overlap": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Overlap with previous chunk in characters"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Chunk text content"
+        }
+      }
+    },
+
+    "ChunkConfig": {
+      "type": "object",
+      "required": ["source_id", "chunking_strategy", "chunking_params_hash", "chunk_dir", "created_at"],
+      "properties": {
+        "source_id": {
+          "type": "string",
+          "description": "Knowledge source identifier (e.g. 'godot_en')"
+        },
+        "chunking_strategy": {
+          "type": "string",
+          "description": "Chunking strategy name (e.g. 'level1_hierarchical')"
+        },
+        "chunking_params_hash": {
+          "type": "string",
+          "description": "Deterministic hash of chunking parameters for cache validation"
+        },
+        "chunk_dir": {
+          "type": "string",
+          "description": "Relative path to chunk storage directory"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 timestamp of chunk creation"
+        }
+      }
+    },
+
+    "EmbeddingConfig": {
+      "type": "object",
+      "required": ["chunk_key", "model_name", "embed_dir", "created_at"],
+      "properties": {
+        "chunk_key": {
+          "type": "string",
+          "description": "Reference to the source ChunkConfig key"
+        },
+        "model_name": {
+          "type": "string",
+          "description": "Embedding model identifier (e.g. 'BAAI/bge-m3')"
+        },
+        "embed_dir": {
+          "type": "string",
+          "description": "Relative path to embedding storage directory"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+
+    "MappingFile": {
+      "type": "object",
+      "required": ["chunks", "embeddings", "metadata"],
+      "properties": {
+        "chunks": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/definitions/ChunkConfig" },
+          "description": "Map of chunk_key → ChunkConfig"
+        },
+        "embeddings": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/definitions/EmbeddingConfig" },
+          "description": "Map of embed_key (chunk_key__model_safe) → EmbeddingConfig"
+        },
+        "metadata": {
+          "type": "object",
+          "properties": {
+            "total_sources": { "type": "integer" },
+            "total_chunks": { "type": "integer" },
+            "embedding_models_used": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "pipeline_version": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}
