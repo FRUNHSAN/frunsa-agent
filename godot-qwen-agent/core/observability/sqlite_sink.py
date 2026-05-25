@@ -494,7 +494,7 @@ class SQLiteTraceSink:
         from core.observability.trace_registry import TRACE_KEY_REGISTRY
 
         orchestration_key_names = {
-            k for k, v in TRACE_KEY_REGISTRY.items() if v.engine == "orchestration"
+            k for k, v in TRACE_KEY_REGISTRY.items() if "orchestration" in v.engines
         }
         existing_orch = self._conn.execute(
             f"SELECT key_name FROM {TRACE_KEYS_TABLE_NAME} WHERE engine = ?",

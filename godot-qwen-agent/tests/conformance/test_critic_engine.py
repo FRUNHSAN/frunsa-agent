@@ -115,8 +115,8 @@ class TestCriticKeyRegistration:
 
     def test_both_critic_keys_engine_is_critic(self):
         for key in ("critic.score", "critic.verdict"):
-            assert TRACE_KEY_REGISTRY[key].engine == "critic", (
-                f"{key} engine should be 'critic', got {TRACE_KEY_REGISTRY[key].engine}"
+            assert "critic" in TRACE_KEY_REGISTRY[key].engines, (
+                f"{key} engines should include 'critic', got {TRACE_KEY_REGISTRY[key].engines}"
             )
 
     def test_critic_keys_not_component_candidates(self):
@@ -124,6 +124,14 @@ class TestCriticKeyRegistration:
             assert TRACE_KEY_REGISTRY[key].component_candidate == False, (
                 f"{key} should not be component_candidate"
             )
+
+    def test_agent_identity_registered_to_critic(self):
+        """Phase 17: agent.identity is multi-engine, includes critic."""
+        assert "agent.identity" in TRACE_KEY_REGISTRY
+        key_def = TRACE_KEY_REGISTRY["agent.identity"]
+        assert "critic" in key_def.engines, (
+            f"agent.identity engines={key_def.engines}, expected 'critic' to be included"
+        )
 
 
 # ── TestCriticAgentIdentity ─────────────────────────────────────────────

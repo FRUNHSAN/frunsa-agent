@@ -29,7 +29,7 @@ def _load_planning_keys() -> Set[str]:
 
         return {
             k for k, v in TRACE_KEY_REGISTRY.items()
-            if v.engine == "planning"
+            if "planning" in v.engines
         }
     except ImportError:
         return set()

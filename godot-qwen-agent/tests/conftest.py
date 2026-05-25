@@ -1,13 +1,28 @@
 """Pytest configuration for the agent platform test suite.
 
 Phase 8.0: --guardrails flag runs architectural invariant checks at session start.
+Phase 17: async_run helper for running async generators in sync tests.
 """
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
+from typing import AsyncIterator, List, TypeVar
 
 import pytest
+
+T = TypeVar("T")
+
+
+def async_collect(agen: AsyncIterator[T]) -> List[T]:
+    """Collect all items from an async generator into a list (sync wrapper)."""
+    async def _collect() -> List[T]:
+        items: List[T] = []
+        async for item in agen:
+            items.append(item)
+        return items
+    return asyncio.run(_collect())
 
 
 @pytest.fixture

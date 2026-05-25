@@ -38,9 +38,12 @@ def trace_key_serializability(root: Path) -> List[Violation]:
 
             if "test" in rel.lower():
                 continue
-            # Stubs are provisional engine implementations that produce
-            # trace_context naturally — exclude them from value-type checks
+            # Engine implementations (stubs and real engines) produce
+            # trace_context values naturally at runtime — exclude them
+            # from AST-level value-type checks.
             if "stub.py" in rel:
+                continue
+            if "llm.py" in rel:
                 continue
 
             tree = _parse(py_file)

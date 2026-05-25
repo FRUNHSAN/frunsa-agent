@@ -489,22 +489,23 @@ class TestTraceRegistryIntegrity:
             assert "." in key, f"Registry key '{key}' lacks dot separator"
             prefix, suffix = key.split(".", 1)
             if prefix == "agent":
-                # agent.* keys: namespace="agent", owned by planning engine
-                assert defn.engine == "planning", (
-                    f"Key '{key}' has agent prefix but engine='{defn.engine}', expected 'planning'"
+                # agent.* keys: namespace="agent", may be multi-engine
+                assert "planning" in defn.engines, (
+                    f"Key '{key}' has agent prefix but engines={defn.engines}, "
+                    f"expected 'planning' to be included"
                 )
             else:
-                assert prefix == defn.engine, (
-                    f"Key '{key}' has prefix '{prefix}' but engine field is '{defn.engine}'"
+                assert prefix == defn.engines[0], (
+                    f"Key '{key}' has prefix '{prefix}' but engines[0] is '{defn.engines[0]}'"
                 )
             assert len(suffix) > 0, f"Key '{key}' has empty suffix after prefix"
 
     def test_registry_defs_are_complete(self):
-        """Each TraceKeyDef has non-empty type, semantics, engine fields."""
+        """Each TraceKeyDef has non-empty type, semantics, engines fields."""
         for key, defn in TRACE_KEY_REGISTRY.items():
             assert defn.type is not None, f"Key '{key}' has no type"
             assert defn.semantics, f"Key '{key}' has empty semantics"
-            assert defn.engine, f"Key '{key}' has empty engine"
+            assert defn.engines, f"Key '{key}' has empty engines"
 
     def test_registry_covers_all_stub_outputs(self):
         """Every trace_context key produced by N=3 stubs is registered.

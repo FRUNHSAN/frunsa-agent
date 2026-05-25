@@ -1,0 +1,180 @@
+# ── Phase 17: Tech Debt Resolution + Real LLM Planning Engine ────────────
+#
+# Task 1: agent.identity multi-engine registration refactor
+# Task 2: First real LLM-backed Planning Engine (while preserving stub)
+#
+# Serial execution: Task 1 (internal, 560 test safety net) → Task 2 (external dep)
+
+chain_id: phase_17_tech_debt_real_engine
+title: "Phase 17: Tech Debt Resolution + Real LLM Planning Engine"
+status: active
+created_at: "2026-05-25T20:00:00Z"
+tags:
+  - api_evolution
+  - adapter_reuse
+  - deterministic_mock
+  - stub_reference
+  - multi_engine_registry
+  - real_engine
+  - backward_compat
+  - agent_registry_refactor
+
+# ── Context ────────────────────────────────────────────────────────────────
+
+context: |
+  Phase 14-16 closed the orchestration contract loop (6/6 FULLY SUFFICIENT).
+  Phase 17 executes two independent tasks serially:
+
+  Task 1 — Resolve agent.identity multi-engine registration technical debt.
+  TraceKeyDef.engine: str → engines: list[str] with backward-compatible
+  @property alias. agent.identity becomes engines=["planning", "critic"].
+  All guardrail filters updated from v.engine == "X" → "X" in v.engines.
+  critic_engine_contract now enforces agent.identity for critic engine.
+
+  Task 2 — Introduce LLMPlanningEngine, the first real LLM-backed
+  Planning Engine. Reuses GenerationAdapter rather than calling LLM SDK
+  directly. Includes MockLLMBackend for deterministic CI testing.
+  StubPlanningEngine untouched — both coexist as Protocol implementations.
+
+  Task boundary is explicit: Task 1 runs first, full suite verified,
+  then Task 2 proceeds. This isolates variables — if something breaks
+  after Task 2, we know it's the LLM API, not the refactor.
+
+# ── Decision ────────────────────────────────────────────────────────────────
+
+decision: |
+  Two architectural decisions, one for each task:
+
+  1. TraceKeyDef field evolution:
+     engine: str → engines: list[str] + @property engine → engines[0].
+     This is the minimal-change approach. Zero breakage — all existing
+     .engine access continues to work via the property alias. Future
+     multi-engine keys just add to the list. No new dataclass, no
+     registry split, no engine="*" sentinel.
+
+  2. Real Planning Engine integration:
+     LLMPlanningEngine reuses GenerationAdapter (existing) rather than
+     calling OpenAI/Anthropic SDK directly. The adapter already provides
+     DependencyCallTrace injection, timeout enforcement, credential
+     isolation via ResourceContainer, and token tracking. Direct SDK
+     calls would duplicate all of these — violating DRY and observability
+     invariants (Phase 5, Phase 7).
+
+rationale: |
+  Task 1 rationale:
+  - agent.identity is the only multi-engine key today, but more will come.
+    Fixing the data model now (rather than waiting for 3+ agent.* keys)
+    means the pattern is proven before it's load-bearing.
+  - The @property alias pattern is a well-known API evolution technique.
+    Zero breakage, zero migration, immediate benefits.
+  - critic_engine_contract was intentionally incomplete (Phase 16 documented
+    this as technical debt). With engines=["planning", "critic"], the
+    guardrail can now properly enforce agent.identity for critic.
+
+  Task 2 rationale:
+  - GenerationAdapter encapsulates 4 architectural invariants
+    (tracing, timeout, credentials, tokens). Reusing it is DRY.
+  - MockLLMBackend follows the Phase 7 pattern: frozen dataclass with
+    round-robin responses. Deterministic, CI-stable.
+  - StubPlanningEngine remains untouched — fast reference implementation
+    for tests that don't need LLM calls.
+  - No new trace keys. The 18 existing keys are sufficient for the first
+    real engine. Semantic gaps are documented in Sufficiency Report v3.
+
+# ── Alternatives ────────────────────────────────────────────────────────────
+
+alternatives:
+  - option: "Separate MultiEngineKeyDef class for multi-engine keys"
+    pros: "Clear type distinction between single and multi-engine keys"
+    cons: "Over-engineering for 1 key. Creates two code paths for guardrail filters. Adding a third engine to agent.identity would still touch the same single line. Minimal-change approach is simpler."
+
+  - option: "engine: Optional[str] or empty string sentinel for multi-engine"
+    pros: "Avoids list type entirely, minimal field change"
+    cons: "Breaks all guardrail filters that check v.engine == 'X'. Empty string means 'no engine'. Optional means every consumer must handle None. Loses engine provenance entirely."
+
+  - option: "Direct OpenAI/Anthropic SDK calls in LLMPlanningEngine"
+    pros: "Simpler import graph, no adapter dependency"
+    cons: "Duplicates DependencyCallTrace injection (violating Phase 4 invariant). Duplicates timeout handling (Phase 5). Duplicates credential isolation (Phase 5). Duplicates token tracking. Every future real engine would duplicate the same logic."
+
+  - option: "New LLMPlanningAdapter class parallel to GenerationAdapter"
+    pros: "Planning-specific interface could be cleaner"
+    cons: "Creates parallel adapter hierarchy. Every new engine type would need its own adapter. Violates DRY — GenerationAdapter already handles all LLM backends."
+
+# ── Evidence ────────────────────────────────────────────────────────────────
+
+evidence:
+  test_files:
+    - tests/conformance/test_planning_engine.py
+    - tests/conformance/test_critic_engine.py
+    - tests/conformance/test_orchestration_trace.py
+    - tests/e2e/test_trace_serialization.py
+  test_cases:
+    - "TestPlanningKeyRegistration: all 5 planning keys in registry via v.engines filter"
+    - "TestCriticKeyRegistration: critic keys + agent.identity registered to critic"
+    - "TestOrchestrationKeyRegistration: 6 orchestration keys via v.engines filter"
+    - "test_registry_defs_complete: defn.engines truthiness check"
+  benchmark_results: "560 tests, 0 failures, 16 guardrails (Task 1 baseline)"
+
+# ── Future Guidance ─────────────────────────────────────────────────────────
+
+future_guidance:
+
+  api_evolution_backward_compat_property:
+    summary: "When evolving core registry fields (str → list), use @property aliases to maintain zero-breakage backward compatibility during transition."
+    detail: "TraceKeyDef.engine: str → engines: list[str] added a @property engine returning engines[0]. All existing .engine access continues to work. This pattern generalizes to any frozen dataclass field type evolution. The key insight: add the new field alongside a read-only property mapping the old field name to the new one. Zero test changes needed at call sites."
+    priority: high
+
+  real_engine_adapter_reuse:
+    summary: "Real LLM engines MUST reuse GenerationAdapter rather than calling SDKs directly."
+    detail: "GenerationAdapter already provides DependencyCallTrace injection, timeout enforcement, credential isolation via ResourceContainer, and cumulative_tokens tracking. Direct SDK calls would duplicate 4 architectural invariants and violate Phase 5 (External I/O) and Phase 7 (LLM Risks) patterns. The adapter is the canonical LLM interface for ALL engines."
+    priority: critical
+
+  deterministic_mock_backend:
+    summary: "Non-deterministic LLM outputs break CI. Use frozen dataclass MockLLMBackend with round-robin responses for deterministic testing."
+    detail: "MockLLMBackend implements GenerationBackend Protocol with pre-canned responses cycled via _call_count % len(responses). Frozen dataclass with _call_count mutation via object.__setattr__ (Phase 7 pattern). This guarantees CI stability while testing the full Protocol→Adapter→Engine→Sink chain."
+    priority: high
+
+  stub_as_canonical_reference:
+    summary: "StubPlanningEngine remains the fast, deterministic reference implementation. LLMPlanningEngine is an independent peer, not a replacement."
+    detail: "Both engines implement PlanningEngine Protocol and produce identical trace_context keys. Stub is for fast CI testing and contract validation. LLM engine is for production use. This pattern — stub as canonical reference, real engine as independent peer — should be followed for all future engines (orchestration, critic)."
+    priority: medium
+
+  no_new_trace_keys_for_real_engine:
+    summary: "First real engine must operate within existing 18 trace keys."
+    detail: "Before adding new trace keys for real-engine behavior (e.g. llm.model_name, llm.temperature), the existing 18 keys must be proven sufficient via production trace data. Semantic gaps are documented in Sufficiency Report v3, not immediately added. This prevents speculative key proliferation — keys must earn their place through observed need, not anticipated need."
+    priority: high
+
+  serial_execution_isolation:
+    summary: "Complete all internal refactors before introducing external dependencies."
+    detail: "When a phase has both internal refactoring and external dependency work, do the internal part first and verify the full suite. This isolates variables — if something breaks after introducing the external dependency, you know with certainty it's the integration, not the refactor. Parallel execution of independent internal+external tasks loses this diagnostic clarity."
+    priority: medium
+
+# ── Anti-Patterns ───────────────────────────────────────────────────────────
+
+anti_patterns:
+  - "Creating a separate FaultyOrchestrationEngine class instead of using config injection — duplicates code, creates parallel maintenance burden."
+  - "Hardcoding API keys in engine constructors — credentials come from ResourceContainer via GenerationAdapter (Phase 5 pattern)."
+  - "Using synchronous requests.post() in an async engine — all LLM calls go through GenerationAdapter.generate() which uses run_in_executor (Phase 7 pattern)."
+  - "Modifying StubPlanningEngine when adding LLMPlanningEngine — stub is the fast deterministic reference, both coexist as independent Protocol implementations."
+  - "Creating two dict entries for agent.identity (one per engine) — dict keys must be unique. Use engines: list[str] instead, with the @property backward-compat pattern."
+  - "Adding new trace keys before validating semantic gaps via Sufficiency Report — first real engine operates within existing 18 keys. Keys must earn their place through observed need."
+
+# ── Benchmark Results ───────────────────────────────────────────────────────
+
+benchmark_results:
+  test_count: 597
+  new_tests: 36
+  failures: 0
+  guardrails: 16
+  guardrails_passed: true
+  schema_version: 2
+  engines: 3
+  trace_keys: 18
+  task_1_changes:
+    files_changed: 11
+    loc_changed: ~80
+    key_finding: "Zero breakage — @property engine backward compat eliminated all existing test changes at call sites"
+  task_2_changes:
+    files_created: 4
+    loc_created: ~860
+    key_finding: "LLMPlanningEngine matches StubPlanningEngine trace key shape, proves engine Protocol reusability for 3rd engine"

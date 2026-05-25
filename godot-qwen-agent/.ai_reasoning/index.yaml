@@ -13,7 +13,7 @@
 # Schema: schemas/reasoning_chain.schema.json
 
 library_version: 1
-last_updated: "2026-05-25T20:00:00Z"
+last_updated: "2026-05-25T20:30:00Z"
 
 # ── Chains by architectural layer ────────────────────────────────────
 
@@ -162,6 +162,14 @@ chains:
     tags: [planning, engine, agent_identity, namespace, sufficiency_report, stress_test, orchestration_contract]
     status: active
 
+  # ── Tech debt resolution + Real engine ──
+  - chain_id: phase_17_tech_debt_real_engine
+    file: chains/phase_17_tech_debt_real_engine.yaml
+    title: "Tech Debt Resolution + Real LLM Planning Engine"
+    layer: engine
+    tags: [api_evolution, adapter_reuse, deterministic_mock, stub_reference, multi_engine_registry, real_engine, backward_compat, agent_registry_refactor]
+    status: active
+
   # ── Chaos injection + Multi-agent foundation ──
   - chain_id: phase_16_chaos_multi_agent
     file: chains/phase_16_chaos_multi_agent.yaml
@@ -253,3 +261,11 @@ tag_index:
   engine_mapping: [phase_13_component_trace_contracts]
   ast_scanning: [phase_14_orchestration_engine]
   stub: [phase_14_orchestration_engine]
+  api_evolution: [phase_17_tech_debt_real_engine]
+  adapter_reuse: [phase_17_tech_debt_real_engine]
+  deterministic_mock: [phase_17_tech_debt_real_engine]
+  stub_reference: [phase_17_tech_debt_real_engine]
+  multi_engine_registry: [phase_17_tech_debt_real_engine]
+  real_engine: [phase_17_tech_debt_real_engine]
+  backward_compat: [phase_17_tech_debt_real_engine]
+  agent_registry_refactor: [phase_17_tech_debt_real_engine]

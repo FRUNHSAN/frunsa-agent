@@ -193,7 +193,7 @@ class TestPlanningKeyRegistration:
     """Verify all planning keys are in TRACE_KEY_REGISTRY."""
 
     def test_all_four_planning_keys_in_registry(self):
-        planning_keys = {k for k, v in TRACE_KEY_REGISTRY.items() if v.engine == "planning"}
+        planning_keys = {k for k, v in TRACE_KEY_REGISTRY.items() if "planning" in v.engines}
         expected = {
             "planning.step_index",
             "planning.reasoning_depth",
@@ -208,7 +208,8 @@ class TestPlanningKeyRegistration:
     def test_agent_identity_in_registry(self):
         assert "agent.identity" in TRACE_KEY_REGISTRY
         key_def = TRACE_KEY_REGISTRY["agent.identity"]
-        assert key_def.engine == "planning"
+        assert "planning" in key_def.engines
+        assert "critic" in key_def.engines
         assert key_def.type == dict
         assert key_def.component_candidate is False
 

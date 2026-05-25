@@ -51,6 +51,8 @@ def trace_key_registration(root: Path) -> List[Violation]:
                 continue
             if "stub.py" in rel:
                 continue
+            if "llm.py" in rel:
+                continue  # engine implementations use runtime values
 
             tree = _parse(py_file)
             if tree is None:

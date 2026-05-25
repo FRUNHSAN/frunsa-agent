@@ -1,10 +1,12 @@
-"""Rule: critic engine must emit all registered critic.* keys.
+"""Rule: critic engine must emit all registered critic.* and agent.* keys.
 
-Phase 16: ERROR level. Two checks:
+Phase 16: ERROR level. Two checks.
+Phase 17: Uses "critic" in v.engines (multi-engine support).
+    Now enforces agent.identity emission by critic engine.
 
 1. Missing required keys: if the critic engine's source code
    contains ANY critic.* key, it must contain ALL keys
-   registered with engine="critic".
+   registered with "critic" in engines.
    Severity: ERROR.
 
 2. Unregistered critic keys: any key with the "critic." prefix
@@ -22,13 +24,13 @@ from guardrails.rules._ast_utils import collect_trace_keys_from_engine
 
 
 def _load_critic_keys() -> Set[str]:
-    """Load registered critic.* key names from TRACE_KEY_REGISTRY."""
+    """Load registered critic keys (including multi-engine) from TRACE_KEY_REGISTRY."""
     try:
         from core.observability.trace_registry import TRACE_KEY_REGISTRY
 
         return {
             k for k, v in TRACE_KEY_REGISTRY.items()
-            if v.engine == "critic"
+            if "critic" in v.engines
         }
     except ImportError:
         return set()
@@ -44,10 +46,8 @@ def critic_engine_contract(root: Path) -> List[Violation]:
          "critic." prefix not in the registered set → ERROR
          (potential typo or pollution)
 
-    Note: agent.identity is NOT checked here. It is registered with
-    engine="planning" (Phase 15) and checked by planning_engine_contract.
-    The critic engine also produces agent.identity (Phase 16 technical
-    debt — deferred to Phase 17+ multi-engine registration refactor).
+    Note: Phase 17 — agent.identity is now registered with
+    engines=["planning", "critic"] and IS checked here.
     """
     violations: List[Violation] = []
     registered_keys = _load_critic_keys()
@@ -63,10 +63,11 @@ def critic_engine_contract(root: Path) -> List[Violation]:
     if not engine_keys:
         return violations
 
-    # Filter to critic.* keys only (keys owned by critic engine)
+    # Collect critic.* keys AND any other keys registered to critic engine
+    # (e.g., agent.identity with engines=["planning", "critic"])
     source_critic_keys = {
         k for k in engine_keys
-        if k.startswith("critic.")
+        if k.startswith("critic.") or k in registered_keys
     }
 
     if not source_critic_keys:

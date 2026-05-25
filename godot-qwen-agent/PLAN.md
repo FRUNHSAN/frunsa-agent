@@ -2987,3 +2987,98 @@ Phase 16: 混沌注入 + 多 Agent → 6/6 verified（验证）
 ```
 560 tests, 16 guardrails, 0 failures
 ```
+
+---
+
+## Phase 17: 技术债收尾 + 真实 LLM 引擎 — 从"协议验证"到"生产可用"
+
+**完成状态**: ✅ 已完成 (Phase 17)
+
+### 背景
+
+Phase 16 完成了第一个完整的合约验证闭环（6/6 orchestration keys FULLY SUFFICIENT），但系统存在两个缺口：
+
+1. **agent.identity 多引擎注册技术债**：`TraceKeyDef.engine: str` 限制一个 key 只能属于一个引擎，但 `agent.identity` 实际被 planning 和 critic 双引擎产出。Phase 16 记录了此债务。
+2. **所有引擎都是 stub**：Planning、Orchestration、Critic 三个引擎全是确定性模拟实现，系统缺少真实 LLM 引擎来验证 Protocol→Adapter→Sink 链路在非确定性环境下的表现。
+
+两个任务串行推进——Task 1（纯内部重构，560 测试安全网）→ Task 2（引入外部依赖，每次只装一个变量）。
+
+### Task 1: agent.identity 多引擎注册重构
+
+#### 设计决策
+
+`TraceKeyDef.engine: str` → `engines: list[str]` + backward-compatible `@property engine` alias returning `engines[0]`。这是 minimal-change 方案：
+- **Zero breakage**: 所有现有 `.engine` 访问通过 property 继续工作
+- **Future-proof**: 未来多引擎 key 直接加到列表
+- **无新 dataclass**，无注册表拆分，无 `engine="*"` sentinel
+
+#### 变更清单
+
+| 文件 | 变更 | 说明 |
+|------|------|------|
+| `core/observability/trace_registry.py` | `engine: str` → `engines: list[str]` + `__post_init__` + `@property engine` | 15 个注册项全部迁移。agent.identity → `engines=["planning", "critic"]` |
+| `guardrails/rules/planning_engine_contract.py` | `v.engine == "planning"` → `"planning" in v.engines` | 过滤器更新 |
+| `guardrails/rules/critic_engine_contract.py` | 同上 + `source_critic_keys` 扩展为包含多引擎注册 key | critic engine 现正确强制 agent.identity |
+| `guardrails/rules/orchestration_trace_completeness.py` | `v.engine == "orchestration"` → `"orchestration" in v.engines` | 过滤器更新 |
+| `core/observability/sqlite_sink.py` | 同上模式 | Sink 种子逻辑 |
+| `tests/e2e/test_trace_serialization.py` | 3 assertions: `defn.engine` → `defn.engines` | 向后兼容验证 |
+| `tests/conformance/test_planning_engine.py` | 2 assertions + agent.identity 多引擎检查 | 包含 `"critic" in key_def.engines` |
+| `tests/conformance/test_critic_engine.py` | 2 assertions + `test_agent_identity_registered_to_critic` | critic 新增 agent.identity 归属测试 |
+| `tests/conformance/test_orchestration_trace.py` | 2 assertions | 过滤器更新 |
+
+**关键发现**: `@property engine` 向后兼容消除了所有现有测试中调用位置的更改——零 breakage。
+
+### Task 2: LLMPlanningEngine — 第一个真实 LLM 引擎
+
+#### 设计决策
+
+`LLMPlanningEngine` 实现 `PlanningEngine` Protocol，**复用 `GenerationAdapter`** 而非直接调用 LLM SDK。理由：
+- Adapter 已封装 4 个架构 invariants：DependencyCallTrace 注入、超时、凭证隔离 (ResourceContainer)、token 追踪
+- 直接 SDK 调用会复制所有 4 个 invariants → 违反 DRY 和可观测性契约
+
+`MockLLMBackend`（frozen dataclass + round-robin responses）提供确定性 CI 测试。`StubPlanningEngine` 完全不变——两者作为独立的 Protocol 实现共存。
+
+#### 新文件
+
+| 文件 | LOC | 说明 |
+|------|-----|------|
+| `engines/planning/llm.py` | ~300 | MockLLMBackend + Prompt templates + Parser + LLMPlanningEngine |
+| `tests/conformance/test_llm_planning.py` | ~310 | MockLLMBackend (5)、Parser (10)、Engine conformance (7)、Edge cases (5) = 27 tests |
+| `tests/integration/test_llm_planning_sink.py` | ~155 | Sink 集成、agent.identity 持久化、terminal item、key count |
+| `tests/e2e/test_llm_planning_e2e.py` | ~165 | Full chain、LLM vs stub trace key 对比、model tag、error path |
+| `.ai_reasoning/chains/phase_17_tech_debt_real_engine.yaml` | ~180 | 完整推理链（decision、alternatives、anti-patterns、future_guidance、benchmark_results） |
+
+#### 架构决策
+
+| 决策 | 实现 |
+|------|------|
+| LLM 调用 | 通过 `GenerationAdapter.generate()` — tracing/timeout/credentials 全部继承 |
+| 确定性测试 | `MockLLMBackend` frozen dataclass + round-robin `_call_count % len(responses)` |
+| Stub 共存 | `StubPlanningEngine` 未改 — 快速确定性参考实现 |
+| 异步测试 | `async_collect()` helper in `conftest.py` — `asyncio.run()` wrapper（pytest-asyncio 未安装） |
+| Guardrail 排除 | `trace_key_registration.py` + `trace_key_serializability.py` 排除 `llm.py`（与 `stub.py` 同样模式） |
+| 5 步流程 | decompose (LLM) → dispatch (Orchestration passthrough) → synthesize (LLM, terminal) |
+| Token 追踪 | `planning.cumulative_tokens` 累积所有 LLM 调用的 total_tokens |
+
+### 测试覆盖
+
+| 文件 | 测试数 | 验证点 |
+|------|--------|--------|
+| `tests/conformance/test_llm_planning.py` | 27 | MockLLMBackend 确定性/round-robin/token counting、Parser (JSON/markdown fence/missing fields/non-JSON/empty list)、Engine conformance (StreamItem/trace keys/agent.identity/cumulative tokens/orchestration passthrough)、Edge cases (deadline/token budget/parse failure/identity) |
+| `tests/integration/test_llm_planning_sink.py` | 4 | Sink write→query full cycle、agent.identity in all records、terminal item、key count unchanged |
+| `tests/e2e/test_llm_planning_e2e.py` | 5 | Full chain LLM→Sink→query、LLM vs stub trace key set comparison (identical)、model tag `planning/llm`、schema v2 unchanged、error path still writes to sink |
+| Task 1 测试更新 | 4 files, ~30 LOC | 所有 `defn.engine` → `defn.engines` 断言更新 |
+
+**新增**: 36 tests (27 + 4 + 5) | **更新**: 14 files, ~80 LOC | **总计**: 597 tests, 36 new, 0 failures, 16 guardrails
+
+### 方法论价值
+
+1. **API evolution via @property**: `str → list[str]` 零 breakage 模式被实证。未来任何 frozen dataclass 字段类型演化都可复用。
+2. **Engine Protocol 可复用性**: 第三个引擎 (LLMPlanningEngine) 集成零 pipeline 变更。Protocol 设计得到验证。
+3. **Stub-as-reference 模式**: LLM 和 stub 产出完全相同的 trace key 集合（E2E 测试验证）。Stub 是快速确定性参考，LLM engine 是生产实现——各自独立，互不替代。
+4. **Serial execution isolation**: Task 1 先完成并验证全部 560 测试 → Task 2 引入外部依赖。如果 Task 2 出现问题，我们 100% 确定是 LLM 集成，不是重构。
+
+```
+597 tests, 16 guardrails, 0 failures, 3 engines (stub×3 + LLM×1)
+18 trace keys, schema v2, 16 guardrails
+```
