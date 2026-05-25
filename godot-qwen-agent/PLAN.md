@@ -1,5 +1,99 @@
 # Plan: 组件平台 + 引擎平台 — 高度分化，转译层连通
 
+---
+
+## Global Guiding Principles — 架构宪法 (长期维护准则)
+
+为防止系统在长期演进中出现**跨层职责代偿**与**边界模糊**，本项目确立以下核心准则作为所有后续迭代的最高约束。
+
+### 一、引擎层优化指标 (Six Properties)
+
+引擎层（Agent Runtime / Protocol Infrastructure）是所有上层业务的基石。任何针对引擎层的重构、优化或新功能引入，**必须且只能**服务于以下六大核心性质：
+
+| # | 性质 | 定义 | 强制机制 |
+|---|------|------|----------|
+| **1** | **高效 (Efficiency)** | 极致的并发调度与资源利用率，杜绝不必要的阻塞与冗余计算 | GenerationAdapter 复用、deadline 强制、asyncio.gather 并行、token budget 封顶 |
+| **2** | **全透明 (Full Transparency)** | 执行链路必须是白盒，状态流转、上下文截断及异常根因需完全可观测 | DependencyCallTrace 注入（每次 adapter 调用）、trace_context 在每个 StreamItem、SQLiteTraceSink 全链持久化 |
+| **3** | **安全隔离 (Security & Isolation)** | 严格的凭证隔离、权限边界与沙箱机制，防止单点故障或恶意注入引发系统级雪崩 | try/except → error terminal StreamItem（不 crash）、ResourceContainer 凭证隔离、引擎目录互不 import |
+| **4** | **冗余性 (Redundancy / Resilience)** | 具备优雅降级、超时熔断与多模型 Fallback 能力，确保非确定性环境下的生存底线 | Protocol 抽象 — stub 和 LLM 引擎共存、Factory 装配契约（DI）、组件注册表 |
+| **5** | **可审计 (Auditability)** | 所有决策链路与 Guardrail 触发必须留存不可篡改的完整证据链，支持事后溯源 | SQLiteTraceSink 单文件数据库、guardrail 强制 key 完整性、Sufficiency Report 形式化语义充分性 |
+| **6** | **可更新 (Updatability / Evolvability)** | 保持底层协议的极度稳定与接口的向后兼容，支持底层算法或模型的无缝热插拔与平滑升级 | 三条设计原则：Factory 装配契约 / Guardrail 合约锁定 / metadata 观测扩展槽 |
+
+#### 可更新性 — 三条设计子原则
+
+**可更新性**是六性质中最不显眼但最承重的一项。它回答"Phase 25 时系统是否仍然健康"。
+
+| 原则 | 说明 | 反例 |
+|------|------|------|
+| **Factory 装配契约** | 引擎通过可注入工厂函数获取依赖，而非硬编码实例化。切换实现 → 改一行 lambda | `StubOrchestrationEngine()` 硬编码在 planning stub 中（Phase 18 修复） |
+| **Contract Locking** | Protocol 签名 + Trace Key 集合 = 合约面。Guardrail 在 AST 级强制执行。内部实现自由重写 | 新增 ad-hoc trace key 绕过 Sufficiency Report 流程 |
+| **metadata 扩展槽** | `metadata: Mapping[str, Any]` 字段在所有 Context 中。不参与强类型约束，不触发 guardrail，不透传 caller | 引擎开发者因缺调试通道而向核心接口添加临时字段 |
+
+#### 六性质合规矩阵（按 Phase 追踪）
+
+| Phase | 高效 | 全透明 | 安全隔离 | 冗余性 | 可审计 | 可更新 |
+|-------|------|--------|---------|--------|--------|--------|
+| Phase 14 (Stub 编排) | — | 6 orchestration keys | stub try/except | Stub 单一实现 | SQLiteTraceSink | — |
+| Phase 15 (Stub 规划) | — | 5 planning keys + agent.identity | — | Stub 单一实现 | Sufficiency Report v1 | — |
+| Phase 16 (混沌注入) | FailureInjectionConfig 确定性 | retry_count/resource_pool_key 真实语义 | 混沌隔离在 stub 内部 | 3 引擎共存 | Sufficiency Report v2 (6/6) | — |
+| Phase 17 (真实规划) | GenerationAdapter 复用 | cumulative_tokens 追踪 | MockLLMBackend 确定性 CI | Stub + LLM 双实现 | Sufficiency Report v3 (trace 等价) | @property engine 零 breakage API 演进 |
+| Phase 18 (真实编排+评判) | LLM routing 替代硬编码、deadline | DependencyCallTrace 每次调用 | try/except → error terminal | Factory DI、stub+LLM 共存 | Sufficiency Report v4 | Factory 装配契约、Contract Locking、metadata 扩展槽 |
+| Phase 19+ (未来) | — | — | — | — | — | 三项原则持续承载 |
+
+### 二、四轴演化方向 (Four Axes)
+
+系统的功能扩展必须严格遵循分层架构，**禁止跨层实现**。未来的技术债偿还与新特性开发，围绕以下四个正交的轴进行：
+
+```
+        引擎轴 (Engine Axis)
+        ───────────────────
+        Planning ──→ Orchestration ──→ Critic ──→ Memory ──→ (未来: Learner, Executor, ...)
+        │             │                  │
+        │ Protocol 复用性 — 添加第 N+1 个引擎只需 identity + stub/llm + guardrail
+        │
+        │   编排轴 (Orchestration Axis)
+        │   ──────────────────────────
+        │   Agent 协作协议 ──→ DAG 路由 ──→ 并行合并 ──→ 重试/退避 ──→ 多池路由
+        │   │
+        │   │  观测轴 (Observability Axis)
+        │   │  ───────────────────────────
+        │   │  Trace Keys (18) ──→ SQLiteSink ──→ Guardrails (16) ──→ Sufficiency Reports ──→ 监控看板
+        │   │  │
+        │   │  │  组件轴 (Component Axis)
+        │   │  │  ──────────────────────────
+        │   │  │  Tools/Skills ──→ API 接入 ──→ 数据源连接器 ──→ 标准化封装
+        │   │  │  │
+        ▼   ▼  ▼  ▼
+```
+
+| 轴线 | 定义 | 深化方式 | 当前状态 |
+|------|------|----------|---------|
+| **引擎轴 (Engines Axis)** | Planning、Critic、Memory 等具体 AI 大脑的实现、Prompt 工程与模型适配 | 新增引擎类型，验证 Protocol 不退化 | 3 引擎（Planning, Orchestration, Critic），3 套 Protocol |
+| **编排轴 (Orchestration Axis)** | Agent 间协作协议、DAG 路由、重试策略与合并逻辑（**当前核心战场**） | 增大并行度、引入更多 merge strategy、真实 LLM 故障替换混沌注入 | 2 分支 WAIT_ALL 合并、指数退避重试、cpu/gpu 双池 |
+| **观测轴 (Observability Axis)** | Trace Key 定义、Sink 存储、Guardrails 拦截规则与监控看板 | 不增 key 数量，深化现有 key 的语义价值。每个 Phase 产出 Sufficiency Report | 18 keys、SQLite Sink、16 guardrails、3 份 Sufficiency Reports |
+| **组件轴 (Components Axis)** | 外部工具链（Tools/Skills）、API 接入、数据源连接器的标准化封装 | 新增组件类型，遵循 frozen dataclass + Protocol 约定 | 4 组件类型、3 component_candidate keys |
+
+### 三、轴线隔离原则与架构红线
+
+**四轴隔离：**
+
+- **引擎轴深化不能修改组件轴的数据模型** — 引擎只认 Protocol，不认 Chunk/ContentBlock
+- **编排轴深化不能新增 Trace Key（观测轴）** — 现有 18 keys 语义必须充分；不充分 → Sufficiency Report 标记 → 下一 Phase 修复
+- **观测轴深化不能触碰引擎内部实现** — guardrail 只校验合约面（Protocol 签名 + Key 集合），不检查内部逻辑
+- **组件轴深化不能依赖引擎轴** — 组件契约是纯数据，可以被任何引擎消费
+
+**架构红线 (Architecture Red Lines)：**
+
+> **严禁使用低层级能力去弥补高层级的缺陷。**
+>
+> - 不准用引擎层的死循环重试来掩盖组件层的接口不稳定
+> - 不准用中间服务层（如 Memory）的缓存来补偿引擎层的性能缺陷
+> - 不准将应用层业务逻辑下沉到引擎层硬编码
+>
+> **各层必须恪守边界，独立演进。** 如果某次变更同时触碰 ≥2 条轴线 → 架构退化信号 → 退回重新设计。
+
+---
+
 ## 架构决策
 
 组件平台和引擎平台各自独立演进，互不依赖。两者之间通过一个**薄转译层**连通。三种契约的分工：
