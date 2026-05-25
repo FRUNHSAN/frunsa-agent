@@ -272,7 +272,7 @@ tag_index:
   api_evolution: [phase_17_tech_debt_real_engine]
   adapter_reuse: [phase_17_tech_debt_real_engine, phase_18_real_orch_critic]
   deterministic_mock: [phase_17_tech_debt_real_engine, phase_18_real_orch_critic]
-  stub_reference: [phase_17_tech_debt_real_engine, phase_18_real_orch_critic]
+  stub_reference: [phase_17_tech_debt_real_engine]
   multi_engine_registry: [phase_17_tech_debt_real_engine]
   real_engine: [phase_17_tech_debt_real_engine, phase_18_real_orch_critic]
   backward_compat: [phase_17_tech_debt_real_engine]
@@ -280,4 +280,3 @@ tag_index:
   factory_di: [phase_18_real_orch_critic]
   contract_locking: [phase_18_real_orch_critic]
   metadata_slot: [phase_18_real_orch_critic]
-  engine_isolation: [phase_18_real_orch_critic]

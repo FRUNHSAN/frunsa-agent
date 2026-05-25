@@ -17,10 +17,8 @@ tags:
   - factory_di
   - contract_locking
   - metadata_slot
-  - engine_isolation
   - deterministic_mock
   - adapter_reuse
-  - stub_reference
   - sufficiency_report
   - multi_agent
 
