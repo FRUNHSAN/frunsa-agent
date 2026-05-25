@@ -229,8 +229,9 @@ class TestMultiAgentE2E:
                 orch_rows = sink.query_by_engine("orchestration")
                 for row in orch_rows:
                     ctx = json.loads(row["trace_context_json"])
-                    # orchestration doesn't produce agent.identity
-                    assert "agent.identity" not in ctx
+                    # Phase 18: orchestration now emits agent.identity
+                    # (registered to ["planning", "critic", "orchestration"])
+                    assert ctx["agent.identity"]["role"] == "orchestration"
             finally:
                 sink.close()
 

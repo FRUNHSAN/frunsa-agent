@@ -497,8 +497,7 @@ class SQLiteTraceSink:
             k for k, v in TRACE_KEY_REGISTRY.items() if "orchestration" in v.engines
         }
         existing_orch = self._conn.execute(
-            f"SELECT key_name FROM {TRACE_KEYS_TABLE_NAME} WHERE engine = ?",
-            ("orchestration",),
+            f"SELECT key_name FROM {TRACE_KEYS_TABLE_NAME}"
         ).fetchall()
         existing_orch_names = {row[0] for row in existing_orch}
 

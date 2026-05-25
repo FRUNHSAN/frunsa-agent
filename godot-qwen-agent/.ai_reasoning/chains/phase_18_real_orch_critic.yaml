@@ -1,0 +1,222 @@
+# ── Phase 18: Real LLM Orchestration + Critic Engines ─────────────────
+# Completes the stub→LLM migration for all 3 engine types.
+# Governed by 6 engine-layer properties and 3 design principles.
+#
+# Task 1: Protocol Infrastructure + Assembly Contract Refactor
+# Task 2: Real LLM Orchestration Engine
+# Task 3: Real LLM Critic Engine
+
+chain_id: phase_18_real_orch_critic
+title: "Phase 18: Real LLM Orchestration + Critic Engines — 全链路真枪实弹"
+status: active
+created_at: "2026-05-25T23:00:00Z"
+tags:
+  - real_engine
+  - orchestration
+  - critic
+  - factory_di
+  - contract_locking
+  - metadata_slot
+  - engine_isolation
+  - deterministic_mock
+  - adapter_reuse
+  - stub_reference
+  - sufficiency_report
+  - multi_agent
+
+# ── Context ────────────────────────────────────────────────────────────────
+
+context: |
+  Phase 17 delivered the first real LLM engine (LLMPlanningEngine) and proved
+  the GenerationAdapter reuse pattern works. But two structural gaps remained:
+
+  1. Orchestration and Critic engines had no formal Protocol (interface.py)
+  2. Planning engines directly instantiated StubOrchestrationEngine() — hardcoded
+     dependency preventing engine swaps
+  3. Two stub engines remained without LLM counterparts
+
+  Phase 18 addresses all three through three serial tasks, governed by six
+  engine-layer properties (高效, 全透明, 安全隔离, 冗余性, 可审计, 可更新)
+  and three design principles derived from 可更新性 (Updatability).
+
+  The three design principles are:
+  - Principle 1: Factory Assembly Contract — engines accept factory callables,
+    not instances. Swap stub→LLM via one lambda change.
+  - Principle 2: Contract Locking via Guardrails — Protocol signature + Trace
+    Key set enforced at AST level. Internal implementation is free.
+  - Principle 3: metadata Extension Slot — metadata: Mapping[str, Any] field
+    in all Context dataclasses. Not a trace key, not guardrail-enforced.
+
+# ── Decision ────────────────────────────────────────────────────────────────
+
+decision: |
+  Three sequential tasks, each with distinct architectural decisions:
+
+  Task 1 — Protocol Infrastructure:
+  1. Formal Protocols for orchestration and critic engines (matching planning)
+  2. Factory-based DI: Planning engines receive orch_factory, not instance
+  3. metadata slot in all Context dataclasses
+  4. Stubs add optional params for backward compat
+
+  Task 2 — LLMOrchestrationEngine:
+  1. Reuses GenerationAdapter for LLM calls (same pattern as LLMPlanningEngine)
+  2. MockOrchBackend for deterministic CI (frozen dataclass + round-robin)
+  3. 3-step LLM flow: ROUTE → asyncio.gather dispatch → MERGE + per-item RETRY
+  4. All 6 orchestration.* keys + retrieval pass-through + agent.identity
+  5. Default responses: 2 branches (fast_path cpu 3, full_rerank gpu 2)
+
+  Task 3 — LLMCriticEngine:
+  1. Reuses GenerationAdapter for LLM calls
+  2. MockCriticBackend for deterministic CI
+  3. 3-step serial flow: decomposition → dispatch → synthesis
+  4. Default scores match stub values: (0.85 accept, 0.72 rework, 0.90 accept)
+  5. 2 critic.* keys + agent.identity on every StreamItem
+
+rationale: |
+  Task 1 rationale:
+  - Formal Protocols were missing for orchestration and critic — they existed
+    only as stub classes with no contract surface. This made engine swapping
+    impossible and guardrail enforcement incomplete.
+  - Factory-based DI was chosen over optional constructor params because it
+    makes the assembly point explicit. Switching from stub to LLM is one line
+    of config, not scattered code changes.
+  - metadata extension slot: without it, engine developers have no legitimate
+    way to add debug information. They'd either add ad-hoc trace keys (violating
+    the contract) or go without observability. metadata is the pressure-release
+    valve — structured enough for sink storage, unstructured enough for flexibility.
+
+  Task 2 rationale:
+  - LLM-based routing/merge/retry decisions replace hardcoded stub logic.
+    The route parser extracts branch definitions from LLM output; the retry
+    parser determines whether to retry; the merge parser selects ordering.
+    All three use the same GenerationAdapter pattern proven in Phase 17.
+  - Default mock responses (2 branches, sequential merge, retry=true) provide
+    enough structure for CI testing without over-specifying LLM behavior.
+
+  Task 3 rationale:
+  - LLM-based quality evaluation replaces hardcoded scores. Three serial
+    evaluations (decomposition, dispatch, synthesis) mirror the planning
+    engine's 5-step flow — each step is an independent LLM call with its
+    own prompt template and parsing.
+  - Default mock responses match stub values exactly (0.85, 0.72, 0.90).
+    This is intentional: it proves the Protocol contract holds regardless
+    of implementation. Stub values are the canonical reference.
+
+# ── Alternatives ────────────────────────────────────────────────────────────
+
+alternatives:
+  - option: "Keep orchestration/critic as stub-only, defer LLM engines to Phase 19+"
+    pros: "Less code, faster completion"
+    cons: "Leaves the system in an asymmetric state (planning=LLM, orchestration=stub, critic=stub). The Sufficiency Report's core question — 'are 6 orchestration keys sufficient with real LLM values?' — remains unanswered. Phase 19 would carry both the implementation risk AND the sufficiency validation risk simultaneously."
+
+  - option: "Shared MockBackend base class instead of per-engine MockBackend"
+    pros: "DRY — one MockBackend for all engines"
+    cons: "Creates cross-engine coupling. Each engine's mock responses are semantically different (route vs score vs plan). A shared base would need generic response typing, losing the type safety of engine-specific backends. Engine isolation anti-pattern (per CLAUDE.md)."
+
+  - option: "Inherit StubOrchestrationEngine in LLMOrchestrationEngine instead of independent implementation"
+    pros: "Code reuse for branch simulation, merge logic"
+    cons: "Inheritance couples the LLM engine to stub internals. Changing stub behavior would silently affect LLM behavior. Protocol-based coexistence (both implement the same Protocol independently) is cleaner and matches the Phase 17 pattern."
+
+  - option: "Skip the factory pattern, use optional orch_engine parameter"
+    pros: "Simpler constructor signature, no lambda indirection"
+    cons: "Assembly logic scattered across call sites. Switching from stub to LLM requires changes at every place that constructs a planning engine. Factory centralizes the assembly decision — Principle 1 (Updatability) requires this."
+
+# ── Evidence ────────────────────────────────────────────────────────────────
+
+evidence:
+  test_files:
+    - tests/conformance/test_llm_orchestration.py
+    - tests/conformance/test_llm_critic.py
+    - tests/integration/test_llm_orchestration_sink.py
+    - tests/integration/test_llm_critic_sink.py
+    - tests/e2e/test_llm_orchestration_e2e.py
+    - tests/e2e/test_llm_critic_e2e.py
+  test_cases:
+    - "TestMockOrchBackend: 5 tests — deterministic, round-robin, frozen dataclass"
+    - "TestOrchParsers: 9 tests — route/merge/retry valid/invalid/markdown/missing"
+    - "TestLLMOrchestrationConformance: 8 tests — keys, deadline, terminal, error path"
+    - "TestMockCriticBackend: 5 tests — deterministic, round-robin, frozen dataclass"
+    - "TestParser: 9 tests — score/verdict/reasoning valid/invalid/markdown/missing"
+    - "TestLLMCriticConformance: 8 tests — 3 items, keys, scores float, deadline"
+    - "TestMultiAgentCoexistence: LLM critic + LLM orch + stub planning in same sink"
+    - "test_no_key_collision_critic_orch: critic.* keys not in orch rows, vice versa"
+    - "test_scores_queryable_in_sink: [0.85, 0.72, 0.90] — matches stub values exactly"
+  benchmark_results: "673 tests, 0 failures, 16 guardrails (Phase 18 complete)"
+
+# ── Future Guidance ─────────────────────────────────────────────────────────
+
+future_guidance:
+
+  factory_assembly_contract:
+    summary: "Use factory callables (not instances) for engine-level DI. This centralizes assembly decisions at one point and makes stub→LLM swaps one-line changes."
+    detail: "Planning engines receive orch_factory: Callable[[], OrchestrationEngine] | None = None. Default factory creates stub. Callers who want LLM pass lambda: LLMOrchestrationEngine(adapter). This pattern generalizes to all engine-to-engine dependencies (future: critic_factory, memory_factory, etc.)."
+    priority: critical
+
+  metadata_extension_slot:
+    summary: "Always include metadata: Mapping[str, Any] field in Context dataclasses. It is the pressure-release valve for engine developers who need to add debug information without expanding the trace key surface."
+    detail: "metadata is NOT a trace key, NOT guardrail-enforced, NOT strongly typed. It is opaque to callers — planning engines pass it through without inspection. It IS recorded in trace_context_json via StreamingTraceRecord, providing post-hoc auditability without contract bloat."
+    priority: high
+
+  guardrail_prefix_filtering:
+    summary: "When a key is registered to multiple engines (e.g., agent.identity), guardrails that verify engine-specific keys MUST filter by prefix (k.startswith('orchestration.')) rather than by engine registration (v.engines)."
+    detail: "after agent.identity → engines=['planning', 'critic', 'orchestration'], the orchestration trace completeness guardrail loaded 7 keys (6 orchestration.* + 1 agent.identity) but only found 6 orchestration.* prefixed keys in source. The fix: filter registered keys by prefix, not by engine membership. This is a general pattern — multi-engine keys belong to multiple engines but are not 'owned' by any single one for completeness checks."
+    priority: high
+
+  sqlite_seed_check_all_keys:
+    summary: "When seeding trace_keys for a new engine, check ALL existing keys (SELECT key_name FROM trace_keys) not just keys for that engine (WHERE engine = ?)."
+    detail: "agent.identity is seeded in the planning block. When orchestration seeding checked WHERE engine = 'orchestration', it didn't find agent.identity (seeded with engine='planning') and tried to INSERT — causing UNIQUE constraint violation. The fix: check all existing key_names, not just those registered to the current engine. This applies to any future engine seeding blocks."
+    priority: medium
+
+  streaming_trace_record_conversion:
+    summary: "Sink write_streaming() expects StreamingTraceRecord, not StreamItem. All test helpers that feed engine output into sinks must convert."
+    detail: "StreamItem is the engine output type. StreamingTraceRecord is the sink storage type. They have different fields (StreamItem has model/finish_reason/error; StreamingTraceRecord has pipeline_run_id/step_name/dependency_name/ts_iso/engine). The conversion pattern from test_chaos_e2e.py is canonical."
+    priority: medium
+
+  deterministic_mock_pattern_confirmed:
+    summary: "The Phase 7 MockLLMBackend pattern (frozen dataclass + round-robin + object.__setattr__ mutation) is now validated across 3 independent engines. It is the canonical pattern for all future real engines."
+    detail: "LLMPlanningEngine (Phase 17), LLMOrchestrationEngine, and LLMCriticEngine (Phase 18) all use the same MockBackend pattern. Each engine defines its OWN MockBackend class — no shared base class. The pattern: frozen dataclass with responses tuple + _call_count field (repr=False) + generate() using idx = _call_count % len(responses) + count_tokens() for token estimation."
+    priority: high
+
+  async_for_in_sync_test:
+    summary: "Python cannot have 'async for' directly in sync test functions. Wrap in inner async function and call via asyncio.run()."
+    detail: "This is a recurring bug across all E2E test files. The pattern: define an inner async def _collect() that does the async for loop, then call asyncio.run(_collect()). Never put async for directly in a def test_* function body."
+    priority: medium
+
+# ── Anti-Patterns ───────────────────────────────────────────────────────────
+
+anti_patterns:
+  - "Hardcoding StubOrchestrationEngine() in planning engines — violates Principle 1 (Factory Assembly Contract). Use orch_factory lambda."
+  - "Sharing MockBackend between engines — each engine defines its own for isolation."
+  - "Writing 'async for' directly in sync test functions — always wrap in inner async def."
+  - "Passing StreamItem to sink.write_streaming() — must convert to StreamingTraceRecord first."
+  - "Adding new trace keys before Sufficiency Report confirms need — 18 keys are sufficient."
+  - "Filtering guardrail keys by engine registration instead of by prefix — multi-engine keys (agent.identity) break this."
+  - "Checking WHERE engine = ? in SQLite seed blocks instead of checking all existing keys — causes UNIQUE violations for multi-engine keys."
+  - "Modifying stub engines when adding LLM counterparts — stubs are canonical reference implementations, both coexist."
+
+# ── Benchmark Results ───────────────────────────────────────────────────────
+
+benchmark_results:
+  test_count: 673
+  new_tests_task2: 39
+  new_tests_task3: 37
+  total_new_tests: 76
+  failures: 0
+  guardrails: 16
+  guardrails_passed: true
+  schema_version: 2
+  engines: 6  # 3 stub + 3 LLM
+  trace_keys: 18
+  task_1_changes:
+    files_created: 3
+    files_modified: 7
+    loc_changed: ~280
+    key_finding: "Zero breakage — stub backward compat preserved all 597 existing tests"
+  task_2_changes:
+    files_created: 4
+    loc_created: ~820
+    key_finding: "LLMOrchestrationEngine matches StubOrchestrationEngine trace key shape exactly"
+  task_3_changes:
+    files_created: 4
+    loc_created: ~700
+    key_finding: "LLMCriticEngine default scores match StubCriticEngine values — proves Protocol contract"

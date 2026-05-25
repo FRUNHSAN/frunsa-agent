@@ -125,7 +125,7 @@ class TestOrchestrationKeyRegistration:
     """All 6 orchestration keys must be in TRACE_KEY_REGISTRY with correct metadata."""
 
     def test_all_six_in_registry(self):
-        orch_keys = {k: v for k, v in TRACE_KEY_REGISTRY.items() if "orchestration" in v.engines}
+        orch_keys = {k: v for k, v in TRACE_KEY_REGISTRY.items() if k.startswith("orchestration.")}
         assert len(orch_keys) == 6
 
     def test_engine_is_orchestration(self):

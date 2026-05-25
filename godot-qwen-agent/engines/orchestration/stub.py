@@ -20,7 +20,10 @@ import hashlib
 from typing import AsyncIterator, List
 
 from core.contracts.generation import StreamItem
+from core.contracts.streaming_protocol import PaceConfig
 from engines.orchestration.config import FailureInjectionConfig, OrchestrationConfig
+from engines.orchestration.identity import OrchestratorIdentity
+from engines.orchestration.interface import OrchestrationContext
 
 
 class StubOrchestrationEngine:
@@ -37,16 +40,34 @@ class StubOrchestrationEngine:
     Phase 16: accepts optional OrchestrationConfig for:
       - Failure injection: deterministic (chunk_id, attempt) tuples
       - Multi-pool routing: branch_name → pool_key mapping
+
+    Phase 18: orchestrate() accepts optional Protocol params (context,
+    deadline, pace_config) for signature uniformity. No-arg calls
+    continue to work (backward compat). Every StreamItem carries
+    agent.identity.
     """
+
+    identity = OrchestratorIdentity(
+        id="orchestrator-v1",
+        role="orchestration",
+        version="1.0.0",
+        capabilities=("parallel_dispatch", "result_merge"),
+    )
 
     def __init__(self, config: OrchestrationConfig | None = None) -> None:
         self._config = config
         self._failure_config = config.failure_injection if config else None
 
-    async def orchestrate(self) -> AsyncIterator[StreamItem]:
+    async def orchestrate(
+        self,
+        context: OrchestrationContext | None = None,
+        deadline: float | None = None,
+        pace_config: PaceConfig | None = None,
+    ) -> AsyncIterator[StreamItem]:
         goal_hash = hashlib.sha256(b"phase_14_orch").hexdigest()[:8]
 
         pools = self._config.resource_pools if self._config else None
+        identity_value = self.identity.to_trace_value()
 
         results = await asyncio.gather(
             self._simulate_branch(
@@ -92,6 +113,7 @@ class StubOrchestrationEngine:
                     "orchestration.branch_taken": item["branch"],
                     "orchestration.retry_count": item.get("attempts", 1) - 1,
                     "orchestration.resource_pool_key": item["resource_pool_key"],
+                    "agent.identity": identity_value,
                 },
             )
 

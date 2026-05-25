@@ -15,13 +15,25 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import AsyncIterator
+from typing import AsyncIterator, Callable
 
 from core.contracts.generation import StreamItem
 from core.contracts.streaming_protocol import PaceConfig
+from engines.orchestration.identity import OrchestratorIdentity
+from engines.orchestration.interface import (
+    BranchSpec,
+    OrchestrationContext,
+    OrchestrationEngine,
+)
 from engines.planning.identity import AgentIdentity
 from engines.planning.interface import PlanningContext, PlanningStep
-from engines.orchestration.stub import StubOrchestrationEngine
+
+
+def _default_orch_factory() -> OrchestrationEngine:
+    """Default factory: StubOrchestrationEngine with no config."""
+    from engines.orchestration.stub import StubOrchestrationEngine
+
+    return StubOrchestrationEngine()
 
 
 class StubPlanningEngine:
@@ -44,6 +56,10 @@ class StubPlanningEngine:
 
     Deadline enforcement: checks elapsed time before each step yield.
     Raises asyncio.TimeoutError if deadline exceeded.
+
+    Principle 1 (Assembly Contract): orch_factory is the single assembly
+    point for swapping orchestration engines. Default = StubOrchestrationEngine.
+    Switching to LLM changes one lambda, not every call site.
     """
 
     identity = AgentIdentity(
@@ -52,6 +68,12 @@ class StubPlanningEngine:
         version="1.0.0",
         capabilities=("task_decomposition", "parallel_planning"),
     )
+
+    def __init__(
+        self,
+        orch_factory: Callable[[], OrchestrationEngine] | None = None,
+    ) -> None:
+        self._orch = (orch_factory or _default_orch_factory)()
 
     async def plan(
         self,
@@ -134,9 +156,25 @@ class StubPlanningEngine:
         )
 
         # ── Steps 2-3: Parallel dispatch via orchestration engine ──
-        orch_engine = StubOrchestrationEngine()
+        orch_context = OrchestrationContext(
+            branches=(
+                BranchSpec(name="fast_path", pool="cpu", items=3),
+                BranchSpec(name="full_rerank", pool="gpu", items=2),
+            ),
+            agent_identity=OrchestratorIdentity(
+                id="orchestrator-v1",
+                role="orchestration",
+                version="1.0.0",
+                capabilities=("parallel_dispatch", "result_merge"),
+            ),
+            metadata={"source": "planning_stub"},
+        )
         orch_items: list[StreamItem] = []
-        async for orch_item in orch_engine.orchestrate():
+        async for orch_item in self._orch.orchestrate(
+            context=orch_context,
+            deadline=deadline,
+            pace_config=pace_config,
+        ):
             orch_items.append(orch_item)
 
         if time.perf_counter() - start > deadline:

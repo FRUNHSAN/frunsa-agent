@@ -22,13 +22,18 @@ from guardrails.rules._ast_utils import collect_trace_keys_from_engine
 
 
 def _load_orchestration_keys() -> Set[str]:
-    """Load registered orchestration.* key names from TRACE_KEY_REGISTRY."""
+    """Load registered orchestration.* key names from TRACE_KEY_REGISTRY.
+
+    Filters by key prefix (orchestration.*), not by engine registration,
+    because keys like agent.identity may be registered to multiple engines
+    including orchestration without being orchestration-specific keys.
+    """
     try:
         from core.observability.trace_registry import TRACE_KEY_REGISTRY
 
         return {
             k for k, v in TRACE_KEY_REGISTRY.items()
-            if "orchestration" in v.engines
+            if k.startswith("orchestration.")
         }
     except ImportError:
         return set()

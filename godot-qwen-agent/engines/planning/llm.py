@@ -17,10 +17,16 @@ import json
 import time
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any, AsyncIterator, List
+from typing import Any, AsyncIterator, Callable, List
 
 from core.contracts.generation import GenerationResult, StreamItem
 from core.contracts.streaming_protocol import PaceConfig
+from engines.orchestration.identity import OrchestratorIdentity
+from engines.orchestration.interface import (
+    BranchSpec,
+    OrchestrationContext,
+    OrchestrationEngine,
+)
 from engines.planning.identity import AgentIdentity
 from engines.planning.interface import PlanningContext, PlanningStep
 
@@ -205,19 +211,30 @@ def _parse_synthesis(raw_text: str) -> str:
 # ── LLM Planning Engine ────────────────────────────────────────────────
 
 
+def _default_orch_factory() -> OrchestrationEngine:
+    """Default factory: StubOrchestrationEngine with no config."""
+    from engines.orchestration.stub import StubOrchestrationEngine
+
+    return StubOrchestrationEngine()
+
+
 class LLMPlanningEngine:
     """Real LLM-backed Planning Engine using GenerationAdapter.
 
     Implements PlanningEngine Protocol. 5-step flow:
       0. Analyze goal (LLM decompose call)
       1. Decompose into sub-tasks
-      2-3. Parallel dispatch via StubOrchestrationEngine
+      2-3. Parallel dispatch via orchestration engine (factory-injected)
       4. Synthesize (LLM synthesize call, terminal)
 
     Each StreamItem carries planning.* trace_context keys + agent.identity.
     Deadline enforcement before every yield. Token budget tracking.
 
     StubPlanningEngine remains the fast, deterministic reference.
+
+    Principle 1 (Assembly Contract): orch_factory is the single assembly
+    point for swapping orchestration engines. Default = StubOrchestrationEngine.
+    Switching to LLM changes one lambda, not every call site.
     """
 
     identity = AgentIdentity(
@@ -235,11 +252,13 @@ class LLMPlanningEngine:
         max_tokens: int = 4096,
         decompose_temperature: float = 0.3,
         synthesize_temperature: float = 0.5,
+        orch_factory: Callable[[], OrchestrationEngine] | None = None,
     ) -> None:
         self._adapter = adapter
         self._max_tokens = max_tokens
         self._decompose_temp = decompose_temperature
         self._synthesize_temp = synthesize_temperature
+        self._orch = (orch_factory or _default_orch_factory)()
 
     async def plan(
         self,
@@ -254,8 +273,6 @@ class LLMPlanningEngine:
             deadline: Operation-level deadline in seconds (duration).
             pace_config: QoS parameters (accepted but no-op for now).
         """
-        from engines.orchestration.stub import StubOrchestrationEngine
-
         start = time.perf_counter()
         identity_value = context.agent_identity.to_trace_value()
         cumulative_tokens = 0
@@ -353,9 +370,25 @@ class LLMPlanningEngine:
             item_index += 1
 
         # ── Steps 2-3: Parallel dispatch via orchestration ────
-        orch_engine = StubOrchestrationEngine()
+        orch_context = OrchestrationContext(
+            branches=(
+                BranchSpec(name="fast_path", pool="cpu", items=3),
+                BranchSpec(name="full_rerank", pool="gpu", items=2),
+            ),
+            agent_identity=OrchestratorIdentity(
+                id="orchestrator-v1",
+                role="orchestration",
+                version="1.0.0",
+                capabilities=("parallel_dispatch", "result_merge"),
+            ),
+            metadata={"source": "planning_llm"},
+        )
         orch_items: list[StreamItem] = []
-        async for orch_item in orch_engine.orchestrate():
+        async for orch_item in self._orch.orchestrate(
+            context=orch_context,
+            deadline=deadline,
+            pace_config=pace_config,
+        ):
             orch_items.append(orch_item)
 
         if time.perf_counter() - start > deadline:

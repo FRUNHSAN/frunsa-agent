@@ -134,7 +134,7 @@ TRACE_KEY_REGISTRY: Dict[str, TraceKeyDef] = {
     "agent.identity": TraceKeyDef(
         type=dict,
         semantics="Structured agent identity carrying id, role, version, and capabilities manifest",
-        engines=["planning", "critic"],
+        engines=["planning", "critic", "orchestration"],
         component_candidate=False,
     ),
 

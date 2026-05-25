@@ -14,7 +14,9 @@ from __future__ import annotations
 from typing import AsyncIterator
 
 from core.contracts.generation import StreamItem
+from core.contracts.streaming_protocol import PaceConfig
 from engines.critic.identity import CriticAgent
+from engines.critic.interface import CriticContext
 
 
 class StubCriticEngine:
@@ -33,7 +35,12 @@ class StubCriticEngine:
             capabilities=("result_evaluation", "quality_scoring"),
         )
 
-    async def evaluate(self) -> AsyncIterator[StreamItem]:
+    async def evaluate(
+        self,
+        context: CriticContext | None = None,
+        deadline: float | None = None,
+        pace_config: PaceConfig | None = None,
+    ) -> AsyncIterator[StreamItem]:
         evaluations = [
             {"step": "task_decomposition", "score": 0.85, "verdict": "accept",
              "delta": "Task decomposition: clear sub-goals, reasonable granularity."},

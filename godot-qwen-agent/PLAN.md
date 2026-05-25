@@ -3176,3 +3176,110 @@ Phase 16 完成了第一个完整的合约验证闭环（6/6 orchestration keys 
 597 tests, 16 guardrails, 0 failures, 3 engines (stub×3 + LLM×1)
 18 trace keys, schema v2, 16 guardrails
 ```
+
+---
+
+## Phase 18: Real LLM Orchestration + Critic Engines — 全链路"真枪实弹"
+
+**完成状态**: ✅ 已完成 (Phase 18)
+
+### 背景
+
+Phase 17 证明了 GenerationAdapter 复用模式可行，但系统仍有两个结构性缺口：
+
+1. **缺少正式 Protocol**：Orchestration 和 Critic 引擎没有 `interface.py`，只是 stub 类
+2. **硬编码依赖**：Planning 引擎直接 `StubOrchestrationEngine()` 实例化，无法替换
+3. **两个 stub 未替换**：Orchestration 和 Critic 仍为确定性模拟
+
+Phase 18 通过三个串行任务以**六引擎层性质**和**三条可更新性子原则**为治理框架完成全部替换。
+
+### 三条设计原则 (可更新性)
+
+| 原则 | 说明 | 实现 |
+|------|------|------|
+| **Factory 装配契约** | 引擎接收工厂函数而非实例 | `orch_factory: Callable[[], OrchestrationEngine]` — stub→LLM 一行 lambda |
+| **Contract Locking** | Guardrail AST 级强制 Protocol 签名 + Trace Key 集合 | `orchestration_trace_completeness` 扫描所有 `engines/orchestration/*.py` |
+| **metadata 扩展槽** | 所有 Context 带 `metadata: Mapping[str, Any]` | 不参与强类型约束，不触发 guardrail，不透传 caller |
+
+### Task 1: Protocol Infrastructure + DI Refactor
+
+**新文件**:
+| 文件 | 说明 |
+|------|------|
+| `engines/orchestration/interface.py` | OrchestrationContext (metadata slot) + BranchSpec + OrchestrationEngine Protocol |
+| `engines/orchestration/identity.py` | OrchestratorIdentity frozen dataclass (6-point agent.* convention) |
+| `engines/critic/interface.py` | CriticContext (metadata slot) + CriticEngine Protocol |
+
+**修改文件**: planning/stub.py + planning/llm.py (factory DI), orchestration/stub.py + critic/stub.py (optional params), `__init__.py` exports, trace_registry.py (agent.identity +"orchestration")
+
+**关键修复**: orchestration_trace_completeness guardrail 改为按 `k.startswith("orchestration.")` 前缀过滤（因 agent.identity 现在是多引擎 key）；SQLite 种子改为查所有现有 key 避免 UNIQUE 冲突
+
+### Task 2: LLMOrchestrationEngine
+
+**架构**: `LLMOrchestrationEngine` 实现 `OrchestrationEngine` Protocol。3 步 LLM 流程：
+1. **ROUTE** (LLM) → 分支定义 + 并行深度 + pool key
+2. **asyncio.gather()** 并行分发 + per-item **RETRY** (LLM)
+3. **MERGE** (LLM) → 排序 + 终端 StreamItem
+
+**MockOrchBackend** (frozen dataclass, round-robin) 提供确定性 CI。默认响应：2 分支 (fast_path cpu 3, full_rerank gpu 2)、sequential merge、retry=true。
+
+**新文件**: `engines/orchestration/llm.py` (~350 LOC) + 3 测试文件 (39 tests)
+
+### Task 3: LLMCriticEngine
+
+**架构**: `LLMCriticEngine` 实现 `CriticEngine` Protocol。3 步串行 LLM 评估：
+1. Task decomposition 评估 (LLM) → score + verdict
+2. Parallel dispatch 评估 (LLM) → score + verdict
+3. Result synthesis 评估 (LLM, terminal) → score + verdict
+
+**MockCriticBackend** 默认响应**精确匹配** StubCriticEngine 值：decomposition(0.85, accept)、dispatch(0.72, rework)、synthesis(0.90, accept)。这证明了 Protocol 合约在两种实现间的一致性。
+
+**新文件**: `engines/critic/llm.py` (~300 LOC) + 3 测试文件 (37 tests)
+
+### 测试覆盖
+
+| 层 | Task 2 (Orch) | Task 3 (Critic) | 总计 |
+|----|---------------|-----------------|------|
+| Conformance | 27 tests | 26 tests | 53 |
+| Integration | 6 tests | 5 tests | 11 |
+| E2E | 6 tests | 5 tests | 11 |
+| **新增** | **39** | **36** | **75** |
+
+**关键测试场景**:
+- `test_no_key_collision_critic_orch`: critic.* keys 不在 orch rows，orchestration.* keys 不在 critic rows
+- `test_scores_queryable_in_sink`: [0.85, 0.72, 0.90] 精确匹配 stub 值
+- `test_llm_critic_and_llm_orch_same_sink`: 两个 LLM 引擎共存于同一 sink
+- `test_both_orch_engines_same_sink`: Stub + LLM 编排引擎共存
+
+### Sufficiency Report v4 — 核心结论
+
+**问题**: 当 retry_count 和 resource_pool_key 携带真实 LLM 值后，6 个 orchestration keys 是否仍然充分？
+
+**答案**: **YES**。6 个 orchestration keys + 2 个 critic keys + 18 个总 trace keys 对所有 3 个真实 LLM 引擎完全充分。真实引擎不改变 key 结构——只改变值的来源（LLM 决策 vs 硬编码值）。3 引擎 × 2 实现 (stub + LLM) = 6 个引擎实现零命名空间冲突共存。
+
+### 架构决策
+
+| 决策 | 实现 |
+|------|------|
+| Protocol 签名统一 | 所有引擎: `async def x(context, deadline, pace_config) -> AsyncIterator[StreamItem]` |
+| Factory DI | Planning 引擎接收 `orch_factory`，默认工厂创建 stub |
+| LLM 调用 | 通过 `GenerationAdapter.generate()` — tracing/timeout/credentials 全部继承 |
+| 确定性测试 | 每个引擎定义自己的 MockBackend (frozen dataclass + round-robin) |
+| Stub 向后兼容 | 所有 optional params: `context=None, deadline=None, pace_config=None` |
+| 无新 trace key | 18 个 key 充分覆盖 3 个 LLM 引擎的所有行为 |
+
+### 六性质合规（最终状态）
+
+| 性质 | Phase 18 贡献 |
+|------|--------------|
+| **高效** | LLM routing 替代硬编码分支，LLM evaluation 替代冗余重排 |
+| **全透明** | DependencyCallTrace 每次 LLM 调用，metadata 扩展槽启用每个引擎的调试信息 |
+| **安全隔离** | try/except → error terminal StreamItem（不 crash），MockBackend 确定性 CI |
+| **冗余性** | Factory DI 使 stub↔LLM 按需切换，6 个实现并存 |
+| **可审计** | Sufficiency Report v4 记录真实引擎语义漂移，SQLiteTraceSink 全链 |
+| **可更新** | 三项原则全部实现：Factory 装配、Contract Locking、metadata 扩展槽 |
+
+```
+673 tests, 16 guardrails, 0 failures, 6 engines (stub×3 + LLM×3)
+18 trace keys, schema v2, 3 Sufficiency Reports (v2→v3→v4)
+```
