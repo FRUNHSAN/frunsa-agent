@@ -160,6 +160,15 @@ with tab1:
 
         ```
                          ┌──────────────────────┐
+                         │   RAG 知识检索 (Phase 0)│
+                         │  "向量检索 → Rerank"   │
+                         │  InMemoryVectorBackend │
+                         │  + MockScoringBackend  │
+                         └──────────┬───────────┘
+                                    │ Top-K 召回的知识片段
+                                    │ 注入为 Planning 上下文
+                                    ▼
+                         ┌──────────────────────┐
                          │    Planning Engine    │
                          │  "目标拆解 → 步骤规划" │
                          └──────────┬───────────┘
@@ -198,14 +207,15 @@ with tab1:
 
         #### 执行阶段
 
-        1. **Decompose (Planning #0-#1)**：解析目标 → 拆解为 2 条 sub-tasks，生成 `planning.{step_index, reasoning_depth, parent_step_id, cumulative_tokens}`
-        2. **Dispatch (Orchestration #2-#6)**：fan-out 到两个并行分支 (fast_path / full_rerank)，每条产出一个 chunk，携带完整的 6 个 `orchestration.*` trace key
-        3. **Synthesize (Planning #7)**：将 2 条分支的 5 个 chunk 合并为 1 份 `plan_output`
-        4. **Evaluate (Critic #0-#2)**：对 plan_output 进行三分项评估 (decomposition / dispatch / synthesis)，各自产出 `critic.{score, verdict}`
+        1. **Retrieve (RAG #0-#2)**：将用户目标作为查询，向量检索 → Rerank 重排序 → 返回 Top-3 相关知识片段，构建 knowledge_context
+        2. **Decompose (Planning #0-#1)**：基于目标 + 知识上下文 → 拆解为 2 条 sub-tasks，生成 `planning.{step_index, reasoning_depth, parent_step_id, cumulative_tokens}`
+        3. **Dispatch (Orchestration #2-#6)**：fan-out 到两个并行分支 (fast_path / full_rerank)，每条产出一个 chunk，携带完整的 6 个 `orchestration.*` trace key
+        4. **Synthesize (Planning #7)**：将 2 条分支的 5 个 chunk 合并为 1 份 `plan_output`
+        5. **Evaluate (Critic #0-#2)**：对 plan_output 进行三分项评估 (decomposition / dispatch / synthesis)，各自产出 `critic.{score, verdict}`
 
         #### 时序特征
 
-        整个 pipeline 是 **确定性 Mock 驱动**（非 LLM）——所有 11 个 StreamItem 在 0.1–0.2 秒内产出。切换到 LLM 引擎后，Planning 和 Critic 阶段将有秒级延迟，Orchestration 阶段保持毫秒级（纯路由，不调 LLM）。
+        整个 pipeline 是 **确定性 Mock 驱动**（非 LLM）——RAG 检索 + 引擎全链路在 0.1–0.2 秒内产出。切换到 LLM 引擎后，Planning 和 Critic 阶段将有秒级延迟，RAG 和 Orchestration 阶段保持毫秒级（向量检索 + 路由，不调 LLM）。
         """)
 
     goal = st.text_input(
@@ -225,6 +235,7 @@ with tab1:
         plan_status = st.status("🧠 Planning Engine: 等待启动...", state="running")
 
         items_log = []
+        rag_count = 0
         planning_count = 0
         orch_count = 0
         critic_count = 0
@@ -241,7 +252,9 @@ with tab1:
             ctx = item.get("trace_context", {})
             is_orch = any(k.startswith("orchestration.") for k in ctx)
 
-            if is_orch or engine == "orchestration":
+            if engine == "rag":
+                rag_count += 1
+            elif is_orch or engine == "orchestration":
                 orch_count += 1
             elif engine == "planning":
                 planning_count += 1
@@ -249,7 +262,7 @@ with tab1:
                 critic_count += 1
 
             plan_status.update(
-                label=f"🧠 P:{planning_count} | 🔀 O:{orch_count} | 🛡 C:{critic_count}"
+                label=f"📚 RAG:{rag_count} | 🧠 P:{planning_count} | 🔀 O:{orch_count} | 🛡 C:{critic_count}"
             )
 
         # ── Render all items AFTER the loop (Streamlit replaces container content) ──
@@ -261,7 +274,10 @@ with tab1:
             ctx = item.get("trace_context", {})
             is_orch = any(k.startswith("orchestration.") for k in ctx)
 
-            if is_orch or engine == "orchestration":
+            if engine == "rag":
+                engine_label = "📚 Knowledge Retrieval"
+                engine_color = "#8b5cf6"
+            elif is_orch or engine == "orchestration":
                 engine_label = "🔀 Orchestration"
                 engine_color = "#3b82f6"
             elif engine == "planning":
@@ -313,16 +329,17 @@ with tab1:
         # ── Stats at the bottom ──
         if pipeline_stats:
             st.markdown("### 📊 Pipeline 统计")
-            c1, c2, c3, c4 = st.columns(4)
+            c1, c2, c3, c4, c5 = st.columns(5)
             c1.metric("总 Items", pipeline_stats.get("total_items", len(items_log)))
-            c2.metric("Planning", pipeline_stats.get("planning_items", 0))
-            c3.metric("Critic", pipeline_stats.get("critic_items", 0))
-            c4.metric("耗时 (秒)", f"{pipeline_stats.get('duration_seconds', 0):.3f}s")
+            c2.metric("📚 RAG", pipeline_stats.get("rag_items", 0))
+            c3.metric("Planning", pipeline_stats.get("planning_items", 0))
+            c4.metric("Critic", pipeline_stats.get("critic_items", 0))
+            c5.metric("耗时 (秒)", f"{pipeline_stats.get('duration_seconds', 0):.3f}s")
 
         st.session_state.last_pipeline_items = items_log
 
     elif not run_btn:
-        st.info("👆 输入目标后点击「运行 Pipeline」查看 11 条测试的完整日志")
+        st.info("👆 输入目标后点击「运行 Pipeline」查看 RAG 检索 → Planning → Orchestration → Critic 全链路")
         if st.session_state.last_pipeline_items:
             st.divider()
             st.caption(

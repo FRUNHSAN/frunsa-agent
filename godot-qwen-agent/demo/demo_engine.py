@@ -86,6 +86,37 @@ def run_engine_pipeline(
     """
     db = db_path or DB_PATH
     start_ts = time.perf_counter()
+    rag_items: list[dict] = []
+
+    # ── Phase 0: RAG knowledge retrieval ─────────────────────────────
+    from demo.demo_rag import retrieve as rag_retrieve
+    rag_result = rag_retrieve(goal)
+    for i, chunk in enumerate(rag_result["reranked"]):
+        item = {
+            "delta": f"[RAG 召回 #{chunk['rank']}] score={chunk['score']:.3f} | source={chunk['source']}\n{chunk['text'][:150]}",
+            "engine": "rag",
+            "index": i,
+            "is_terminal": False,
+            "model": "retriever/reranker",
+            "finish_reason": "",
+            "trace_context": {
+                "rag.query": goal,
+                "rag.retrieved_count": len(rag_result["retrieved"]),
+                "rag.reranked_count": len(rag_result["reranked"]),
+                "rag.elapsed_ms": rag_result["elapsed_ms"],
+                "rag.kb_size": rag_result["knowledge_base_size"],
+            },
+            "timestamp": time.time(),
+            "item_type": "rag",
+        }
+        rag_items.append(item)
+        yield item
+
+    # Build knowledge context for planning
+    knowledge_context = "\n".join(
+        c["text"][:200] for c in rag_result["reranked"]
+    )
+
     identity = AgentIdentity(
         id="planner-v1", role="planning", version="1.0.0",
         capabilities=("task_decomposition", "parallel_planning"),
@@ -226,6 +257,7 @@ def run_engine_pipeline(
         "item_type": "stats",
         "stats": {
             "total_items": len(all_items),
+            "rag_items": len(rag_items),
             "planning_items": len(plan_items),
             "critic_items": len(critic_items),
             "orchestration_items": sum(
@@ -235,6 +267,7 @@ def run_engine_pipeline(
             "total_tokens": total_tokens,
             "duration_seconds": round(elapsed, 3),
             "db_path": db,
+            "knowledge_context_preview": knowledge_context[:200],
         },
     }
 
