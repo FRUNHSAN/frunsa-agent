@@ -2,6 +2,8 @@
 
 > 从大学比赛作品到 AI 安全 Agent 架构实验平台 — 18 个 Phase 的完整演进。
 
+[English](README_EN.md) | 中文
+
 [![Tests](https://img.shields.io/badge/tests-673%20passed-brightgreen)](godot-qwen-agent/tests/)
 [![Guardrails](https://img.shields.io/badge/guardrails-16%20passed-blue)](godot-qwen-agent/guardrails/)
 [![Python](https://img.shields.io/badge/python-3.12+-informational)](https://www.python.org/)
