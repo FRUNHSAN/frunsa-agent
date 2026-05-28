@@ -21,6 +21,10 @@ from core.contracts.composition import (
     AssemblyDiagnostic,
     CompositionBlueprint,
     CompositionEvent,
+    ContractHealthReport,
+    ContractViolation,
+    SeverityMapping,
+    SeverityRule,
     SourceRule,
 )
 from core.adapters.composer import (
@@ -29,6 +33,7 @@ from core.adapters.composer import (
     PipelineComposer,
     SourceRouter,
 )
+from core.adapters.health_evaluator import ContractHealthEvaluator
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -605,19 +610,19 @@ class TestContractViolationDetection:
         assert cv is None
 
     def test_classify_violation_all_categories(self):
-        """Each error_type maps to the correct violation category."""
+        """Each error_type maps to the correct ContractViolation enum value."""
         assert PipelineAssembler._classify_violation(
             "routing", "unknown", "No matching rule"
-        ) == "routing_contract_breach"
+        ) == ContractViolation.ROUTING_CONTRACT_BREACH
         assert PipelineAssembler._classify_violation(
             "instantiation", "xyz", "Unknown strategy: 'xyz'"
-        ) == "unknown_chunker_strategy"
+        ) == ContractViolation.UNKNOWN_CHUNKER_STRATEGY
         assert PipelineAssembler._classify_violation(
             "instantiation", "xyz", "Invalid params for 'xyz': missing chunk_size"
-        ) == "invalid_chunk_params"
+        ) == ContractViolation.INVALID_CHUNK_PARAMS
         assert PipelineAssembler._classify_violation(
             "validation", "xyz", "Contract validation: [...]"
-        ) == "output_contract_violation"
+        ) == ContractViolation.OUTPUT_CONTRACT_VIOLATION
         assert PipelineAssembler._classify_violation(
             "execution", "xyz", "ChunkerAdapter failed: OOM"
         ) is None
@@ -775,3 +780,322 @@ class TestContractAwareEventSink:
         r = repr(sink)
         assert "events=5" in r
         assert "violations=2" in r
+
+
+# ── Phase 20: Contract Health Evaluator ────────────────────────────
+
+class TestContractHealthEvaluator:
+    """Verify evaluator produces correct ContractHealthReport from sink state."""
+
+    @pytest.fixture
+    def evaluator(self):
+        return ContractHealthEvaluator()
+
+    @pytest.fixture
+    def sink(self):
+        from core.adapters.event_sink import ContractAwareEventSink
+        return ContractAwareEventSink()
+
+    def _event(self, event_type, correlation_id, **context):
+        return CompositionEvent(
+            event_type=event_type,
+            correlation_id=correlation_id,
+            timestamp=1.0,
+            context=context,
+        )
+
+    def test_zero_events_is_healthy(self, evaluator, sink):
+        """Empty sink → healthy, 1.0 compliance, no violations."""
+        report = evaluator.evaluate(sink)
+        assert report.severity == "healthy"
+        assert report.compliance_rate == 1.0
+        assert report.dominant_violation_type is None
+        assert report.total_documents == 0
+        assert report.total_events == 0
+
+    def test_all_success_is_healthy(self, evaluator, sink):
+        """Documents with no violations → healthy at 1.0."""
+        sink(self._event("rule_matched", "doc-1", path="a.md"))
+        sink(self._event("chunker_instantiated", "doc-1", chunker="recursive"))
+        sink(self._event("assembly_complete", "batch", total_docs=1))
+        report = evaluator.evaluate(sink)
+        assert report.severity == "healthy"
+        assert report.compliance_rate == 1.0
+
+    def test_single_unknown_strategy_is_critical(self, evaluator, sink):
+        """One unknown_chunker_strategy → critical (threshold=1)."""
+        sink(self._event(
+            "document_failed", "doc-1",
+            error_type="instantiation",
+            contract_violation=ContractViolation.UNKNOWN_CHUNKER_STRATEGY,
+        ))
+        sink(self._event("assembly_complete", "batch", total_docs=1))
+        report = evaluator.evaluate(sink)
+        assert report.severity == "critical"
+        assert report.dominant_violation_type == ContractViolation.UNKNOWN_CHUNKER_STRATEGY
+
+    def test_routing_breach_below_threshold_is_healthy(self, evaluator, sink):
+        """routing_contract_breach threshold is 3 → 2 violations = healthy (below)."""
+        for i in range(2):
+            sink(self._event(
+                "document_failed", f"doc-{i}",
+                error_type="routing",
+                contract_violation=ContractViolation.ROUTING_CONTRACT_BREACH,
+            ))
+        report = evaluator.evaluate(sink)
+        assert report.severity == "healthy"
+
+    def test_routing_breach_3_triggers_critical(self, evaluator, sink):
+        """3 routing_contract_breach → critical."""
+        for i in range(3):
+            sink(self._event(
+                "document_failed", f"doc-{i}",
+                error_type="routing",
+                contract_violation=ContractViolation.ROUTING_CONTRACT_BREACH,
+            ))
+        report = evaluator.evaluate(sink)
+        assert report.severity == "critical"
+
+    def test_invalid_params_is_degraded(self, evaluator, sink):
+        """invalid_chunk_params threshold=1 → degraded (not critical)."""
+        sink(self._event(
+            "document_failed", "doc-1",
+            error_type="instantiation",
+            contract_violation=ContractViolation.INVALID_CHUNK_PARAMS,
+        ))
+        report = evaluator.evaluate(sink)
+        assert report.severity == "degraded"
+
+    def test_critical_overrides_degraded(self, evaluator, sink):
+        """When violations span multiple severities, the most severe wins."""
+        sink(self._event(
+            "document_failed", "doc-1",
+            error_type="instantiation",
+            contract_violation=ContractViolation.INVALID_CHUNK_PARAMS,
+        ))
+        sink(self._event(
+            "document_failed", "doc-2",
+            error_type="instantiation",
+            contract_violation=ContractViolation.UNKNOWN_CHUNKER_STRATEGY,
+        ))
+        report = evaluator.evaluate(sink)
+        assert report.severity == "critical"
+
+    def test_compliance_rate_calculation(self, evaluator, sink):
+        """2 out of 4 docs with violations → compliance_rate = 0.5."""
+        sink(self._event("rule_matched", "doc-ok-1"))
+        sink(self._event("rule_matched", "doc-ok-2"))
+        sink(self._event(
+            "document_failed", "doc-bad-1",
+            contract_violation=ContractViolation.UNKNOWN_CHUNKER_STRATEGY,
+        ))
+        sink(self._event(
+            "document_failed", "doc-bad-2",
+            contract_violation=ContractViolation.OUTPUT_CONTRACT_VIOLATION,
+        ))
+        report = evaluator.evaluate(sink)
+        assert report.compliance_rate == 0.5
+
+    def test_dominant_violation_type(self, evaluator, sink):
+        """dominant_violation_type is the most frequent category."""
+        # 3 unknown_chunker_strategy, 1 invalid_chunk_params
+        for i in range(3):
+            sink(self._event(
+                "document_failed", f"doc-u-{i}",
+                contract_violation=ContractViolation.UNKNOWN_CHUNKER_STRATEGY,
+            ))
+        sink(self._event(
+            "document_failed", "doc-i-1",
+            contract_violation=ContractViolation.INVALID_CHUNK_PARAMS,
+        ))
+        report = evaluator.evaluate(sink)
+        assert report.dominant_violation_type == ContractViolation.UNKNOWN_CHUNKER_STRATEGY
+
+    def test_trend_first_report_is_none(self, evaluator, sink):
+        """First report always has trend=None."""
+        sink(self._event(
+            "document_failed", "doc-1",
+            contract_violation=ContractViolation.UNKNOWN_CHUNKER_STRATEGY,
+        ))
+        report = evaluator.evaluate(sink)
+        assert report.trend is None
+
+    def test_trend_improving(self, evaluator, sink):
+        """Better compliance_rate → trend='improving'."""
+        sink(self._event(
+            "document_failed", "doc-1",
+            contract_violation=ContractViolation.UNKNOWN_CHUNKER_STRATEGY,
+        ))
+        previous = evaluator.evaluate(sink)  # compliance = 0.0
+
+        # Clear and add only success events
+        sink.clear()
+        sink(self._event("rule_matched", "doc-ok"))
+        sink(self._event("assembly_complete", "batch", total_docs=1))
+        current = evaluator.evaluate(sink, previous=previous)  # compliance = 1.0
+        assert current.trend == "improving"
+
+    def test_trend_deteriorating(self, evaluator, sink):
+        """Worse compliance_rate → trend='deteriorating'."""
+        sink(self._event("rule_matched", "doc-ok"))
+        previous = evaluator.evaluate(sink)  # compliance = 1.0
+
+        sink.clear()
+        sink(self._event(
+            "document_failed", "doc-1",
+            contract_violation=ContractViolation.UNKNOWN_CHUNKER_STRATEGY,
+        ))
+        current = evaluator.evaluate(sink, previous=previous)  # compliance = 0.0
+        assert current.trend == "deteriorating"
+
+    def test_trend_stable(self, evaluator, sink):
+        """Same compliance_rate → trend='stable'."""
+        sink(self._event(
+            "document_failed", "doc-1",
+            contract_violation=ContractViolation.UNKNOWN_CHUNKER_STRATEGY,
+        ))
+        previous = evaluator.evaluate(sink)
+
+        sink.clear()
+        sink(self._event(
+            "document_failed", "doc-1",
+            contract_violation=ContractViolation.UNKNOWN_CHUNKER_STRATEGY,
+        ))
+        current = evaluator.evaluate(sink, previous=previous)
+        assert current.trend == "stable"
+
+    def test_deterministic_same_input_same_output(self, evaluator, sink):
+        """Pure function: same input → same output."""
+        sink(self._event(
+            "document_failed", "doc-1",
+            contract_violation=ContractViolation.UNKNOWN_CHUNKER_STRATEGY,
+        ))
+        r1 = evaluator.evaluate(sink)
+        r2 = evaluator.evaluate(sink)
+        assert r1.compliance_rate == r2.compliance_rate
+        assert r1.severity == r2.severity
+        assert r1.dominant_violation_type == r2.dominant_violation_type
+
+    def test_evaluator_does_not_modify_sink(self, evaluator, sink):
+        """evaluate() is read-only on the sink."""
+        sink(self._event(
+            "document_failed", "doc-1",
+            contract_violation=ContractViolation.UNKNOWN_CHUNKER_STRATEGY,
+        ))
+        before = len(sink)
+        evaluator.evaluate(sink)
+        assert len(sink) == before
+
+    def test_custom_severity_mapping(self, sink):
+        """Custom SeverityMapping overrides defaults."""
+        custom = SeverityMapping(rules=(
+            SeverityRule(
+                violation_type=ContractViolation.UNKNOWN_CHUNKER_STRATEGY,
+                count_threshold=5,
+                severity="degraded",
+            ),
+        ))
+        evaluator = ContractHealthEvaluator(severity_mapping=custom)
+        sink(self._event(
+            "document_failed", "doc-1",
+            contract_violation=ContractViolation.UNKNOWN_CHUNKER_STRATEGY,
+        ))
+        report = evaluator.evaluate(sink)
+        # With custom mapping, 1 < 5 → still healthy
+        assert report.severity == "healthy"
+
+    def test_violation_counts_in_report(self, evaluator, sink):
+        """ContractHealthReport.violation_counts mirrors the categories."""
+        sink(self._event(
+            "document_failed", "doc-1",
+            contract_violation=ContractViolation.UNKNOWN_CHUNKER_STRATEGY,
+        ))
+        sink(self._event(
+            "document_failed", "doc-2",
+            contract_violation=ContractViolation.UNKNOWN_CHUNKER_STRATEGY,
+        ))
+        sink(self._event(
+            "document_failed", "doc-3",
+            contract_violation=ContractViolation.INVALID_CHUNK_PARAMS,
+        ))
+        report = evaluator.evaluate(sink)
+        assert report.violation_counts[ContractViolation.UNKNOWN_CHUNKER_STRATEGY] == 2
+        assert report.violation_counts[ContractViolation.INVALID_CHUNK_PARAMS] == 1
+
+
+# ── Phase 20: ContractViolation Enum + Data Models ─────────────────
+
+class TestContractViolationEnum:
+    """Verify StrEnum drop-in compatibility with existing string checks."""
+
+    def test_enum_is_str_subclass(self):
+        assert issubclass(ContractViolation, str)
+
+    def test_enum_equals_string(self):
+        assert ContractViolation.UNKNOWN_CHUNKER_STRATEGY == "unknown_chunker_strategy"
+
+    def test_enum_in_dict_key(self):
+        d = {ContractViolation.UNKNOWN_CHUNKER_STRATEGY: 1}
+        assert d["unknown_chunker_strategy"] == 1
+
+    def test_all_four_categories_defined(self):
+        names = {m.name for m in ContractViolation}
+        assert names == {
+            "UNKNOWN_CHUNKER_STRATEGY",
+            "INVALID_CHUNK_PARAMS",
+            "ROUTING_CONTRACT_BREACH",
+            "OUTPUT_CONTRACT_VIOLATION",
+        }
+
+
+class TestSeverityMappingDefaults:
+    """Verify SeverityMapping.default() produces sensible rules."""
+
+    def test_default_has_four_rules(self):
+        m = SeverityMapping.default()
+        assert len(m.rules) == 4
+
+    def test_default_unknown_strategy_is_critical(self):
+        m = SeverityMapping.default()
+        rule = next(r for r in m.rules
+                    if r.violation_type == ContractViolation.UNKNOWN_CHUNKER_STRATEGY)
+        assert rule.count_threshold == 1
+        assert rule.severity == "critical"
+
+    def test_default_routing_breach_needs_3(self):
+        m = SeverityMapping.default()
+        rule = next(r for r in m.rules
+                    if r.violation_type == ContractViolation.ROUTING_CONTRACT_BREACH)
+        assert rule.count_threshold == 3
+        assert rule.severity == "critical"
+
+    def test_default_invalid_params_is_degraded(self):
+        m = SeverityMapping.default()
+        rule = next(r for r in m.rules
+                    if r.violation_type == ContractViolation.INVALID_CHUNK_PARAMS)
+        assert rule.count_threshold == 1
+        assert rule.severity == "degraded"
+
+
+class TestContractHealthReport:
+    """Verify health report frozen dataclass invariants."""
+
+    def test_compliance_rate_must_be_in_range(self):
+        with pytest.raises(ValueError):
+            ContractHealthReport(
+                compliance_rate=1.5, severity="healthy",
+                dominant_violation_type=None, trend=None,
+                total_documents=0, total_events=0,
+                violation_counts={}, evaluated_at=1.0,
+            )
+
+    def test_violation_counts_is_copied(self):
+        vc = {"test": 5}
+        report = ContractHealthReport(
+            compliance_rate=1.0, severity="healthy",
+            dominant_violation_type=None, trend=None,
+            total_documents=0, total_events=0,
+            violation_counts=vc, evaluated_at=1.0,
+        )
+        vc["test"] = 999
+        assert report.violation_counts["test"] == 5

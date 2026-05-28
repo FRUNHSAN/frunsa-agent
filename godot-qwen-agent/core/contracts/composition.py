@@ -18,6 +18,7 @@ import json
 import time
 from copy import deepcopy
 from dataclasses import dataclass, field
+from enum import Enum
 from fnmatch import fnmatch
 from types import MappingProxyType
 from typing import Any, Dict, FrozenSet, Literal, Tuple
@@ -215,3 +216,124 @@ class CompositionEvent:
             self, "context",
             MappingProxyType(deepcopy(dict(self.context)))
         )
+
+
+# ── Contract Violation Enum (Phase 20) ─────────────────────────────
+
+class ContractViolation(str, Enum):
+    """Enumeration of contract violation categories.
+
+    str subclass — drop-in compatible with all existing string comparisons.
+    Enum — IDE autocomplete, mypy exhaustiveness checking, no silent typo failures.
+
+    These values correspond to _classify_violation() return categories in
+    PipelineAssembler (core/adapters/composer.py).
+    """
+
+    UNKNOWN_CHUNKER_STRATEGY = "unknown_chunker_strategy"
+    INVALID_CHUNK_PARAMS = "invalid_chunk_params"
+    ROUTING_CONTRACT_BREACH = "routing_contract_breach"
+    OUTPUT_CONTRACT_VIOLATION = "output_contract_violation"
+
+
+# ── Severity Mapping (Phase 20) ─────────────────────────────────────
+
+@dataclass(frozen=True)
+class SeverityRule:
+    """A single rule mapping violation count → severity level.
+
+    Attributes:
+        violation_type: ContractViolation category this rule applies to
+        count_threshold: How many violations of this type trigger the severity
+        severity:        healthy | degraded | critical — the assigned level
+    """
+
+    violation_type: str
+    count_threshold: int = 1
+    severity: Literal["healthy", "degraded", "critical"] = "degraded"
+
+    def __post_init__(self) -> None:
+        if self.count_threshold < 1:
+            raise ValueError(
+                f"count_threshold must be >= 1, got {self.count_threshold}"
+            )
+
+
+@dataclass(frozen=True)
+class SeverityMapping:
+    """Declarative rules for translating violation counts → health severity.
+
+    Consumed by ContractHealthEvaluator. The mapping is injectable so tests
+    and production configs can use different thresholds without touching
+    evaluator code.
+
+    Rules are applied in order; the most severe match wins.
+    """
+
+    rules: Tuple[SeverityRule, ...] = ()
+
+    @classmethod
+    def default(cls) -> SeverityMapping:
+        """Factory producing sensible defaults for Phase 20."""
+        return cls(rules=(
+            SeverityRule(
+                violation_type=ContractViolation.UNKNOWN_CHUNKER_STRATEGY,
+                count_threshold=1,
+                severity="critical",
+            ),
+            SeverityRule(
+                violation_type=ContractViolation.ROUTING_CONTRACT_BREACH,
+                count_threshold=3,
+                severity="critical",
+            ),
+            SeverityRule(
+                violation_type=ContractViolation.INVALID_CHUNK_PARAMS,
+                count_threshold=1,
+                severity="degraded",
+            ),
+            SeverityRule(
+                violation_type=ContractViolation.OUTPUT_CONTRACT_VIOLATION,
+                count_threshold=1,
+                severity="degraded",
+            ),
+        ))
+
+
+# ── Contract Health Report (Phase 20) ───────────────────────────────
+
+@dataclass(frozen=True)
+class ContractHealthReport:
+    """Aggregated health assessment derived from CompositionEvent history.
+
+    Pure data — computed by ContractHealthEvaluator, consumed by future
+    relationship-layer decision logic (Phase 25+).
+
+    Attributes:
+        compliance_rate:         0.0–1.0 fraction of documents without violations
+        severity:                Overall health level (healthy/degraded/critical)
+        dominant_violation_type: Most frequent violation category, or None
+        trend:                   Direction vs previous report, or None if first
+        total_documents:         Number of documents tracked in the events
+        total_events:            Total CompositionEvents processed
+        violation_counts:        {violation_type: count} breakdown
+        evaluated_at:            epoch timestamp of evaluation
+    """
+
+    compliance_rate: float
+    severity: Literal["healthy", "degraded", "critical"]
+    dominant_violation_type: str | None
+    trend: Literal["improving", "stable", "deteriorating"] | None
+    total_documents: int
+    total_events: int
+    violation_counts: MappingProxyType[str, int]
+    evaluated_at: float
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "violation_counts",
+            MappingProxyType(deepcopy(dict(self.violation_counts)))
+        )
+        if not 0.0 <= self.compliance_rate <= 1.0:
+            raise ValueError(
+                f"compliance_rate must be in [0.0, 1.0], got {self.compliance_rate}"
+            )

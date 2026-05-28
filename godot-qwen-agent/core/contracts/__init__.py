@@ -5,6 +5,10 @@ from .composition import (
     AssemblyDiagnostic,
     CompositionBlueprint,
     CompositionEvent,
+    ContractHealthReport,
+    ContractViolation,
+    SeverityMapping,
+    SeverityRule,
     SourceRule,
 )
 from .generation import GenerationResult, GenerationStrategy, StreamItem
@@ -45,10 +49,14 @@ __all__ = [
     "RetrievalResult",
     "GenerationResult",
     "StreamItem",
-    # Composition contracts (Phase 19)
+    # Composition contracts (Phase 19-20)
     "AssemblyDiagnostic",
     "CompositionBlueprint",
     "CompositionEvent",
+    "ContractHealthReport",
+    "ContractViolation",
+    "SeverityMapping",
+    "SeverityRule",
     "SourceRule",
     # Strategy protocols
     "ChunkingStrategy",

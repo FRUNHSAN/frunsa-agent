@@ -147,6 +147,7 @@ evidence:
     - core/contracts/composition.py
     - core/adapters/composer.py
     - core/adapters/event_sink.py
+    - core/adapters/health_evaluator.py
     - core/contracts/registry.py
     - configs/default_pipeline.yaml
   test_cases:
@@ -158,7 +159,11 @@ evidence:
     - "TestArchitectureInvariants: 12 tests (no resolve on Blueprint, pure router, frozen, freeze)"
     - "TestContractViolationDetection: 5 tests (violation classification, event context, all categories)"
     - "TestContractAwareEventSink: 11 tests (query, violations, summary, e2e, repr)"
-    - "Full suite: 740 passed, 0 regression, 0 guardrail errors"
+    - "TestContractHealthEvaluator: 18 tests (severity, compliance, trend, determinism)"
+    - "TestContractViolationEnum: 4 tests (str subclass, equality, dict key)"
+    - "TestSeverityMappingDefaults: 4 tests (default rules, thresholds)"
+    - "TestContractHealthReport: 2 tests (range validation, copy)"
+    - "Full suite: 767 passed, 0 regression, 0 guardrail errors"
 
 # ── 6. Future Guidance ───────────────────────────────────────────────
 
@@ -273,6 +278,27 @@ future_guidance:
     priority: medium
     phase_applicable: "Phase 19.5 (lessons permanent)"
 
+  contract_health_evaluation:
+    summary: "ContractHealthEvaluator is a pure function that converts sink events → health report"
+    detail: "ContractHealthEvaluator.evaluate(sink, previous=None) produces a
+      ContractHealthReport with compliance_rate, severity (healthy/degraded/critical),
+      dominant_violation_type, and trend (improving/stable/deteriorating). Severity
+      is computed via injectable SeverityMapping rules (YAML-able in future).
+      Trend is stateless — caller provides previous report, evaluator compares.
+      This is Phase 25+'s trigger: severity=critical + trend=deteriorating →
+      initiate renegotiate."
+    priority: high
+    phase_applicable: "Phase 20+"
+
+  contract_violation_strenum:
+    summary: "ContractViolation is a StrEnum — drop-in compatible, IDE-safe, typo-proof"
+    detail: "The 4 contract violation strings are now ContractViolation StrEnum members.
+      str subclass → backward compatible with all existing string comparisons.
+      Enum → mypy exhaustiveness, IDE autocomplete, no silent typo failures.
+      _classify_violation() returns ContractViolation | None instead of str | None."
+    priority: high
+    phase_applicable: "Phase 20+"
+
 anti_patterns:
   - "Putting resolve() or any matching algorithm on CompositionBlueprint (data model)"
   - "SourceRouter producing I/O, network calls, or state mutation (must be pure)"
@@ -295,3 +321,8 @@ anti_patterns:
   - "Treating execution failures as contract violations (they may be transient bugs)"
   - "Populating contract_violation with free-text instead of enum categories"
   - "Sink.query() returning live references to internal list instead of copies"
+  - "Evaluator storing previous report internally instead of accepting it as parameter"
+  - "Hardcoding severity thresholds instead of injecting SeverityMapping"
+  - "Using bare strings for contract_violation instead of ContractViolation enum"
+  - "Evaluator modifying sink state during evaluation (must be read-only)"
+  - "Computing trend from same report object (need previous snapshot for comparison)"

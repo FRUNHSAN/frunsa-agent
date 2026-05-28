@@ -26,6 +26,7 @@ from core.contracts.composition import (
     AssemblyDiagnostic,
     CompositionBlueprint,
     CompositionEvent,
+    ContractViolation,
     SourceRule,
 )
 from core.adapters.chunker_adapter import ChunkerAdapter
@@ -302,7 +303,7 @@ class PipelineAssembler:
     @staticmethod
     def _classify_violation(
         error_type: str, chunker: str, message: str
-    ) -> str | None:
+    ) -> ContractViolation | None:
         """Map a technical failure to a contract violation category.
 
         Not all failures are contract violations. Execution failures may be
@@ -310,24 +311,20 @@ class PipelineAssembler:
         failures (unknown strategy, invalid params) and validation failures
         are always violations of the Blueprint ↔ Component contract.
 
-        Categories:
-          - unknown_chunker_strategy: Blueprint references a non-existent chunker
-          - invalid_chunk_params: Blueprint params don't match chunker signature
-          - routing_contract_breach: No rule matched, no fallback available
-          - output_contract_violation: Chunk output failed contract validation
+        Returns ContractViolation enum (str subclass — backward compatible).
         """
         if error_type == "routing":
-            return "routing_contract_breach"
+            return ContractViolation.ROUTING_CONTRACT_BREACH
         if error_type == "instantiation":
             if "Unknown strategy" in message:
-                return "unknown_chunker_strategy"
+                return ContractViolation.UNKNOWN_CHUNKER_STRATEGY
             if "Invalid params" in message:
-                return "invalid_chunk_params"
-            return "instantiation_contract_breach"
+                return ContractViolation.INVALID_CHUNK_PARAMS
+            return None
         if error_type == "execution":
             return None  # Technical failure, may be transient
         if error_type == "validation":
-            return "output_contract_violation"
+            return ContractViolation.OUTPUT_CONTRACT_VIOLATION
         return None
 
     def _record_failure(

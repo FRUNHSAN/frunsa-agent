@@ -40,6 +40,7 @@
 | Phase 18 (真实编排+评判) | LLM routing 替代硬编码、deadline | DependencyCallTrace 每次调用 | try/except → error terminal | Factory DI、stub+LLM 共存 | Sufficiency Report v4 | Factory 装配契约、Contract Locking、metadata 扩展槽 |
 | Phase 19 (Pipeline Composition) | lazy resolve, 零反射 health_check | CompositionEvent + event_sink + correlation_id | Router 纯函数 + Assembler 异常隔离 | Registry 发现, USB 热插拔 | blueprint_fingerprint + audit_manifest + rule_id 血缘 | validate_params trait 预留, Python→Rust 映射表 |
 | Phase 19.5 (Contract-Aware Events) | — | ContractAwareEventSink 结构化存储 + 查询 | 死锁/truthiness trap 修复 | 违约分类, sink 可查询 | violation_count, violations_by_type, summary | _classify_violation 四种契约违约类别 |
+| Phase 20 (Contract Health) | — | ContractHealthReport 结构化自省 | 违约严重度可配置映射 | SeverityMapping 注入, 纯函数评估器 | compliance_rate, trend, dominant_violation | ContractViolation StrEnum, 严重度梯度 |
 | Phase 20+ (未来) | — | — | — | — | — | 三项原则持续承载 |
 
 ### 二、四轴演化方向 (Four Axes)
@@ -5266,3 +5267,151 @@ self._emit = event_sink or (lambda e: None)
 - [x] `pytest tests/unit/test_pipeline_composer.py -q` — 67/67 通过
 - [x] `pytest tests/ -q` — 740/740 通过, 0 回归
 - [x] `python -m guardrails check --all` — 39 files, 16 rules, 0 violations
+
+---
+
+## Phase 20: 契约健康度评估器 — 让系统理解自己的痛苦
+
+### 定位
+
+Phase 19.5 让违约信号可追溯、可分类。Phase 20 将这些离散信号聚合为**可决策的关系状态**。这是"关系认知层"的基石——系统第一次拥有了对自身履约状态的量化认知。
+
+```
+Phase 19.5                    Phase 20
+─────────────────────────────────────────────────
+ContractAwareEventSink        ContractHealthEvaluator
+"这里违约了"                    "整体履约率 0.6, 严重度 critical, 正在恶化"
+离散事件                        聚合的健康状态
+查询违约信号                    输出可决策的关系评估
+```
+
+### 核心抽象
+
+```
+ContractAwareEventSink  ──→  ContractHealthEvaluator  ──→  ContractHealthReport
+     (信号源)                    (纯函数评估器)                  (结构化自省)
+                                     │
+                              SeverityMapping (注入)
+                              ┌──────────────────────┐
+                              │ unknown → count≥1 → critical
+                              │ routing  → count≥3 → critical
+                              │ params   → count≥1 → degraded
+                              │ output   → count≥1 → degraded
+                              └──────────────────────┘
+```
+
+### 新增文件
+
+```
+core/
+├── contracts/
+│   └── composition.py          ← [修改] ContractViolation StrEnum,
+│                                  SeverityRule, SeverityMapping,
+│                                  ContractHealthReport (+~80 LOC)
+│
+└── adapters/
+    └── health_evaluator.py     ← [新增] ContractHealthEvaluator (~100 LOC)
+```
+
+### ContractViolation — StrEnum 枚举
+
+```python
+class ContractViolation(str, Enum):
+    """str subclass → backward compatible. Enum → IDE autocomplete, typo-proof."""
+    UNKNOWN_CHUNKER_STRATEGY = "unknown_chunker_strategy"
+    INVALID_CHUNK_PARAMS = "invalid_chunk_params"
+    ROUTING_CONTRACT_BREACH = "routing_contract_breach"
+    OUTPUT_CONTRACT_VIOLATION = "output_contract_violation"
+```
+
+`_classify_violation()` 现在返回 `ContractViolation | None`，不再是裸 `str`。下游代码可以用 `ContractViolation.UNKNOWN_CHUNKER_STRATEGY` 替代字符串字面量。
+
+### SeverityMapping — 可注入的严重度规则
+
+```python
+@dataclass(frozen=True)
+class SeverityRule:
+    violation_type: str       # ContractViolation 枚举值
+    count_threshold: int = 1  # 多少个触发此严重度
+    severity: Literal["healthy", "degraded", "critical"] = "degraded"
+
+@dataclass(frozen=True)
+class SeverityMapping:
+    rules: Tuple[SeverityRule, ...]
+
+    @classmethod
+    def default(cls) -> SeverityMapping:
+        """unknown_chunker → critical ×1, routing_breach → critical ×3,
+           invalid_params → degraded ×1, output_violation → degraded ×1"""
+```
+
+规则顺序决定优先级。第一个匹配的规则生效。`critical` 覆盖 `degraded`，`degraded` 覆盖 `healthy`。
+
+### ContractHealthReport — 系统自省的数据结构
+
+```python
+@dataclass(frozen=True)
+class ContractHealthReport:
+    compliance_rate: float          # 0.0–1.0
+    severity: Literal["healthy", "degraded", "critical"]
+    dominant_violation_type: str | None
+    trend: Literal["improving", "stable", "deteriorating"] | None
+    total_documents: int
+    total_events: int
+    violation_counts: MappingProxyType[str, int]
+    evaluated_at: float
+```
+
+### ContractHealthEvaluator — 纯函数评估器
+
+```python
+class ContractHealthEvaluator:
+    def __init__(self, severity_mapping: SeverityMapping | None = None): ...
+    def evaluate(
+        self,
+        sink: ContractAwareEventSink,
+        previous: ContractHealthReport | None = None,  # 调用方传入快照
+    ) -> ContractHealthReport: ...
+```
+
+设计约束：
+- **纯函数** — 相同输入永远相同输出。不持有锁、不修改 Sink、不缓存跨调用结果
+- **趋势无状态** — `previous` 由调用方传入，评估器自己零存储
+- **严重度映射可注入** — 测试用严格规则，生产用宽松规则，无需改代码
+- **零 truthiness 检查** — 所有条件用 `is not None`，不复现 Phase 19.5 的 `or` 陷阱
+
+### 严重度决策算法
+
+```
+1. 遍历 SeverityMapping.rules
+2. 对每条 rule: 检查 violation_counts[rule.violation_type] >= rule.count_threshold
+3. 若 critical → 立即返回 critical (最高优先)
+4. 若 degraded → 记录 degraded，继续检查
+5. 无匹配 → healthy
+```
+
+### 测试覆盖
+
+| 测试类 | 测试数 | 核心验证 |
+|--------|--------|---------|
+| `TestContractHealthEvaluator` | 18 | 空=healthy, 全成功=healthy, 违约→critical, 低于阈值=healthy, 跨类别优先级, compliance_rate 计算, dominant_violation_type, trend (none/improving/stable/deteriorating), 确定性, 不修改 sink, 自定义映射 |
+| `TestContractViolationEnum` | 4 | str 子类, 字符串相等, dict 键, 四种类别完整性 |
+| `TestSeverityMappingDefaults` | 4 | 4 条规则, unknown=critical×1, routing=critical×3, params=degraded×1 |
+| `TestContractHealthReport` | 2 | compliance_rate 范围校验, violation_counts 深拷贝 |
+
+### 改动清单
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `core/contracts/composition.py` | 修改 | ContractViolation enum, SeverityRule, SeverityMapping, ContractHealthReport |
+| `core/adapters/health_evaluator.py` | 新增 | ContractHealthEvaluator |
+| `core/adapters/composer.py` | 修改 | `_classify_violation` 返回 ContractViolation 枚举 |
+| `core/adapters/__init__.py` | 修改 | 导出 ContractHealthEvaluator |
+| `core/contracts/__init__.py` | 修改 | 导出 Phase 20 数据模型 |
+| `tests/unit/test_pipeline_composer.py` | 修改 | +27 测试 |
+
+### 验证
+
+- [x] `pytest tests/unit/test_pipeline_composer.py -q` — 94/94 通过
+- [x] `pytest tests/ -q` — 767/767 通过, 0 回归
+- [x] `python -m guardrails check --all` — 40 files, 16 rules, 0 violations

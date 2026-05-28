@@ -7,6 +7,7 @@ from .chunker_adapter import AdapterTypeError, ChunkerAdapter
 from .composer import AssemblyError, PipelineAssembler, PipelineComposer, SourceRouter
 from .event_sink import ContractAwareEventSink
 from .factory import create_step_factory
+from .health_evaluator import ContractHealthEvaluator
 from .generator_adapter import GenerationAdapter, GenerationBackend, StreamingBackend
 from .reranker_adapter import ScoringAdapter, ScoringBackend
 from .stream_adapter import (
@@ -36,9 +37,10 @@ __all__ = [
     # Common
     "AdapterTypeError",
     "create_step_factory",
-    # Grammar engines (Phase 19)
+    # Grammar engines (Phase 19-20)
     "AssemblyError",
     "ContractAwareEventSink",
+    "ContractHealthEvaluator",
     "PipelineAssembler",
     "PipelineComposer",
     "SourceRouter",
