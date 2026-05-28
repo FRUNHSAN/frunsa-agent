@@ -1,6 +1,12 @@
 """Component contracts: data models, protocols, validation, and unified registry."""
 
 from .chunking import Chunk, ChunkingStrategy, ContentBlock, SemVer
+from .composition import (
+    AssemblyDiagnostic,
+    CompositionBlueprint,
+    CompositionEvent,
+    SourceRule,
+)
 from .generation import GenerationResult, GenerationStrategy, StreamItem
 from .identity_chunker import IdentityChunker
 from .registry import (
@@ -39,6 +45,11 @@ __all__ = [
     "RetrievalResult",
     "GenerationResult",
     "StreamItem",
+    # Composition contracts (Phase 19)
+    "AssemblyDiagnostic",
+    "CompositionBlueprint",
+    "CompositionEvent",
+    "SourceRule",
     # Strategy protocols
     "ChunkingStrategy",
     "RetrievalStrategy",

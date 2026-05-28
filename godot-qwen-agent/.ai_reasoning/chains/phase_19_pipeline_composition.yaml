@@ -1,0 +1,297 @@
+# ── Reasoning Chain ───────────────────────────────────────────────────
+chain_id: phase_19_pipeline_composition
+title: "Pipeline Composition: grammar layer for the three-platform architecture"
+created_at: "2026-05-28T20:00:00Z"
+tags:
+  - composition
+  - grammar_engine
+  - pipeline
+  - adapter
+  - registry
+  - blueprint
+  - traceability
+  - auditability
+status: active
+related_chains:
+  - phase_01_three_platform
+  - phase_01_data_integrity
+  - phase_03_adapter_pattern
+  - phase_04_observability
+  - phase_19_composition
+
+# ── 1. Context ───────────────────────────────────────────────────────
+
+context: |
+  The three-platform architecture defines three layers: contracts (Protocols
+  and data models), adapters (translation), and pipeline (execution). But a
+  critical piece was missing: the "grammar layer" — how components compose
+  into pipelines.
+
+  Components are "vocabulary" (what to do). Grammar engines are "syntax"
+  (how to compose them). Without a grammar layer:
+  - Every pipeline has to be hand-coded with if/elif chains
+  - Adding a new chunker requires changing engine code
+  - There is no standard way to route source documents to chunking strategies
+  - Errors during composition are ad-hoc dicts, not structured data
+
+  The fundamental question: where does a "Pipeline Composer" live in a
+  three-platform architecture? It must import domain types from contracts
+  (ContentBlock, Chunk, SemVer) AND execution types from pipeline
+  (PipelineStep, HealthStatus). Only core/adapters/ can legally import
+  from both.
+
+  This revealed a deeper insight: core/adapters/ is a physical container,
+  not a logical role. It houses TWO distinct sub-domains:
+  - Component adapters (1:1 translation, stateless): e.g. ChunkerAdapter
+  - Grammar engines (N:M orchestration, stateful): e.g. SourceRouter
+
+  Same directory, same import permissions, completely different design
+  paradigms. This is not an "adapter layer upgrade" — it's a resolution
+  improvement in understanding what already exists.
+
+# ── 2. Alternatives ──────────────────────────────────────────────────
+
+alternatives:
+  - option: "Put PipelineComposer in core/pipeline/"
+    pros: "Pipeline orchestration intuitively belongs in the pipeline layer"
+    cons: "Violates invariant #1 — pipeline/ cannot import domain types
+      (ContentBlock, Chunk, SemVer). The composer MUST know about chunking
+      strategies, documents, and glob patterns. Moving it to pipeline/
+      would require either violating platform boundaries or creating
+      awkward abstractions to smuggle domain types through."
+
+  - option: "Put PipelineComposer in core/contracts/"
+    pros: "Blueprint schema and data models could live alongside composition rules"
+    cons: "Violates invariant #2 — contracts/ cannot import orchestration
+      types (PipelineRunner, StepConfig, ResourceContainer). The composer
+      MUST produce a RetrieverStep implementing PipelineStep Protocol.
+      Contracts layer has zero business logic by design."
+
+  - option: "Matrix model — every component × every engine = adapter file"
+    pros: "Explicit; each adapter-connector pair is a visible file"
+    cons: "O(N×M) Cartesian explosion. Adding 10 chunkers and 3 engines =
+      30 new files. Engine code changes every time a component is added.
+      The USB model (O(N+M) hub) is strictly superior for >2 components."
+
+  - option: "Device Tree model — static binding in engine code"
+    pros: "Deterministic; IDE-friendly; easy to debug"
+    cons: "Adding a component requires changing kernel code (if/elif/switch).
+      Blueprint names couple to file names. Zero hot-swap capability.
+      The USB model (registry-based discovery) is the correct abstraction
+      for a platform that expects component expansion."
+
+# ── 3. Decision ──────────────────────────────────────────────────────
+
+decision: |
+  Three grammar engines living in core/adapters/composer.py, consuming
+  contracts-layer data models (CompositionBlueprint, SourceRule) and producing
+  pipeline-layer steps (RetrieverStep):
+
+  1. SourceRouter — pure function, glob match + priority sort → SourceRule
+  2. PipelineAssembler — chunker instantiation via COMPONENT_REGISTRY,
+     ChunkerAdapter wrapping, Chunk lineage enrichment, structured diagnostics
+  3. PipelineComposer — thin Facade: Blueprint → Router → Assembler → Step
+
+  All three follow the USB driver model: engine discovers components via
+  COMPONENT_REGISTRY.get("chunker", name), never via direct imports. Adding
+  a chunker = 1 file + @register decorator, zero engine code changes.
+
+  Three pillars are non-negotiable:
+  - Traceable: rule_id, chunker_version, blueprint_version on every Chunk
+  - Transparent: CompositionEvent protocol with event_sink injection
+  - Auditable: blueprint fingerprint, audit_manifest, AssemblyDiagnostic
+
+# ── 4. Rationale ─────────────────────────────────────────────────────
+
+rationale: |
+  Why this design won across 17 dimensions:
+
+  Architecture:
+  - Respects all platform boundaries (contracts ↔ adapters ↔ pipeline)
+  - Hub model prevents O(N×M) matrix explosion
+  - USB model enables hot-plug component addition
+  - Four iron laws prevent architecture degradation
+
+  Data integrity:
+  - All data models @dataclass(frozen=True) + MappingProxyType
+  - Deterministic rule_id (sha256) and blueprint fingerprint
+  - AssemblyDiagnostic and CompositionEvent as first-class citizens
+  - contract_violation field reserved for Phase 25+ graceful degradation
+
+  Observability:
+  - CompositionEvent protocol with event_sink dependency injection
+  - Zero logging framework coupling (engines never import logging)
+  - correlation_id for cross-event tracing
+  - audit_manifest for runtime identity verification
+
+  Future-proofing:
+  - validate_params() classmethod for Rust trait mapping
+  - freeze() for Anti-WinReg startup integrity
+  - Signature caching at @register time (no runtime inspect overhead)
+  - Phase 19 boundary explicitly documented: grammar infrastructure, not
+    relationship behavior
+
+  Costs acknowledged (six hidden taxes):
+  1. Debugging black hole (mitigated by structured ComponentResolutionError)
+  2. IDE intelligence failure (mitigated by component_manifest.json)
+  3. Startup fragility (mitigated by freeze + explicit discover + print_summary)
+  4. Type safety loss (mitigated by Protocol return types)
+  5. Newcomer cognitive wall (mitigated by "how to add component" docs)
+  6. Over-abstraction risk (mitigated by YAGNI threshold: <3 components = dict)
+
+# ── 5. Evidence ──────────────────────────────────────────────────────
+
+evidence:
+  test_files:
+    - tests/unit/test_pipeline_composer.py
+    - core/contracts/composition.py
+    - core/adapters/composer.py
+    - core/adapters/event_sink.py
+    - core/contracts/registry.py
+    - configs/default_pipeline.yaml
+  test_cases:
+    - "TestSourceRule: 9 tests (glob matching, deterministic rule_id, frozen)"
+    - "TestCompositionBlueprint: 10 tests (from_yaml, from_dict, fingerprint, sorting)"
+    - "TestSourceRouter: 6 tests (first-match-wins, fallback, events, correlation_id)"
+    - "TestPipelineAssembler: 8 tests (lineage, partial failure, diagnostics, AssemblyError)"
+    - "TestPipelineComposer: 6 tests (e2e, audit_manifest, health_check)"
+    - "TestArchitectureInvariants: 12 tests (no resolve on Blueprint, pure router, frozen, freeze)"
+    - "TestContractViolationDetection: 5 tests (violation classification, event context, all categories)"
+    - "TestContractAwareEventSink: 11 tests (query, violations, summary, e2e, repr)"
+    - "Full suite: 740 passed, 0 regression, 0 guardrail errors"
+
+# ── 6. Future Guidance ───────────────────────────────────────────────
+
+future_guidance:
+  grammar_engine_location:
+    summary: "Grammar engines live in core/adapters/ alongside component adapters"
+    detail: "The adapters/ directory is a physical container, not a logical role.
+      Any engine that must consume domain types (from contracts) AND produce
+      pipeline steps MUST live here. This is the only layer with cross-platform
+      import permissions."
+    priority: critical
+    phase_applicable: "Phase 19+"
+
+  usb_discovery:
+    summary: "Engines discover components via COMPONENT_REGISTRY.get(), never direct import"
+    detail: "from .chunkers.x import XAdapter is a VIOLATION. Engine code must
+      not change when new components are added. The four USB prohibitions are
+      machine-enforceable via AST guardrails."
+    priority: critical
+    phase_applicable: "Phase 19+"
+
+  validate_params_pattern:
+    summary: "Components SHOULD provide validate_params(params) -> list[str] classmethod"
+    detail: "Tier 1 validation captures semantic constraints (chunk_overlap < chunk_size)
+      that inspect.signature cannot express. This classmethod maps directly to
+      a Rust trait method. Fallback: COMPONENT_REGISTRY.validate_params() reads
+      cached signatures from @register time."
+    priority: high
+    phase_applicable: "Phase 19+"
+
+  anti_winreg_firewalls:
+    summary: "Four firewalls prevent Registry from becoming Windows Registry"
+    detail: "1. freeze() after bootstrap; 2. explicit discover(), no magic import;
+      3. typed keys (Protocol, not Any); 4. test isolation fixture. All four
+      must be in place from Day 1. Missing any one = Registry degradation risk."
+    priority: high
+    phase_applicable: "Phase 19+"
+
+  contract_paradigm_boundary:
+    summary: "Phase 19 implements grammar INFRASTRUCTURE, not relationship BEHAVIOR"
+    detail: "SourceRouter does NOT ask users which chunker to use. PipelineAssembler
+      does NOT renegotiate params. CompositionEvent does NOT compute trust scores.
+      These are Phase 25+ capabilities. Phase 19's job: make the substrate so
+      clean that relationship logic can grow without kernel redesign. The boundary
+      is explicitly documented in the plan to prevent cognitive dissonance."
+    priority: high
+    phase_applicable: "Phase 19"
+
+  rust_migration_path:
+    summary: "Python is the contract prototype, not the final product"
+    detail: "Five iron laws ensure today's Python code is tomorrow's Rust asset:
+      1. Contract/implementation physical separation; 2. Tests as specs;
+      3. Blueprint Schema is the invariant; 4. Adapter FFI exits pre-built;
+      5. Docstrings as human-readable contracts. The Python→Rust mapping table
+      in the plan identifies every risk point and its Phase 19 mitigation."
+    priority: medium
+    phase_applicable: "Phase 19-50"
+
+  kernel_value_audit:
+    summary: "Every Phase must pass the kernel value audit checklist"
+    detail: "Six questions including: 'Without this kernel, would using existing
+      frameworks take more or less time?' and 'Does the interface signature assume
+      all information is complete at call time?' Audit failures = stop and reassess.
+      YAGNI is STRICTER in the kernel than in application code."
+    priority: medium
+    phase_applicable: "Phase 19+"
+
+  contract_violation_detection:
+    summary: "PipelineAssembler MUST classify failures into contract violation categories"
+    detail: "Phase 19.5 introduced _classify_violation() that maps technical error_types
+      to contract violation categories: unknown_chunker_strategy, invalid_chunk_params,
+      routing_contract_breach, output_contract_violation. Execution failures return None
+      (technical, not contractual). AssemblyDiagnostic.contract_violation and
+      CompositionEvent.context['contract_violation'] are both populated.
+      This is the first 'nerve' — downstream consumers can now distinguish
+      'something broke' from 'a contract was breached'."
+    priority: critical
+    phase_applicable: "Phase 19.5+"
+
+  structured_event_sink:
+    summary: "ContractAwareEventSink provides queryable, thread-safe event storage"
+    detail: "ContractAwareEventSink implements Callable[[CompositionEvent], None]
+      (drop-in for any event_sink parameter) plus query methods: by_correlation(),
+      by_type(), violations, violations_by_type(), summary. Uses threading.Lock
+      for future async safety. WARNING: implement __len__ on a Callable sink
+      breaks the 'event_sink or lambda' truthiness pattern — use explicit
+      'if event_sink is not None' instead."
+    priority: high
+    phase_applicable: "Phase 19.5+"
+
+  contract_violation_field_populated:
+    summary: "AssemblyDiagnostic.contract_violation is now populated at runtime"
+    detail: "Previously the field existed but was always None (per Phase 19 boundary).
+      Phase 19.5 begins populating it for instantiation, routing, and validation
+      failures. Execution failures remain None (may be transient bugs, not contract
+      breaches). This distinction is the foundation for Phase 25+ graceful degradation
+      (repair vs renegotiate vs abandon)."
+    priority: high
+    phase_applicable: "Phase 19.5-25"
+
+  bugs_discovered_and_fixed:
+    summary: "Two bugs found during Phase 19.5 implementation, both instructive"
+    detail: "1. threading.Lock deadlock: summary property held _lock then called
+      violations_by_type() which re-acquired same non-reentrant lock. Fix: compute
+      inline within single lock acquisition. Lesson: public methods on locked
+      objects must never call sibling public methods that also acquire the lock.
+      2. Python __len__ truthiness trap: event_sink or lambda evaluated sink's
+      __len__ (0), treated it as falsy, silently replaced with no-op. Tests never
+      caught this because list.append (a bound method) is always truthy. Fix:
+      use explicit 'if X is not None' instead of 'X or default' for callable
+      parameters that may implement __len__."
+    priority: medium
+    phase_applicable: "Phase 19.5 (lessons permanent)"
+
+anti_patterns:
+  - "Putting resolve() or any matching algorithm on CompositionBlueprint (data model)"
+  - "SourceRouter producing I/O, network calls, or state mutation (must be pure)"
+  - "PipelineAssembler importing logging or print() directly (use event_sink)"
+  - "Caller bypassing PipelineComposer to use Router/Assembler directly (except tests)"
+  - "AssemblyDiagnostic as Dict[str, Any] instead of frozen dataclass"
+  - "Chunk metadata missing rule_id or blueprint_version (broken lineage)"
+  - "audit_manifest missing blueprint_fingerprint (unreproducible incidents)"
+  - "Composer constructor accepting file path instead of CompositionBlueprint"
+  - "from .chunkers.x import XAdapter in any grammar engine"
+  - "if rule.chunker == 'semantic': branch in any grammar engine"
+  - "Blueprint YAML chunker name coupled to file path or class name"
+  - "Component adapter importing from composer.py or any grammar engine"
+  - "Registry.register() after freeze() — must raise RuntimeError"
+  - "health_check() using live inspect.signature instead of cached data"
+  - "CompositionEvent missing correlation_id"
+  - "AssemblyDiagnostic missing contract_violation field"
+  - "Using 'event_sink or lambda' with a sink that implements __len__ (truthiness trap)"
+  - "Calling public locked methods from within another locked method (non-reentrant deadlock)"
+  - "Treating execution failures as contract violations (they may be transient bugs)"
+  - "Populating contract_violation with free-text instead of enum categories"
+  - "Sink.query() returning live references to internal list instead of copies"

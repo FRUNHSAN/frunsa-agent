@@ -4,6 +4,8 @@ The only package that imports from both core.contracts and core.pipeline.
 """
 
 from .chunker_adapter import AdapterTypeError, ChunkerAdapter
+from .composer import AssemblyError, PipelineAssembler, PipelineComposer, SourceRouter
+from .event_sink import ContractAwareEventSink
 from .factory import create_step_factory
 from .generator_adapter import GenerationAdapter, GenerationBackend, StreamingBackend
 from .reranker_adapter import ScoringAdapter, ScoringBackend
@@ -34,4 +36,10 @@ __all__ = [
     # Common
     "AdapterTypeError",
     "create_step_factory",
+    # Grammar engines (Phase 19)
+    "AssemblyError",
+    "ContractAwareEventSink",
+    "PipelineAssembler",
+    "PipelineComposer",
+    "SourceRouter",
 ]

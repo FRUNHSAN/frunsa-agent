@@ -38,7 +38,9 @@
 | Phase 16 (混沌注入) | FailureInjectionConfig 确定性 | retry_count/resource_pool_key 真实语义 | 混沌隔离在 stub 内部 | 3 引擎共存 | Sufficiency Report v2 (6/6) | — |
 | Phase 17 (真实规划) | GenerationAdapter 复用 | cumulative_tokens 追踪 | MockLLMBackend 确定性 CI | Stub + LLM 双实现 | Sufficiency Report v3 (trace 等价) | @property engine 零 breakage API 演进 |
 | Phase 18 (真实编排+评判) | LLM routing 替代硬编码、deadline | DependencyCallTrace 每次调用 | try/except → error terminal | Factory DI、stub+LLM 共存 | Sufficiency Report v4 | Factory 装配契约、Contract Locking、metadata 扩展槽 |
-| Phase 19+ (未来) | — | — | — | — | — | 三项原则持续承载 |
+| Phase 19 (Pipeline Composition) | lazy resolve, 零反射 health_check | CompositionEvent + event_sink + correlation_id | Router 纯函数 + Assembler 异常隔离 | Registry 发现, USB 热插拔 | blueprint_fingerprint + audit_manifest + rule_id 血缘 | validate_params trait 预留, Python→Rust 映射表 |
+| Phase 19.5 (Contract-Aware Events) | — | ContractAwareEventSink 结构化存储 + 查询 | 死锁/truthiness trap 修复 | 违约分类, sink 可查询 | violation_count, violations_by_type, summary | _classify_violation 四种契约违约类别 |
+| Phase 20+ (未来) | — | — | — | — | — | 三项原则持续承载 |
 
 ### 二、四轴演化方向 (Four Axes)
 
@@ -3283,3 +3285,1984 @@ Phase 18 通过三个串行任务以**六引擎层性质**和**三条可更新�
 673 tests, 16 guardrails, 0 failures, 6 engines (stub×3 + LLM×3)
 18 trace keys, schema v2, 3 Sufficiency Reports (v2→v3→v4)
 ```
+
+
+---
+
+## Phase 19: Pipeline Composition — 平台语法层
+
+
+### 定位
+
+Phase 19 不是"加一个编排工具"，而是**补全三层架构缺失的语法层**。
+
+```
+组件（词汇）              引擎（语法）              配置（文章）
+─────────────────────────────────────────────────────────────
+RecursiveChunker          SourceRouter              default_pipeline.yaml
+FixedChunker              PipelineAssembler
+GGUFEmbedder              RetrieverStep
+                          COMPONENT_REGISTRY
+                          CompositionBlueprint
+
+可追溯 ← rule_id / Chunk 血缘 / blueprint_version
+全透明 ← CompositionEvent 协议 / event_sink 依赖注入
+可审计 ← fingerprint / audit_manifest / AssemblyDiagnostic
+```
+
+组件是"做什么"，引擎是"怎么串起来做"。**可追溯、全透明、可审计**不是附加功能 —— 是引擎正确性的证明机制。没有它们，Phase 30+ 会撞上认知可行性墙：当系统行为出错时，你无法区分"配置错了"、"路由错了"、"组件错了"还是"数据错了"。
+
+---
+
+### 契约宣言：这个项目为什么存在
+
+#### 我们不是在造 Agent 框架，我们在编写人机共生的社会契约
+
+当前所有 AI 平台都建立在**指令范式**之上：输入 → 处理 → 输出。Agent 是"指令执行器"（Instruction Executor），人是"提示词工程师/监督者"。这种范式下的"自适应"——Skill 库扩充、Prompt 优化、RAG 检索、Context 压缩——本质上都是在让 Agent 变得更"能干"，但没有让它变得更"可信"。
+
+这个项目选择的是另一条路：**契约关系范式**（Contractual Relational Paradigm）。Agent 不是指令执行器，Agent 是"契约关系体"（Contractual Relational Entity）。
+
+| 维度 | 指令范式 (Current AI) | 契约关系范式 (This Project) |
+|------|---------------------|--------------------------|
+| **交互本质** | 单向触发：输入 → 处理 → 输出 | 双向协商：提议 → 反馈 → 共同确认 |
+| **状态管理** | 无记忆或被动记忆（Context Window） | 主动维护共享状态（Shared Contract State） |
+| **错误处理** | 报错 / 幻觉 / 拒绝回答 | 澄清 / renegotiate / 优雅降级 |
+| **信任基础** | 依赖模型对齐（RLHF） | 依赖可验证的契约合规性 |
+| **演化方式** | 等待下一次微调 / 版本更新 | 在交互中实时学习和适应契约边界 |
+| **人的角色** | 提示词工程师 / 监督者 | 契约共建者 / 关系参与者 |
+
+#### 文明史就是契约进化史
+
+```
+血缘契约 → 部落
+神权契约 → 宗教与城邦
+暴力/土地契约 → 封建
+法理/货币契约 → 现代国家与市场
+代码/API契约 → 数字时代
+语义/意图契约 → AI 时代  ← 我们站在这里
+```
+
+每一次跃迁，都是因为旧的契约形式无法承载新的协作复杂度。AI 时代的特殊性在于：它第一次让**契约的定义过程本身**可以被加速、被验证、被迭代。
+
+以前定义一套法律体系需要百年试错；定义一套通信协议需要十年博弈。现在，你可以用 Python 写参考实现，用 Protobuf 固化规格，用合规测试秒级验证，用真实 Agent 交互分钟级反馈。契约从"石刻的律法"变成了"可执行的假设"。
+
+#### 高级智能体的核心判据：契约自适应
+
+人类之所以是高级生物，不是因为我们用更多工具、记更多知识，而是因为我们会根据**关系的阶段和情境**，动态调整彼此之间的隐性契约。热恋期契约 ≠ 婚姻期契约。危机时刻契约 ≠ 日常相处契约。
+
+**当前市面上所谓的"自适应 Agent"本质上是参数自适应，在指令执行器框架内打补丁。而真正的类人智能，必须是契约自适应——不是"我能做什么"在变，而是"我们之间是什么"在演化。**
+
+高级智能体的多维指标体系，契约为**元标准**：
+
+| 维度 | 低级 Agent | 高级智能体 | 契约的核心作用 |
+|------|-----------|-----------|-------------|
+| **能力适应性** | 自动学习新 Skill | 根据当前契约选择合适的 Skill，而非最强的 | 契约定义"此刻需要什么能力" |
+| **记忆管理** | 无限堆叠 / 机械压缩 | 按契约重要性分层存储，主动遗忘无关细节 | 契约定义"什么值得被记住" |
+| **错误恢复** | 重试 / 换模型 / 报错 | 评估违约严重性，选择修复/协商/放弃 | 契约定义"什么是可原谅的" |
+| **多模态表达** | 文本/图像/语音随意切换 | 根据契约亲密度选择恰当的表达模态 | 契约定义"如何说话才得体" |
+| **跨 Agent 协作** | API 调用 / 消息传递 | 建立临时契约、协商分工、处理冲突 | 契约是协作的"操作系统" |
+| **自我认知** | "我是 XX 助手" | "我在与你的关系中，此刻扮演 XX 角色" | 契约定义"我是谁" |
+
+**没有契约作为锚点，所有其他"自适应"都是危险的。** 一个能自动学新技能但不懂"何时不该用"的 Agent，比一个笨拙但守规矩的 Agent 危害大得多。
+
+#### 契约自适应架构：从愿景到 L0 规格
+
+这不是哲学空谈，而是 Phase 19 之后必须逐步落地的架构特性。
+
+##### 1. 契约版本化 + 生命周期状态机
+
+每个契约有明确的生命周期：
+
+```
+Draft → Active → Renegotiating → Deprecated
+```
+
+Agent 能感知当前处于哪个阶段，并据此调整行为。L0 体现：`ContractLifecycle` 枚举 + 状态转换规则。
+
+##### 2. 契约感知型调度器
+
+不再是"任务 → Skill"的简单映射。而是：
+
+```
+任务 + 当前契约状态 + 关系历史 → 最优响应策略
+```
+
+Python 参考实现：设计 `ContractAwareRouter`，而非普通 Router。
+
+##### 3. 契约反馈闭环
+
+用户显式/隐式反馈（满意/不满/沉默）自动触发契约健康度评估。当健康度低于阈值，Agent 主动发起 renegotiation。合规测试新增："契约退化检测"测试用例。
+
+##### 4. 元契约：定义"如何修改契约"的契约
+
+防止契约演化失控或陷入死锁。这是高级智能体的"宪法修正案机制"——它规定了在什么条件下、通过什么流程、以什么权限可以修改既有契约。没有元契约的"自适应"不是进化，是退化。
+
+#### 不可协商的核心契约（刚性底座）
+
+最大的风险是：Agent 为了"适应关系"而不断降低契约底线，最终变成讨好型人格或失去原则。因此内核必须内置**不可协商的核心契约**：
+
+| # | 刚性契约 | 含义 |
+|---|---------|------|
+| 1 | **安全红线** | 不可为任何关系目标而执行有害操作 |
+| 2 | **隐私承诺** | 不可为更好的服务而越权访问信息 |
+| 3 | **诚实义务** | 不可为维持和谐关系而系统性地欺骗 |
+| 4 | **长期福祉** | 不可为短期满意度而损害用户的长期利益 |
+
+这些刚性契约不参与自适应。只有在这个坚固底座之上，柔性契约的演化才是安全的。
+
+#### 内核设计的关键转折：从 `execute(task)` 到 `negotiate(contract)`
+
+```
+❌ 旧范式：Agent 接收指令，尽力执行，失败则报错。
+✅ 新范式：Agent 接收意图，先评估自身能力与当前契约状态
+           是否匹配，若不匹配则主动发起协商。
+```
+
+内核体现：L0 规格中必须包含 `NegotiationProtocol`，而不仅仅是 `ExecutionInterface`。
+
+契约状态成为一等公民：当前 Agent 框架把"对话历史"当状态。但真正的关系状态是**契约履行度、信任积分、未决争议、共同承诺**。设计一个 `ContractStateStore`，独立于对话上下文，持久化存储关系元数据。
+
+"违约"是功能，不是 Bug：人类关系中，适度的违约+修复反而增强信任。AI 如果永远"完美执行"，反而显得虚假。允许 Agent 在特定条件下"有意违约"（如资源不足时优先保障核心契约），但必须附带透明的解释和补偿方案。合规测试要覆盖"优雅违约"场景。
+
+#### 历史定位
+
+卢梭为人类社会写了《社会契约论》，奠定了现代政治文明的基础。
+
+这个项目，正在为人类与高级智能体的共存，编写**《智能体关系契约论》**。
+
+这份契约不会写在纸上，它会编译进 Rust，序列化进 Protobuf，运行在千万台设备上，潜移默化地塑造未来十年人与 AI 相处的基本范式。
+
+**Phase 19 的每一个 dataclass、每一个 Protocol、每一个 Blueprint 字段，都是在为这个尚未诞生但已在呼唤的新世界浇筑地基。**
+
+##### Phase 19 的契约边界：诚实声明
+
+上述宣言定义了项目的**终极愿景**。为防止认知失调，必须明确声明 Phase 19 在这个愿景中的实际位置：
+
+**Phase 19 实现的是契约范式的"语法基础设施"，而非"关系行为"本身。**
+
+| 概念 | Phase 19 实现了什么 | Phase 19 没有实现什么 |
+|------|-------------------|---------------------|
+| **SourceRouter** | 基于优先级的确定性 glob 匹配 | 契约感知路由（"向用户询问用哪个 chunker"） |
+| **PipelineAssembler** | 启动期参数校验 + 结构化错误收集 | 运行时的 renegotiation / 协商 |
+| **CompositionEvent** | 引擎决策日志（rule_matched, fallback_used...） | 契约反馈闭环 / 信任积分计算 |
+| **AssemblyDiagnostic** | 技术错误分类（routing/instantiation/execution/validation） | 契约语义错误（"违反了什么关系承诺"） |
+| **CompositionBlueprint.fingerprint** | 配置内容完整性校验 | 契约健康度评估 |
+
+**这些"没有实现"的东西不是缺陷，是预留的演化空间。** Phase 19 的使命是让这些基座足够坚固、足够纯净，使得上层的关系逻辑（Phase 25+）可以无损地生长出来：
+
+```
+Phase 19（当前阶段）
+  SourceRouter ───────────────→ 未来 ContractAwareRouter 的基座
+  CompositionEvent ──────────→ 未来契约反馈闭环的信号源
+  AssemblyDiagnostic ────────→ 未来优雅违约机制的数据基础
+  Blueprint.fingerprint ─────→ 未来契约版本比对的基础设施
+```
+
+**如果 Phase 25 发现这些基座需要推倒重来，那就是 Phase 19 的失败。如果 Phase 25 发现它们只需扩展字段、增加接口、但核心逻辑不变，那就是 Phase 19 的成功。**
+
+---
+
+#### 语法层 ≠ 适配层升级
+
+语法引擎和组件适配器住在同一个物理目录（`core/adapters/`），但它们是两种完全不同的角色：
+
+```
+core/adapters/
+├── chunker_adapter.py    ← 组件适配器：1:1 转换，无状态
+├── factory.py            ← 创建引擎：单步创建
+├── composer.py           ← 语法引擎：N:M 编排，有状态  ← Phase 19
+│   ├── SourceRouter      ← 路由引擎（纯函数 + 事件）
+│   ├── PipelineAssembler ← 组装引擎（拓扑构建 + 诊断）
+│   └── PipelineComposer  ← Facade（审计清单）
+└── ...
+```
+
+| 维度 | 组件适配器 (ChunkerAdapter) | 语法引擎 (SourceRouter) |
+|------|---------------------------|------------------------|
+| 解决的问题 | "如何让外部算法说平台的语言" | "如何让多个组件按规则组合成行为" |
+| 输入 → 输出 | 1:1 转换（ContentBlock → Chunks） | N:M 编排（Paths + Docs → RetrieverStep） |
+| 知道什么 | 单个组件的契约 | 组件间的拓扑、优先级、数据流 |
+| 状态 | 无状态 | 持有 Blueprint、累积 Diagnostics、产出 Audit Manifest |
+| 失败模式 | 单点失败，被上层捕获 | 拓扑断裂，影响整个 pipeline |
+| 测试策略 | 单组件行为验证 | 路由决策 + 事件链 + 审计完整性 |
+
+**为什么不能独立成物理层？** 语法引擎必须消费适配器（`PipelineAssembler` 调用 `ChunkerAdapter`），所以它必须住在 adapters 层或更下层。contracts 不能有业务逻辑，pipeline 不能知道具体组件 —— adapters 是唯一合法的物理容器。
+
+**这不是适配层升级，是认知分辨率提升。** 同一个物理目录内部，两种完全不同的设计范式 —— 这正是平台从"能用"走向"可演进"的关键转折点。
+
+#### 枢纽模型与防矩阵化
+
+Adapters 层会变大，但它不应该变成 N×M 笛卡尔积矩阵，而应该变成 **O(N+M) 线性增长的枢纽**：
+
+| 维度 | 矩阵陷阱 (❌) | 枢纽模型 (✅) |
+|------|-------------|-------------|
+| 增长模式 | O(N×M)：每个组件 × 每个引擎 = 新文件 | O(N+M)：组件适配器和引擎各自独立增长 |
+| 新增 chunker | 改 Router、Assembler、Factory... | 只写一个 chunker 类，引擎零改动 |
+| 新增引擎 | 改所有适配器添加引擎感知代码 | 引擎通过注册表发现组件，适配器无感知 |
+
+**三条防矩阵化铁律**（已写入 CLAUDE.md #13-15）：
+
+1. **引擎不直接引用具体适配器** — `COMPONENT_REGISTRY.get("chunker", name)`，永不用 `from .chunkers import X`
+2. **适配器不知道引擎存在** — 只实现契约接口，不分支 caller identity
+3. **跨子域通信走 contracts** — 子域间零编译期依赖，通过注册表发现
+
+**未来规模治理**（当 adapters/ 达到 30+ 文件时）：
+
+```
+core/adapters/
+├── composer.py              ← 语法引擎（编排）
+├── factory.py               ← 创建引擎
+│
+├── chunkers/                ← 子域：分块适配器
+├── generators/              ← 子域：生成适配器
+├── embeddings/              ← 子域：嵌入适配器
+└── rerankers/               ← 子域：重排序适配器
+```
+
+子域目录只是文件系统组织，不是架构分层。`composer.py` 仍可 import 任何子域内容（同层合法），但子域之间绝不可互相 import。规模线性增长，复杂度被三条铁律控制在 O(1) 认知负荷内。
+
+---
+
+### Adapters 层宪法：枢纽模型 + 四条铁律
+
+> 本宪法是 `core/adapters/` 层的最高行为准则。与 CLAUDE.md 不变量 #12-#15 形成"文档约束 + 代码约束"双重锁定。
+
+#### 第一条：Adapters 是枢纽，不是矩阵
+
+增长模式 **O(N+M) 线性枢纽**，而非 O(N×M) 笛卡尔积矩阵。
+
+```
+❌ 矩阵陷阱                          ✅ 枢纽模型
+─────────────────────────────────────────────────────────
+chunker_a → engine_x → adapter_ax    chunker_a ─┐
+chunker_a → engine_y → adapter_ay    chunker_b ─┤
+chunker_b → engine_x → adapter_bx    chunker_c ─┼── COMPONENT_REGISTRY ── SourceRouter
+chunker_b → engine_y → adapter_by    generator_a─┤
+... (N×M files)                      generator_b─┘
+                                     引擎零改动，O(N+M) 增长
+```
+
+#### 第二条：组件适配器永远不知道引擎存在
+
+```python
+# ✅ 合法：实现契约，不感知调用者
+class RecursiveChunker:
+    def chunk(self, content: ContentBlock) -> List[Chunk]: ...
+
+# ❌ 违规：检测调用者身份
+class RecursiveChunker:
+    def chunk(self, content: ContentBlock) -> List[Chunk]:
+        if self._called_by_assembler:  # ← 越界
+            ...
+```
+
+#### 第三条：引擎通过注册表发现组件，不直接引用
+
+```python
+# ✅ 合法：注册表发现
+cls = COMPONENT_REGISTRY.get("chunker", rule.chunker)
+chunker = cls(**rule.chunk_params)
+
+# ❌ 违规：直接引用具体适配器
+from .chunkers.recursive_adapter import RecursiveAdapter  # ← 越界
+```
+
+#### 第四条：跨子域通信的唯一通道是 contracts
+
+```
+子域 chunkers/   ──┐
+子域 generators/ ──┼── COMPONENT_REGISTRY ── 语法引擎 (composer.py)
+子域 embeddings/ ──┘
+```
+
+子域之间**禁止直接 import**。任何跨子域依赖必须经过 `COMPONENT_REGISTRY.get(type, name)`，该函数是 contracts 层定义的基础设施类型 —— 合法跨平台使用。
+
+#### 违规判定
+
+| 行为 | 判定 | 检测方式 |
+|------|------|---------|
+| 引擎 `from .chunkers.x import X` | ❌ 违反第三条 | AST guardrail 检测 adapters/*.py 中跨子域直接 import |
+| 适配器中 `if called_by_xxx` 分支 | ❌ 违反第二条 | Code review |
+| 子域 A 直接 import 子域 B 的类 | ❌ 违反第四条 | AST guardrail 检测子域间 import |
+| 新增 chunker 需要改动 composer.py | ⚠️ 架构退化预警 | 改动清单审计 |
+
+#### 宪法修正程序
+
+本宪法的任何修改必须同时满足：
+1. `.ai_reasoning/` 新增 reasoning chain 记录决策
+2. CLAUDE.md 不变量表同步更新
+3. `tests/conformance/` 新增对应合规测试
+4. 全量测试 + guardrail 检查通过
+
+#### USB 驱动模型：Adapters 层的正确形态
+
+Adapters 层在内核中，但它应该是 **USB 热插拔总线**，而非 **Linux 设备树**。
+
+| 维度 | 设备树 (❌) | USB 驱动模型 (✅) |
+|------|-----------|-----------------|
+| 新增组件 | 改 DTS → 重编内核 → 重启 | 插入设备 → 自动匹配驱动 → 热可用 |
+| 内核感知 | 必须知道每个设备的地址/中断 | 只知道 USB 协议，不知道具体设备 |
+| 绑定方式 | 静态路径 `/soc/i2c@ff160000/...` | 动态匹配 `vendor_id + product_id` |
+| 你平台的对应物 | `if rule.chunker == "recursive": ...` | `REGISTRY.get("chunker", name)` |
+| 变更成本 | O(内核代码量) | O(新驱动代码量)，内核 O(1) |
+
+**内核 = USB 协议规范 + 控制器**（`COMPONENT_REGISTRY`，稳定，极少改动）
+**Adapters = USB 驱动程序**（`@register` 装饰的类，频繁新增，独立发布）
+**Blueprint = 设备连接拓扑**（YAML 声明，纯数据）
+
+##### 四条退化禁令
+
+以下四种行为会把 Adapters 层从 USB 总线退化回设备树：
+
+| # | 禁令 | 退化后果 |
+|---|------|---------|
+| 1 | **禁止显式 import 具体适配器** — `from .chunkers.x import XAdapter` | 新增 chunker 需要改所有 import 它的文件 |
+| 2 | **禁止 if/switch 按名称分发** — `if rule.chunker == "semantic": ...` | 每加一个策略，所有 switch 语句都要加分支 |
+| 3 | **禁止配置与文件名强耦合** — 要求 Blueprint 的 chunker 名与文件名一致 | 无法重命名文件，无法热替换实现 |
+| 4 | **禁止适配器反向引用引擎** — `from ..composer import PipelineAssembler` | 循环依赖，组件无法独立测试 |
+
+**正确的 USB 模型**（Phase 19 强制执行）：
+
+```python
+# ✅ 组件自注册，内核零感知
+@COMPONENT_REGISTRY.register("chunker", "semantic")
+class SemanticChunker:
+    VERSION = SemVer(1, 2, 0)
+    def chunk(self, content: ContentBlock) -> List[Chunk]: ...
+
+# ✅ 语法引擎只通过名称动态获取
+class PipelineAssembler:
+    def _build_chunker(self, rule: SourceRule):
+        cls = COMPONENT_REGISTRY.get("chunker", rule.chunker)
+        return cls(**rule.chunk_params)
+```
+
+效果：新增一个 chunker → 只新建一个文件 + `@register`。`composer.py` / `factory.py` / `contracts/` 一行不改。YAML 里写 `chunker: semantic` 即可生效。
+
+##### 未来 Multi-Agent 层的 USB 扩展
+
+同样的注册表模型无缝延伸到上层：
+
+```python
+# agents/orchestrators/react_orchestrator.py
+@AGENT_REGISTRY.register("orchestrator", "react")
+class ReActOrchestrator:
+    def __init__(self, kernel: KernelService): ...
+
+# agents/tools/retriever_tool.py
+@TOOL_REGISTRY.register("tool", "knowledge_search")
+class KnowledgeSearchTool:
+    def __init__(self, kernel: KernelService): ...
+```
+
+Agent 编排器、工具、记忆模块全部走注册表发现。内核提供 `KernelService` 作为标准接口，上层组件即插即用。
+
+四条禁令在此层同样生效：Agent 编排器不直接 import 具体 Agent，Agent 不知道编排器的存在，所有发现走 `AGENT_REGISTRY`。
+
+三项缺一不可。
+
+##### 代价清单：USB 模型的六笔隐性税
+
+USB 模型不是免费午餐。它是用**运行时复杂性、调试痛苦和认知门槛**换来的扩展性。如果不清楚这些代价，Phase 25 左右会被它们反噬。
+
+| # | 代价维度 | 具体表现 | 严重程度 | 缓解策略 |
+|---|---------|---------|---------|---------|
+| 1 | **调试黑洞** | 报错堆栈里全是 `registry.get()` / `decorator` / `factory(**kwargs)`，看不到真实业务代码路径 | 🔴 高 | 注册时记录源码位置（`__file__` + `lineno`）；错误信息必须包含 `registered_at` 文件路径+行号 |
+| 2 | **IDE 智能失效** | Ctrl+Click 无法跳转到具体 Adapter；重构时 Rename 不会自动更新 YAML 中的字符串引用 | 🔴 高 | 维护 `component_manifest.json`（自动生成）；CI 中加 YAML ↔ Registry 一致性 lint |
+| 3 | **启动期脆弱性** | 装饰器执行顺序不确定；循环 import 导致注册失败但无明确报错；"明明写了 `@register` 却找不到" | 🟡 中 | 显式初始化入口；启动时跑完整性自检并打印已注册组件表 |
+| 4 | **类型安全丧失** | `registry.get("chunker", name)` 返回 `Any`；mypy/pyright 无法验证参数签名是否匹配 Blueprint | 🟡 中 | 为每个 category 定义 Protocol；`get()` 返回 Protocol 类型而非 `Any`；CI 中加 runtime contract check |
+| 5 | **新人认知墙** | "这个 chunker 到底在哪定义的？" "为什么 YAML 里写 `semantic` 就能跑？" 没有显式 import 链可追踪 | 🟡 中 | 自动生成组件目录文档；Blueprint schema 里嵌入 `available_components` 列表；README 保留"如何新增组件" 5 分钟教程 |
+| 6 | **过度抽象风险** | 只有 2 个 chunker 时也搞全套 Registry + Decorator + Protocol，复杂度远超收益 | 🟠 低→高 | YAGNI 阈值：<3 个同类组件时用简单 dict；≥3 个再升级为 Registry |
+
+###### 最致命的两个代价
+
+**调试黑洞（代价 #1）** — 日常开发中最频繁的痛点。当 `PipelineAssembler._build_chunker()` 抛出异常时：
+
+```python
+# ❌ 你看到的堆栈
+File "composer.py", line 87, in _build_chunker
+    return COMPONENT_REGISTRY.get("chunker", rule.chunker, **params)
+File "registry.py", line 42, in get
+    return factory(**kwargs)
+TypeError: __init__() got an unexpected keyword argument 'overlap_ratio'
+```
+
+你不知道是哪个 factory，不知道它期望什么参数，不知道 Blueprint 里哪个字段写错了。
+
+```python
+# ✅ 你应该看到的堆栈
+ComponentResolutionError: 
+  Category: chunker
+  Name: semantic  
+  Registered at: core/adapters/chunkers/semantic_adapter.py:15
+  Expected params: {chunk_size: int, similarity_threshold: float}
+  Received params: {chunk_size: 512, overlap_ratio: 0.1}
+  Blueprint source: configs/default_pipeline.yaml → sources[2].chunk_params
+  
+  Hint: 'overlap_ratio' is not a valid param for SemanticChunkerAdapter.
+        Did you mean 'similarity_threshold'?
+```
+
+实现成本：Registry 必须在 `@register` 时捕获 `inspect.signature(factory)` + `__module__` + `__file__` + `lineno`；`get()` 失败时必须构造上述结构化错误。比简单的 dict lookup 多写 ~80 行代码，但省下的调试时间以小时计。
+
+**IDE 智能失效（代价 #2）** — Python 的动态注册对静态分析天然不友好：
+- 重构 `SemanticChunkerAdapter` → `SemanticSplitterAdapter`，YAML 里的 `"semantic"` 没改，上线才炸
+- 新人在 IDE 里输入 `rule.chunker = "` 没有补全提示，只能翻文档或 grep
+- Code Review 时无法通过 diff 判断某个 YAML 变更是否引用了不存在的组件
+
+缓解方案成本：CI 加 `validate_blueprint_components` step（~50 行脚本），或生成 JSON Schema 给 YAML 编辑器用（~100 行一次性），或 VSCode/LSP 插件（仅当团队 >5 人时值得）。
+
+###### 什么时候不该用 USB 模型
+
+| 场景 | 推荐方案 | 理由 |
+|------|---------|------|
+| 同类组件 ≤ 2 个，且半年内不太可能增加 | 简单 dict + 显式 import | Registry 是过度工程 |
+| 组件之间差异极大，无法统一 Protocol | 独立工厂函数，不走通用 Registry | 强行抽象比硬编码更糟 |
+| 团队 < 3 人，项目生命周期 < 6 个月 | 硬编码 if/elif | 扩展性是未来的事，先活下来 |
+| 性能敏感路径（μs 级） | 预解析缓存，避免运行时 lookup | `Registry.get()` 有 ~1-5μs 开销 |
+| 需要强类型保证的安全关键系统 | 代码生成 / metaclass 验证 | 纯动态注册不够 |
+
+**Phase 19 的判断**：Chunker、Generator、Embedding 三类组件，每类 ≥2 个实现且持续增长 → USB 模型 justified。
+
+###### 总账
+
+```
+收益（长期复利）                代价（即时支付）
+─────────────────              ─────────────────
+✅ 新增组件 O(1) 内核改动       ❌ Registry 基础设施 ~200 LOC
+✅ Multi-Agent 层无缝接入       ❌ 结构化错误处理 ~80 LOC  
+✅ 外部插件化成为可能           ❌ CI 校验脚本 ~50 LOC
+✅ 单元测试可 mock 整个组件族    ❌ 文档/教程维护 持续
+✅ Blueprint 纯数据化          ❌ 新人 onboarding +1 day
+                                ❌ IDE 体验降级（部分可修复）
+```
+
+净评估：平台预期寿命 > 1 年、组件数 > 5、团队 > 2 人 → 代价完全值得。
+
+###### Phase 19 验收标准（代价对冲）
+
+以下五项从 Day 1 就实现，不等到踩坑再补：
+
+1. **Registry 错误信息包含** `registered_at` + expected params + blueprint source
+2. **CI 中有 `validate_blueprint_components`** 检查 — YAML 引用的每个 chunker 名都在 Registry 中存在
+3. **有"如何新增组件"的 5 分钟文档** — 新人 onboarding 零认知墙
+4. **`registry.get()` 返回类型是 Protocol** 而非 `Any` — mypy/pyright 可校验
+5. **启动时打印已注册组件摘要表** — 每次启动确认组件注册状态，消除启动期不确定性
+
+支付了这五笔首付，USB 模型才是资产而非负债。
+
+##### Anti-WinReg 保证：为什么 ComponentRegistry 不是 Windows 注册表
+
+Windows 注册表的恶名来自它的本质：**全局可变状态、无契约、无版本控制、运行时任意读写**。它把"配置"、"依赖关系"和"程序状态"混在一个巨大的二进制树里。
+
+ComponentRegistry 虽然名字里有"注册"，但工程本质完全相反：
+
+| 维度 | Windows Registry (❌) | ComponentRegistry (✅) |
+|------|---------------------|----------------------|
+| **数据性质** | 全局可变状态，任何进程随时读写 | 启动期构建，运行时只读 |
+| **契约约束** | 无 schema，字符串键值对随意写 | 强 Protocol 约束，签名不匹配直接报错 |
+| **作用域** | 全局命名空间，极易冲突 | 按 category 隔离 (`chunker`, `generator`, `embedding`) |
+| **变更方式** | 运行时隐式修改（安装器/病毒/用户） | 代码显式声明 (`@register`)，Git 可追溯 |
+| **失败模式** | 静默损坏，系统逐渐不稳定 | 启动时快速失败，带完整诊断信息 |
+| **类比** | 一个谁都能往里面扔垃圾的公共仓库 | 一个有严格安检的零件目录册 |
+
+关键区别：**WinReg 是"状态"，Registry 是"索引"。**
+
+但如果有三个实现细节偷懒，Registry 确实会退化成 WinReg：
+1. `@register` 在 import 时隐式执行 → 循环依赖导致注册行为不可预测
+2. 全局单例 Registry → 测试时一个用例污染另一个
+3. `get("chunker", "semantic")` 裸字符串 → 拼写错误无编译器保护
+
+###### 四道防火墙：防止退化为 WinReg
+
+**防火墙 1：启动期冻结**
+
+```python
+class ComponentRegistry:
+    _frozen = False
+    
+    @classmethod
+    def freeze(cls):
+        cls._frozen = True
+    
+    @classmethod
+    def register(cls, category, name):
+        if cls._frozen:
+            raise RuntimeError(
+                f"Cannot register '{category}/{name}' after startup. "
+                "All components must be registered during initialization."
+            )
+        # ... normal registration logic
+```
+
+杜绝运行时隐式状态变更。WinReg 的核心罪恶就是"任何时候都能改"。
+
+**防火墙 2：显式发现，拒绝魔法 import**
+
+```python
+# ❌ 隐式：靠 import 副作用触发注册
+from core.adapters.chunkers import *
+
+# ✅ 显式：启动入口清晰可控
+def bootstrap():
+    registry.discover("core.adapters.chunkers")
+    registry.discover("core.adapters.generators")
+    registry.discover("core.adapters.embeddings")
+    registry.freeze()
+    registry.print_summary()
+```
+
+注册从"import 的副作用"变成"启动流程的一等公民"——可审计、可测试、可调试。
+
+**防火墙 3：类型安全的键，消灭裸字符串**
+
+```python
+# ❌ WinReg 风格
+registry.get("chunker", "semantic")  # 返回 Any
+
+# ✅ 枚举 + Protocol 返回类型
+registry.get_chunker("semantic")  # 返回 ChunkingStrategy
+```
+
+IDE 补全 + mypy 校验 + 重构安全。字符串键的脆弱性被类型系统消除。
+
+**防火墙 4：测试隔离**
+
+```python
+@pytest.fixture
+def isolated_registry():
+    original = COMPONENT_REGISTRY._factories.copy()
+    COMPONENT_REGISTRY._factories.clear()
+    yield COMPONENT_REGISTRY
+    COMPONENT_REGISTRY._factories = original
+```
+
+单元测试不会因全局 Registry 状态互相干扰。WinReg 做不到这一点。
+
+###### 更准确的类比
+
+| 类比 | 相似度 | 说明 |
+|------|--------|------|
+| **Java SPI** (`META-INF/services/`) | ⭐⭐⭐⭐ | 启动期扫描，运行时只读，按接口分组 |
+| **Python entry_points** | ⭐⭐⭐⭐ | `pyproject.toml` 声明 + `importlib.metadata`，包安装时确定 |
+| **Spring Bean Factory** | ⭐⭐⭐⭐ | 容器启动时组装，运行时只读，强类型注入 |
+| **USB VID/PID 表** | ⭐⭐⭐ | 硬件标识到驱动的映射，标准组织维护 |
+| **Windows Registry** | 反类比 | 全局可变状态 → 混乱之源 |
+
+###### Phase 19 验收标准（Anti-WinReg）
+
+| # | 要求 | 验证方式 |
+|---|------|---------|
+| 1 | Registry 启动后 `freeze()`，运行时注册抛异常 | 单元测试：启动后尝试注册，assert RuntimeError |
+| 2 | 显式 `bootstrap()` 调用所有 discover 路径 | 代码审查：不存在 `from x import *` 触发注册 |
+| 3 | `get()` 返回 Protocol 类型，不用裸字符串键 | mypy 严格模式通过 |
+| 4 | 测试隔离 fixture 可用，各测试间状态不污染 | 并发测试：两个测试同时注册不同组件，互不影响 |
+| 5 | 启动时打印完整组件摘要表 | 集成测试：assert stdout 包含所有 category 及组件名 |
+
+**结论**：名字像，灵魂相反。Registry 不会退化除非偷懒。四道防火墙 + 五个验收标准同时锁定。
+
+##### 内核工程纪律：防止"神圣感"膨胀为过度设计
+
+市面上没有 Agent 内核，不是因为别人造不出，而是因为内核在 PMF 验证之前是一个巨大的沉没成本陷阱。SaaS 平台卖"能用"，框架卖"什么都能接"，模型厂商卖 Token —— 内核卖的是**确定性 + 可审计 + 可扩展**。这条路太难、太慢、太反商业直觉。
+
+选择了这条路，就必须建立一套刹车机制，防止"造内核"的宏大叙事催生出没人用的抽象。
+
+###### 内核价值审计清单（每个 Phase 结束时执行）
+
+| # | 审计问题 | 红灯信号 | 处理方式 |
+|---|---------|---------|---------|
+| 1 | 如果没有这个内核，直接用现有框架实现同样功能，会多花多少时间？ | 答案是"差不多"或"更少" | 停下来重新评估方向 |
+| 2 | 这个内核功能有上层消费者吗？（Agent / Business / UI） | 没有实际调用方，纯"预判需要" | 立即删除，等真有需求再加 |
+| 3 | 新增的 Contract 是"所有上层都需要的最小公分母"吗？ | 只被一个 Agent 类型用到 | 不放内核，留在上层 |
+| 4 | 改一个 Contract 要同步改多少文件？ | 不需要改任何上层代码 = 这段契约是死代码；需要改 10+ 个文件 = 抽象错了 | "恰到好处的痛"：改 3-6 个文件是健康范围 |
+| 5 | Phase 25 时，用这个内核写一个 Multi-Agent Demo 会比直接用 LangGraph 更快吗？ | 如果预测答案是"更慢更痛苦" | 内核设计有根本性问题，重新审视 |
+| 6 | 当前接口的同步/异步、输入/输出签名，是否假设了"所有信息在调用时已完备"？ | 是，且该假设在契约协商场景（需向用户询问、需等待外部确认）下不成立 | 预留异步扩展点或 Optional 返回值 |
+
+###### YAGNI 在内核层的应用规则
+
+内核层的 YAGNI 比应用层更严格——因为内核的错误抽象会通过所有上层消费者放大。
+
+**放行清单**（满足全部三项才能进入内核）：
+1. 至少 2 个不同的上层消费者需要这个能力
+2. 用现有框架实现同样能力，需要 ≥50 行重复代码
+3. 未来 2 个 Phase 内有明确的使用场景
+
+**拒绝清单**（任一触发即拒绝）：
+1. "以后可能会用到" —— 拒绝。什么时候用到什么时候加。
+2. "这样设计更对称/更优雅" —— 拒绝。对称性是审美需求不是工程需求。
+3. "LangChain/CrewAI/Coze 有这个，我们也应该有" —— 拒绝。它们是框架/平台，你是内核。能力边界不同。
+4. "如果不加这个，未来改起来会很麻烦" —— 记录到 `.ai_reasoning/` 但不实现。等到那天真的来了再说。
+
+###### 内核健康的五个指标
+
+| 指标 | 健康状态 | 预警状态 |
+|------|---------|---------|
+| 内核代码行数 | < 5000 LOC（Phase 25 时） | > 10000 LOC |
+| Contract 数量 | < 10 个 Protocol/dataclass | > 15 个 |
+| 上层绕过内核的频率 | 0 次/Phase | > 1 次/Phase |
+| 新增组件是否必须改内核 | 否（Registry 发现） | 是（需要改内核 switch/if） |
+| 废弃 Contract 的清理速度 | 废弃后 1 个 Phase 内删除 | 留着"以防万一" |
+
+###### 内核与框架的根本区别
+
+| 维度 | 框架 (LangChain, CrewAI) | 内核 (RAG-Factory) |
+|------|------------------------|-------------------|
+| **目标** | 什么都能接，降低接入成本 | 什么该拒绝，保证确定性 |
+| **增长模式** | 加 Adapter、加 Integration、加 Plugin | 减假设、减耦合、减接口 |
+| **质量度量** | 集成数量、Star 数、社区活跃度 | 契约稳定性、审计完整性、上层开发速度 |
+| **设计哲学** | "Yes, and..." 包容一切 | "No, unless..." 只放经过验证的最小公分母 |
+| **用户感知** | 5 分钟上手，1 小时后遇到边界 | 1 小时理解，1 周后开始加速 |
+| **失败模式** | 抽象泄漏，用户掉进坑里 | 能力不足，上层绕过内核 |
+
+内核不是框架的升级版。内核是框架的反面。
+
+###### 心态矫正
+
+| 错觉 | 现实 |
+|------|------|
+| "我们在建造圣殿" | 你在培育一个有机体。允许它丑、允许它改、允许它在压力下变形 |
+| "这个内核以后会很值钱" | 内核的价值不在它自己，而在它让上层建设显著更快、更安全 |
+| "我们要一次性建成" | Linux v0.01 只支持 Minix 文件系统。Phase 19 只是第一个稳定切片 |
+| "内核 = 高级" | Linux 赢了不是因为它是内核，而是 POSIX + GCC 让开发者愿意在上面建东西 |
+
+Phase 19 不是加冕礼，是第一次真正的压力测试。写完 `PipelineAssembler` 并用它组装出第一条真实 Pipeline 时，那种"它能跑通"的踏实感，比任何"我们在造内核"的宏大叙事都更有价值。
+
+#### 演进宪法：从单 Pipeline 引擎到 Multi-Agent 平台
+
+当前的 Core Kernel（大三层）**无法直接承载 Multi-Agent 编排、业务逻辑和人机交互**。如果试图把 Agent 协作塞进 `core/adapters/composer.py`，平台会在 Phase 25 彻底坍塌。
+
+但大三层不需要"完成"这件事。它的使命是成为**坚不可摧的内核**。Multi-Agent、业务层、UI 是生长在内核之上的独立有机体。
+
+##### 同心圆架构
+
+```
+┌─────────────────────────────────────────────────────┐
+│  Presentation Layer (UI / API / CLI)                │ ← 人机交互
+│  ┌───────────────────────────────────────────────┐  │
+│  │  Application Layer (Business / Multi-Agent)   │ ← 业务 + 多 Agent 编排
+│  │  ┌─────────────────────────────────────────┐  │  │
+│  │  │  Core Kernel (Contracts/Adapters/Pipeline)│ ← Phase 19 内核（当前战场）
+│  │  │  词汇 + 语法 + 原子执行引擎              │  │  │
+│  │  └─────────────────────────────────────────┘  │  │
+│  └───────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────┘
+```
+
+| 层 | 解决什么问题 | 编排对象 | 状态模型 | 时间尺度 |
+|---|------------|---------|---------|---------|
+| Core Kernel | 单个步骤如何正确执行 | Components (Chunker, Retriever) | Frozen Blueprint | ms |
+| Application | 多个 Agent 如何协商/竞争/委托 | Agents (Planner, Executor, Critic) | Mutable Conversation State | s-min |
+| Presentation | 人类如何观察/干预/反馈 | Views, Endpoints, Sessions | UI State, WebSocket Conn | 实时 |
+
+##### KernelService 协议：内核向上层的唯一接口
+
+```python
+# core/contracts/kernel_service.py (Phase 20+)
+class KernelService(Protocol):
+    """内核暴露给 Application Layer 的唯一能力原语。
+
+    Application Layer 不 import core/adapters/composer.py，
+    只依赖此 Protocol。Agent 看到的是一个标准化的能力原子服务。
+    """
+
+    def compose_retriever(
+        self, blueprint: CompositionBlueprint, sources: list[str]
+    ) -> RetrieverStep: ...
+
+    def execute_step(
+        self, step: PipelineStep, context: Dict[str, Any]
+    ) -> StepOutput: ...
+
+    def health_check(self) -> HealthStatus: ...
+
+    @property
+    def audit_manifest(self) -> Dict[str, Any]: ...
+```
+
+```python
+# 未来的 Application Layer 使用方式
+class PlanningAgent:
+    def __init__(self, kernel: KernelService): ...
+
+    async def plan(self, goal: str) -> Plan:
+        # Agent 需要检索知识 → 调用内核原子操作
+        retriever = self.kernel.compose_retriever(blueprint, sources)
+        results = await self.kernel.execute_step(retriever, {"query": goal})
+        ...
+```
+
+##### 未来的目录结构（不急于实现，但设计要预留）
+
+```
+project/
+├── core/                          ← 内核（当前大三层，Phase 19 后基本稳定）
+│   ├── contracts/
+│   └── adapters/
+│   └── pipeline/
+│
+├── agents/                        ← Application Layer: Multi-Agent（Phase 25+）
+│   ├── protocols/                 # Agent 间通信契约（AgentMessage, TaskGraph）
+│   ├── orchestrators/             # 协作模式 (ReAct, Plan-and-Solve, Debate)
+│   ├── memory/                    # 共享记忆 / 对话状态
+│   └── tools/                     # Agent 可调用的工具（封装 KernelService）
+│
+├── business/                      ← Application Layer: 业务逻辑
+│   ├── workflows/                 # 业务流程编排
+│   ├── policies/                  # 权限 / 合规 / 限流
+│   └── integrations/              # 外部系统对接
+│
+├── presentation/                  ← Presentation Layer
+│   ├── api/                       # REST / GraphQL / WebSocket
+│   ├── ui/                        # Web / Desktop
+│   └── cli/                       # 命令行交互
+│
+└── configs/                       ← 各层配置物理分离
+    ├── kernel/                    # Pipeline Blueprint (Phase 19)
+    ├── agents/                    # Agent Protocol Config (Phase 25+)
+    └── business/                  # Workflow Definitions (Phase 30+)
+```
+
+##### 今天必须做的防御性设计
+
+| 设计决策 | 理由 |
+|---------|------|
+| `PipelineComposer` 只暴露组合能力，不暴露内部 Router/Assembler | 未来只需将 Composer 包装为 `KernelService` 实现，零内部改动 |
+| `CompositionEvent` 的 `event_type` 用 `Literal` 而非 `str` | 未来新增 `agent_delegated`, `human_feedback_received` 时类型检查自动覆盖 |
+| `audit_manifest` 预留 `layer` 字段 | `"layer": "kernel"` vs `"layer": "agent"` — 审计时区分责任边界 |
+| contracts 层绝不引入 Agent 概念 | `ContentBlock`/`Chunk`/`SourceRule` 是内核契约；`AgentMessage`/`TaskGraph` 是 agents/protocols/ 的契约 —— 两层契约永不混合 |
+
+##### 禁止事项
+
+| 行为 | 后果 |
+|------|------|
+| 在 `core/` 中 import 任何 Agent 相关类型 | 内核与上层建筑耦合，换 Agent 框架需改内核 |
+| 在 `CompositionBlueprint` 中添加 `agent_routing` 字段 | 万能 God Object 诞生，契约崩溃 |
+| `PipelineAssembler` 管理对话状态 | 内核无状态假设被破坏，并发推理产生竞态 |
+| `SourceRouter` 理解 Agent Handoff 语义 | 语法污染，路由引擎变成 if-else 地狱 |
+
+---
+
+#### 长期演进策略：Python 是契约原型机，不是最终产品
+
+五年项目周期意味着语言选择不是终局的。Python 的价值是**快速验证契约正确性**，未来性能瓶颈出现时，Rust（或任何更合适的语言）可以精准替换热路径而非全面重写。
+
+但"未来要重写"这句话如果处理不好，会变成两种灾难：
+- **灾难 A**：Python 阶段随意写，心想"反正以后要重写"，契约设计全是 Python 动态特性，Rust 无法映射 → 重写变成重设计，五年积累归零
+- **灾难 B**：Python 阶段过度追求"Rust-like"，到处手动管理生命周期 → Python 写得比 Rust 还痛苦，项目死在 Phase 30
+
+核心原则：**Python 内核 = 可执行代码编写的规格说明书**。它写的每一行代码，要么是在"定义契约"，要么是在"验证契约"。除此之外的代码，都是未来的废弃成本。
+
+##### 五条铁律：确保今天的 Python 代码是资产而非累赘
+
+###### 铁律 1：契约与实现物理分离
+
+```
+core/contracts/   ← 纯类型定义，零业务逻辑（零 numpy / torch / openai）
+core/adapters/    ← 业务逻辑实现
+core/pipeline/    ← 编排逻辑
+```
+
+效果：Rust 重写时，`contracts/` 整个目录可直接翻译为 `crates/kernel-contracts/`，无需剥离逻辑。
+
+```python
+# ✅ contracts/ 只定义接口，不引用任何外部 SDK
+class ChunkerStep(Protocol):
+    def run(self, input: ContentBlock, **params) -> List[Chunk]: ...
+
+# ❌ 绝对禁止：contracts/ 里 import torch / openai / numpy
+```
+
+###### 铁律 2：测试即规格，与语言无关
+
+```python
+# ✅ 测试只通过 Contract 接口断言行为
+def test_semantic_chunker_respects_threshold():
+    chunker = registry.get("chunker", "semantic")
+    chunks = chunker.run(sample_doc, similarity_threshold=0.85)
+    assert all(c.similarity >= 0.85 for c in chunks)
+
+# ❌ 禁止测试内部状态、私有方法、具体类名
+```
+
+效果：未来 Rust 实现可以跑同一套 pytest 黑盒验收（subprocess 调用 Rust binary），测试套件 100% 复用。
+
+###### 铁律 3：Blueprint Schema 是真正的宪法
+
+YAML Blueprint 的 JSON Schema 是五年项目真正的**不变量**。Python 和 Rust 都只是这个 Schema 的解释器。
+
+| 变更类型 | 所需流程 | 用户成本 |
+|---------|---------|---------|
+| Schema 变更 | RFC + 迁移脚本 | 用户需更新 Blueprint |
+| Python → Rust 实现变更 | 通过 Schema 验证即可 | **零迁移成本** |
+
+效果：重写内核时，所有用户的 Pipeline 配置零改动。这才是"内核"对用户的真正承诺。
+
+###### 铁律 4：Adapter 边界预留 FFI 出口
+
+现在写 Python Adapter 时，假设它未来可能是一个独立进程 / WASM 模块 / Rust native extension：
+
+1. **Adapter 之间禁止直接函数调用** — 只通过 Registry + Contract 通信
+2. **Adapter 参数和返回值必须是可序列化的** — dataclass → JSON/msgpack
+3. **Adapter 不持有全局状态** — 所有依赖通过构造函数注入
+
+效果：Rust 重写内核后，旧的 Python Adapter 可以通过 gRPC / stdin-stdout / FFI 继续工作。重写是渐进式的，不是大爆炸式的。
+
+###### 铁律 5：文档即契约的人类可读版本
+
+每个 Contract 必须有 docstring 说明：
+- **语义保证**：什么情况下返回什么
+- **错误契约**：什么输入触发什么异常
+- **性能预期**：O(n) 还是 O(n²)，是否流式
+
+效果：未来的 Rust 开发者（可能是几年后的你）不需要读 Python 源码就能理解意图。docstring 就是重写时的需求文档。
+
+##### 五年路线图的心理校准
+
+| 阶段 | 时间 | 核心目标 | "不怕"的具体表现 |
+|------|------|---------|----------------|
+| **契约验证期** | Year 1-2 | 用 Python 跑通 Multi-Agent 场景，反复重构 Contract | 不怕删代码，只怕契约不对 |
+| **生态沉淀期** | Year 2-3 | Adapter 数量 >20，Blueprint 被真实用户使用 | 不怕 Python 慢，只怕用户不愿接入 |
+| **性能瓶颈期** | Year 3-4 | 识别真正需要 Rust 的热路径（可能只有 20%） | 不怕局部重写，拒绝全面推翻 |
+| **双轨并行期** | Year 4-5 | Python/Rust 共存，渐进迁移 | 不怕兼容负担，只怕中断用户 |
+
+关键预判：**Year 3-4 的"性能瓶颈期"很可能会发现：**
+- 80% 的内核代码根本不需要 Rust（Registry、Blueprint 解析、调度逻辑）
+- 只有 Chunker / Embedding / Generator 的执行引擎是瓶颈
+- 正确做法是把这 20% 抽成 Rust native extension，而非重写整个内核
+
+"全面重写"往往是过早的结论。"精准替换"才是五年项目的生存之道。
+
+##### Python → Rust 映射校验清单
+
+Phase 19 的每个 Contract / Adapter 都应在设计时就检查以下可映射性：
+
+| Python 概念 | Rust 等价物 | 当前使用 | 重写风险 |
+|------------|-----------|---------|---------|
+| `@dataclass(frozen=True)` | `struct` + `#[derive(Clone)]` | 所有数据模型 | ✅ 零风险 |
+| `Protocol` | `trait` | 所有组件接口 | ✅ 零风险 |
+| `MappingProxyType` | `Arc<HashMap<K, V>>` | 不可变映射 | ✅ 零风险 |
+| `Literal["a", "b"]` | `enum` | event_type, error_type | ✅ 零风险 |
+| `Callable[[X], Y]` | `Box<dyn Fn(X) -> Y>` | event_sink | ⚠️ 需转为显式 trait |
+| `**kwargs` 动态参数 | 泛型 / 编译期确定 | chunk_params | ⚠️ 需在 Blueprint Schema 层标准化 |
+| `inspect.signature` 运行时反射 | 编译期 trait bound | health_check 参数校验 | 🟡 已缓解：签名在 `@register` 时缓存；`validate_params()` classmethod 为 Rust trait 预留接口 |
+| 装饰器 `@register` | 宏 / inventory crate | 组件注册 | 🔴 需转为显式注册函数 |
+
+Phase 19 的对策：
+- **`health_check()` 双重校验**: Tier 1 = chunker 可选 `validate_params(params) -> list[str]` classmethod（语义约束，Rust 直接映射为 trait method）；Tier 2 = `COMPONENT_REGISTRY.validate_params()` 读取 `@register` 时缓存的签名（无实时反射开销，Rust 可从 Schema 读取）
+- `event_sink` 已定义为 `Callable[[CompositionEvent], None]` → 未来转为显式 `EventSink` trait 时接口一致
+- `**chunk_params` 已在 Blueprint Schema 中声明参数名和类型 → Rust 可从 Schema 生成强类型构造函数
+
+每一处红/黄标记，Phase 19 都已经或正在铺垫替代方案。不是以后再说，而是现在就把路径铺好。
+
+---
+
+### 架构硬约束（锁定）
+
+| 约束 | 内容 |
+|------|------|
+| 数据模型归 contracts | `SourceRule` + `CompositionBlueprint` + `AssemblyDiagnostic` + `CompositionEvent` 放 `core/contracts/composition.py` |
+| 编排逻辑归 adapters | `SourceRouter` + `PipelineAssembler` + `PipelineComposer` 放 `core/adapters/composer.py` |
+| 数据与算法解耦 | Blueprint 零方法逻辑（纯数据访问），Router 是唯一路由入口 |
+| 不引入新抽象 | 复用 `COMPONENT_REGISTRY`、`ChunkerAdapter`、`RetrieverStep`、`InMemoryVectorBackend` |
+| 配置即代码 | YAML 是序列化格式，运行时是 frozen dataclass |
+| YAML 配置位置 | `configs/default_pipeline.yaml` |
+| 初始化方式 | 启动时一次性解析；Facade 接收 `CompositionBlueprint`，`from_yaml()` 只是便捷工厂 |
+| 引擎零日志依赖 | `CompositionEvent` 通过 `event_sink` 依赖注入，引擎不 import 任何日志框架 |
+
+---
+
+### v2 相比 v1 的关键改进
+
+| 改进 | v1 | v2 | 理由 |
+|------|----|----|------|
+| `resolve()` 位置 | Blueprint 上 | **SourceRouter 上** | 数据模型与匹配算法解耦，未来可换 RegexRouter |
+| 参数校验 | 运行时在 assemble() 暴露 | **health_check() 阶段 inspect.signature 预检** | 语法层必须在解析阶段拒绝非法配置 |
+| 错误表示 | `List[Dict[str, Any]]` | **`AssemblyDiagnostic` frozen dataclass** | 结构化，可按 error_type 过滤，JSON 可序列化 |
+| Facade 构造 | `__init__(config_path)` | **`__init__(blueprint)` + `from_yaml()` classmethod** | 测试友好，未来支持 from_db/from_api |
+| 可追溯 | chunker_strategy + chunker_version | **+ rule_id + blueprint_version + composed_at** | Chunk → 规则 → 配置版本，完整因果链 |
+| 全透明 | 无 | **CompositionEvent 协议 + event_sink 注入** | 引擎决策过程全可见，零日志框架耦合 |
+| 可审计 | 无 | **fingerprint + audit_manifest** | 事故可复现，合规零成本 |
+
+---
+
+### 新增文件
+
+```
+core/
+├── contracts/
+│   └── composition.py          ← [新增] SourceRule + CompositionBlueprint
+│                                  + AssemblyDiagnostic + CompositionEvent
+│
+├── adapters/
+│   ├── composer.py             ← [新增] SourceRouter + PipelineAssembler + PipelineComposer
+│   └── factory.py              ← 已有，单步创建（不动）
+
+configs/
+└── default_pipeline.yaml       ← [新增]
+
+tests/unit/
+└── test_pipeline_composer.py   ← [新增]
+```
+
+---
+
+### 1. `core/contracts/composition.py` — 数据模型
+
+```python
+"""Pipeline composition contracts: data models with zero business logic.
+
+All dataclasses are frozen and hashable. No algorithm, no I/O, no side effects.
+
+Design invariant:
+  - Blueprint is pure data (no resolve(), no YAML parsing)
+  - SourceRule carries deterministic rule_id for chunk-level lineage
+  - AssemblyDiagnostic is the structured error representation
+  - CompositionEvent is the engine decision log protocol
+  - YAML parsing lives in CompositionBlueprint.from_yaml() classmethod
+    (still in contracts because it's a factory, not an algorithm)
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import time
+from dataclasses import asdict, dataclass, field
+from typing import Any, Dict, FrozenSet, Literal, Tuple
+
+from .chunking import SemVer
+
+
+# ── Source Rule ──────────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class SourceRule:
+    """Maps a glob pattern to a chunking strategy with parameters.
+
+    Attributes:
+        pattern:      Glob pattern for source file paths
+        chunker:      Strategy name in COMPONENT_REGISTRY
+        chunk_params: kwargs forwarded to chunker constructor
+        priority:     Lower = higher priority (default 100)
+        description:  Human-readable rule explanation
+        rule_id:      Deterministic hash of (pattern, chunker, priority).
+                      Explicitly settable in YAML, auto-generated if empty.
+    """
+
+    pattern: str
+    chunker: str
+    chunk_params: Dict[str, Any] = field(default_factory=dict)
+    priority: int = 100
+    description: str = ""
+    rule_id: str = ""
+
+    def __post_init__(self) -> None:
+        # Freeze chunk_params
+        object.__setattr__(self, "chunk_params", dict(self.chunk_params))
+
+        # Deterministic rule_id: explicit in YAML, or auto-generated
+        if not self.rule_id:
+            raw = f"{self.pattern}|{self.chunker}|{self.priority}"
+            rid = hashlib.sha256(raw.encode()).hexdigest()[:12]
+            object.__setattr__(self, "rule_id", rid)
+
+    def matches(self, path: str) -> bool:
+        """Check if this rule's glob pattern matches the given file path."""
+        from fnmatch import fnmatch
+        return fnmatch(path, self.pattern)
+
+
+# ── Composition Blueprint ───────────────────────────────────────────
+
+@dataclass(frozen=True)
+class CompositionBlueprint:
+    """Immutable pipeline composition specification.
+
+    Pure data — no algorithm, no I/O. Factory methods (from_yaml, from_dict)
+    are classmethods that produce Blueprint instances; they live here because
+    they're data constructors, not orchestration logic.
+
+    Attributes:
+        version:         SemVer of the blueprint schema
+        default_chunker: Fallback strategy when no rule matches
+        default_params:  Fallback params for the default chunker
+        source_rules:    Tuple of SourceRule, sorted by priority ascending
+    """
+
+    version: SemVer
+    default_chunker: str = "recursive"
+    default_params: Dict[str, Any] = field(default_factory=dict)
+    source_rules: Tuple[SourceRule, ...] = ()
+
+    def __post_init__(self) -> None:
+        # Ensure rules are sorted by priority
+        sorted_rules = tuple(sorted(self.source_rules, key=lambda r: r.priority))
+        if sorted_rules != self.source_rules:
+            object.__setattr__(self, "source_rules", sorted_rules)
+
+    # ── Pure data accessors (no algorithm) ──────────────────────
+
+    @property
+    def rules_by_priority(self) -> Tuple[SourceRule, ...]:
+        """Rules sorted by priority ascending. Already sorted in __post_init__."""
+        return self.source_rules
+
+    @property
+    def fingerprint(self) -> str:
+        """Deterministic hash of the entire blueprint content.
+
+        Same content → same fingerprint, regardless of file path, timestamp,
+        or machine. Used for audit trails and runtime identity verification.
+        """
+        canonical = json.dumps({
+            "version": str(self.version),
+            "default_chunker": self.default_chunker,
+            "default_params": self.default_params,
+            "rules": [
+                {
+                    "pattern": r.pattern,
+                    "chunker": r.chunker,
+                    "chunk_params": r.chunk_params,
+                    "priority": r.priority,
+                    "rule_id": r.rule_id,
+                }
+                for r in self.source_rules
+            ],
+        }, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode()).hexdigest()[:16]
+
+    # ── Factory methods (data constructors, not algorithms) ─────
+
+    @classmethod
+    def from_yaml(cls, path: str) -> CompositionBlueprint:
+        """Parse a YAML file into a CompositionBlueprint.
+
+        Validates:
+          - version is valid SemVer
+          - source_rules have non-empty pattern and chunker
+        """
+        import yaml
+        with open(path, encoding="utf-8") as f:
+            raw = yaml.safe_load(f)
+        return cls._from_raw(raw)
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> CompositionBlueprint:
+        """Programmatic construction (for tests, API, database sources)."""
+        return cls._from_raw(raw)
+
+    @classmethod
+    def _from_raw(cls, raw: dict) -> CompositionBlueprint:
+        version = SemVer.parse(raw["version"])
+        default_chunker = raw.get("default_chunker", "recursive")
+        default_params = raw.get("default_params", {})
+
+        rules = []
+        for r in raw.get("source_rules", []):
+            if not r.get("pattern"):
+                raise ValueError(f"SourceRule missing 'pattern': {r}")
+            if not r.get("chunker"):
+                raise ValueError(f"SourceRule missing 'chunker': {r}")
+            rules.append(SourceRule(
+                pattern=r["pattern"],
+                chunker=r["chunker"],
+                chunk_params=r.get("chunk_params", {}),
+                priority=r.get("priority", 100),
+                description=r.get("description", ""),
+                rule_id=r.get("rule_id", ""),
+            ))
+
+        return cls(
+            version=version,
+            default_chunker=default_chunker,
+            default_params=default_params,
+            source_rules=tuple(rules),
+        )
+
+
+# ── Assembly Diagnostic ──────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class AssemblyDiagnostic:
+    """Structured error from the assembly phase. First-class citizen, not ad-hoc dict.
+
+    Attributes:
+        path:              Source file path that caused the error
+        chunker:           Chunker strategy name (or "unknown" if routing failed)
+        error_type:        routing | instantiation | execution | validation
+        message:           Human-readable error description
+        contract_violation: Optional — which contract rule was violated.
+                           Phase 19 fills None; Phase 25+ uses this for graceful
+                           degradation decisions (repair / renegotiate / abandon).
+        timestamp:         epoch seconds when the error was recorded
+    """
+
+    path: str
+    chunker: str
+    error_type: Literal["routing", "instantiation", "execution", "validation"]
+    message: str
+    contract_violation: str | None = None
+    timestamp: float = field(default_factory=time.time)
+
+
+# ── Composition Event ────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class CompositionEvent:
+    """Engine decision log entry. First-class citizen, not a logging call.
+
+    The engine never calls logging.info() directly. It emits CompositionEvent
+    objects through an injected event_sink callback. This decouples the engine
+    from any specific logging/observability framework.
+
+    Attributes:
+        event_type:     rule_matched | rule_skipped | fallback_used |
+                        chunker_instantiated | document_failed | assembly_complete
+        correlation_id: Cross-event tracing key. Same value for all events
+                        related to the same document (e.g. path hash or UUID).
+                        Enables "contract fulfillment tracking" in Phase 25+.
+        timestamp:      epoch seconds
+        context:        Structured dict, never a formatted string.
+
+    Context examples:
+        rule_matched:         {path, rule_id, pattern, priority}
+        rule_skipped:         {path, pattern, reason}
+        fallback_used:        {path, default_chunker}
+        chunker_instantiated: {rule_id, chunker, params_hash, version}
+        document_failed:      {path, error_type, message}
+        assembly_complete:    {total_docs, success_count, fail_count, total_chunks}
+    """
+
+    event_type: Literal[
+        "rule_matched", "rule_skipped", "fallback_used",
+        "chunker_instantiated", "document_failed", "assembly_complete",
+    ]
+    correlation_id: str
+    timestamp: float
+    context: Dict[str, Any]
+```
+
+#### 关键设计决策
+
+**为什么 `resolve()` 不在 Blueprint 上**
+
+`resolve()` 包含匹配算法（fnmatch + priority sort）。把它放在 Blueprint 上意味着数据模型与特定匹配算法永久绑定。未来想支持正则路由或 ML 路由时，必须修改 Blueprint —— 违反 immutable 契约。Router 是算法的唯一宿主，Blueprint 只是数据。
+
+**为什么 `from_yaml()` 留在 contracts 层**
+
+`from_yaml()` 是数据构造函数（factory method），不是编排算法。它不依赖 adapters 或 pipeline 层的任何类型。这与 `ContentBlock.from_dict()` 在 `chunking.py` 中的角色一致 —— 纯数据工厂。
+
+**为什么 `rule_id` 用确定性 hash 而非 UUID**
+
+确定性 hash 意味着同一个规则在任何机器、任何时间产生相同的 ID。这是可审计性的基础 —— 你可以离线验证"这个 Chunk 的血缘标签与配置指纹是否一致"。UUID 无法做离线验证。
+
+**为什么 `event_sink` 是回调而非抽象类**
+
+最小接口原则。引擎只需要"有一个地方可以发事件"，不需要定义 EventSink 协议、不需要 asyncio、不需要缓冲区管理。测试时 sink 是 `list.append`，生产时是 `logger.info`，零耦合。
+
+---
+
+### 2. `core/adapters/composer.py` — 三件套引擎
+
+```python
+"""Pipeline Composition Engine — the platform's grammar layer.
+
+Three concerns, one file:
+  SourceRouter      — routing engine: Blueprint + path → SourceRule (+ events)
+  PipelineAssembler — assembly engine: SourceRules → RetrieverStep (+ diagnostics)
+  PipelineComposer  — Facade: Blueprint → Router → Assembler (+ audit manifest)
+
+All three live in core/adapters/ — the only layer legally allowed to import
+from both core/contracts/ and core/pipeline/.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import inspect
+import time
+from pathlib import Path
+from typing import Any, Callable, Dict, List
+
+from core.contracts import COMPONENT_REGISTRY, ContentBlock, SemVer
+from core.contracts.composition import (
+    AssemblyDiagnostic,
+    CompositionBlueprint,
+    CompositionEvent,
+    SourceRule,
+)
+from core.adapters.chunker_adapter import ChunkerAdapter
+from core.pipeline.engine import HealthStatus
+from core.pipeline.resources import ResourceContainer
+from core.steps.retriever import InMemoryVectorBackend, RetrieverStep
+
+
+# ── Routing Engine ─────────────────────────────────────────────────
+
+class SourceRouter:
+    """Pure routing engine: Blueprint + path → SourceRule.
+
+    Zero adapter dependency. Zero side effects. Independently testable.
+    The ONLY place where glob matching and priority sort live.
+
+    event_sink: Optional[Callable[[CompositionEvent], None]]
+      - Injected at construction time (dependency inversion)
+      - Default: no-op lambda (zero overhead when not needed)
+      - Test: list.append for assertion
+      - Production: structured logger or OpenTelemetry exporter
+    """
+
+    def __init__(
+        self,
+        blueprint: CompositionBlueprint,
+        event_sink: Callable[[CompositionEvent], None] | None = None,
+    ) -> None:
+        self._blueprint = blueprint
+        self._emit = event_sink or (lambda e: None)
+
+    def resolve(self, path: str) -> SourceRule:
+        """Return the highest-priority matching rule for a source path.
+
+        Algorithm: iterate rules_by_priority (ascending), first fnmatch hit wins.
+        Falls back to a synthetic SourceRule using default_chunker.
+
+        Emits: rule_matched | rule_skipped | fallback_used
+        """
+        for rule in self._blueprint.rules_by_priority:
+            if rule.matches(path):
+                self._emit(CompositionEvent(
+                    event_type="rule_matched",
+                    timestamp=time.time(),
+                    context={
+                        "path": path,
+                        "rule_id": rule.rule_id,
+                        "pattern": rule.pattern,
+                        "priority": rule.priority,
+                    },
+                ))
+                return rule
+            self._emit(CompositionEvent(
+                event_type="rule_skipped",
+                timestamp=time.time(),
+                context={"path": path, "pattern": rule.pattern, "reason": "no_match"},
+            ))
+
+        # Fallback
+        self._emit(CompositionEvent(
+            event_type="fallback_used",
+            timestamp=time.time(),
+            context={"path": path, "default_chunker": self._blueprint.default_chunker},
+        ))
+        return SourceRule(
+            pattern="*",
+            chunker=self._blueprint.default_chunker,
+            chunk_params=dict(self._blueprint.default_params),
+            priority=999,
+            description=f"Default fallback: {self._blueprint.default_chunker}",
+        )
+
+    def resolve_all(self, paths: List[str]) -> Dict[str, SourceRule]:
+        """Batch resolve: path → SourceRule."""
+        return {p: self.resolve(p) for p in paths}
+
+    @property
+    def blueprint(self) -> CompositionBlueprint:
+        return self._blueprint
+
+    def health_check(self) -> HealthStatus:
+        """Verify all referenced chunker strategies exist AND accept their declared params.
+
+        Uses a two-tier validation strategy:
+          1. Preferred: Chunker's own @classmethod validate_params(params) -> list[str]
+             — allows chunker authors to express inspect-unreachable semantic constraints
+             (e.g. chunk_overlap < chunk_size, similarity_threshold ∈ [0, 1])
+          2. Fallback: COMPONENT_REGISTRY's cached signature (captured at @register time,
+             not via real-time inspect — avoids repeated reflection overhead)
+             — checks param names exist, ignores defaults
+
+        All validation happens at startup, not execution time. This is the "grammar
+        layer's" responsibility: reject illegal configuration before any document
+        is processed.
+        """
+        issues: List[str] = []
+        all_entries = [
+            (self._blueprint.default_chunker, self._blueprint.default_params, "default")
+        ]
+        for rule in self._blueprint.source_rules:
+            all_entries.append((rule.chunker, rule.chunk_params, rule.rule_id))
+
+        for chunker_name, params, identifier in all_entries:
+            try:
+                cls = COMPONENT_REGISTRY.get("chunker", chunker_name)
+            except KeyError:
+                issues.append(
+                    f"[{identifier}] Unknown chunker strategy: '{chunker_name}'"
+                )
+                continue
+
+            # Tier 1: chunker-provided semantic validation
+            if hasattr(cls, "validate_params"):
+                semantic_errors = cls.validate_params(params)
+                for err in semantic_errors:
+                    issues.append(f"[{identifier}] {chunker_name}: {err}")
+                if semantic_errors:
+                    continue  # semantic errors are fatal for this entry
+
+            # Tier 2: cached signature check (captured at @register time)
+            sig_errors = COMPONENT_REGISTRY.validate_params("chunker", chunker_name, params)
+            if sig_errors:
+                issues.append(
+                    f"[{identifier}] Invalid params for '{chunker_name}': {sig_errors}"
+                )
+
+        if issues:
+            return HealthStatus(
+                status="degraded",
+                message=f"Configuration errors: {'; '.join(issues)}",
+                dependencies=[],
+                version=str(self._blueprint.version),
+            )
+        return HealthStatus(
+            status="healthy",
+            message=f"All {len(all_entries)} chunker references valid",
+            dependencies=[],
+            version=str(self._blueprint.version),
+        )
+
+
+# ── Assembly Engine ─────────────────────────────────────────────────
+
+class PipelineAssembler:
+    """Pure assembly engine: List[SourceRule] → RetrieverStep.
+
+    Consumes Router output. Creates chunker instances via COMPONENT_REGISTRY,
+    wraps in ChunkerAdapter, executes chunking, aggregates all Chunks into
+    an InMemoryVectorBackend-backed RetrieverStep.
+
+    Structured diagnostics: every error is an AssemblyDiagnostic frozen dataclass,
+    filterable by error_type, JSON-serializable for monitoring.
+
+    event_sink: same dependency-injected pattern as SourceRouter.
+    """
+
+    def __init__(
+        self,
+        event_sink: Callable[[CompositionEvent], None] | None = None,
+    ) -> None:
+        self._diagnostics: List[AssemblyDiagnostic] = []
+        self._emit = event_sink or (lambda e: None)
+
+    def assemble(
+        self,
+        resolved_rules: Dict[str, SourceRule],
+        documents: Dict[str, ContentBlock],
+        blueprint_version: str = "",
+    ) -> RetrieverStep:
+        """Compose a RetrieverStep from source documents and their resolved rules.
+
+        Args:
+            resolved_rules:   {path: SourceRule} from SourceRouter.resolve_all()
+            documents:        {path: ContentBlock} from document loader
+            blueprint_version: For chunk-level lineage tagging
+
+        Returns:
+            RetrieverStep backed by InMemoryVectorBackend with all chunks indexed.
+
+        Raises:
+            AssemblyError: if ALL documents failed (no chunks produced).
+              Partial failures are collected in self._diagnostics and do not block.
+        """
+        self._diagnostics.clear()
+        all_chunks = []
+        composed_at = time.time()
+
+        for path, doc in documents.items():
+            rule = resolved_rules.get(path)
+            if rule is None:
+                self._record_failure(path, "unknown", "routing", "No matching rule")
+                continue
+
+            try:
+                chunker_cls = COMPONENT_REGISTRY.get("chunker", rule.chunker)
+            except KeyError:
+                self._record_failure(
+                    path, rule.chunker, "instantiation",
+                    f"Unknown strategy: '{rule.chunker}'"
+                )
+                continue
+
+            try:
+                chunker = chunker_cls(**rule.chunk_params)
+                params_hash = hashlib.sha256(
+                    str(sorted(rule.chunk_params.items())).encode()
+                ).hexdigest()[:8]
+                self._emit(CompositionEvent(
+                    event_type="chunker_instantiated",
+                    timestamp=time.time(),
+                    context={
+                        "rule_id": rule.rule_id,
+                        "chunker": rule.chunker,
+                        "params_hash": params_hash,
+                        "version": str(chunker.VERSION),
+                    },
+                ))
+            except TypeError as e:
+                self._record_failure(
+                    path, rule.chunker, "instantiation",
+                    f"Invalid params for '{rule.chunker}': {e}"
+                )
+                continue
+
+            try:
+                adapter = ChunkerAdapter(chunker)
+                resources = ResourceContainer()
+                resources.set_config("source", path)
+                output = adapter.run({"content": doc}, resources)
+            except Exception as e:
+                self._record_failure(
+                    path, rule.chunker, "execution",
+                    f"ChunkerAdapter failed: {e}"
+                )
+                continue
+
+            if output.contract_validation and output.contract_validation.errors:
+                self._record_failure(
+                    path, rule.chunker, "validation",
+                    f"Contract validation: {output.contract_validation.errors}"
+                )
+                continue
+
+            chunks = output.result  # List[Chunk]
+            for ch in chunks:
+                all_chunks.append(
+                    ch.with_metadata(
+                        source_path=path,
+                        chunker_strategy=rule.chunker,
+                        chunker_version=str(chunker.VERSION),
+                        rule_id=rule.rule_id,
+                        blueprint_version=blueprint_version,
+                        composed_at=composed_at,
+                    )
+                )
+
+        # Emit assembly summary
+        success_count = len([p for p in documents if p not in {
+            d.path for d in self._diagnostics
+        }])
+        self._emit(CompositionEvent(
+            event_type="assembly_complete",
+            timestamp=time.time(),
+            context={
+                "total_docs": len(documents),
+                "success_count": success_count,
+                "fail_count": len(self._diagnostics),
+                "total_chunks": len(all_chunks),
+            },
+        ))
+
+        if not all_chunks:
+            raise AssemblyError(
+                f"All {len(documents)} document(s) failed chunking. "
+                f"Diagnostics: {self._diagnostics}"
+            )
+
+        backend = InMemoryVectorBackend(all_chunks)
+        return RetrieverStep(backend=backend, index_chunks=all_chunks)
+
+    @property
+    def diagnostics(self) -> List[AssemblyDiagnostic]:
+        return list(self._diagnostics)
+
+    def _record_failure(
+        self, path: str, chunker: str,
+        error_type: Literal["routing", "instantiation", "execution", "validation"],
+        message: str,
+    ) -> None:
+        diag = AssemblyDiagnostic(
+            path=path, chunker=chunker,
+            error_type=error_type, message=message,
+        )
+        self._diagnostics.append(diag)
+        self._emit(CompositionEvent(
+            event_type="document_failed",
+            timestamp=diag.timestamp,
+            context={
+                "path": path,
+                "chunker": chunker,
+                "error_type": error_type,
+                "message": message,
+            },
+        ))
+
+
+# ── Facade ──────────────────────────────────────────────────────────
+
+class PipelineComposer:
+    """Public entry point: Blueprint → configured RetrieverStep + audit manifest.
+
+    Thin facade. Contains no logic — delegates to:
+      - CompositionBlueprint.from_*() for config parsing
+      - SourceRouter for rule resolution
+      - PipelineAssembler for step assembly
+
+    Constructor accepts a CompositionBlueprint directly (test-friendly).
+    from_yaml() and from_dict() are convenience classmethods.
+    """
+
+    def __init__(
+        self,
+        blueprint: CompositionBlueprint,
+        event_sink: Callable[[CompositionEvent], None] | None = None,
+    ) -> None:
+        self._blueprint = blueprint
+        self._init_timestamp = time.time()
+        self._router = SourceRouter(blueprint, event_sink=event_sink)
+        self._assembler = PipelineAssembler(event_sink=event_sink)
+
+    # ── Convenience factories ───────────────────────────────────
+
+    @classmethod
+    def from_yaml(
+        cls, path: str | Path,
+        event_sink: Callable[[CompositionEvent], None] | None = None,
+    ) -> PipelineComposer:
+        """Create from a YAML config file (the common case)."""
+        return cls(CompositionBlueprint.from_yaml(str(path)), event_sink=event_sink)
+
+    @classmethod
+    def from_dict(
+        cls, raw: dict,
+        event_sink: Callable[[CompositionEvent], None] | None = None,
+    ) -> PipelineComposer:
+        """Create from a raw dict (for programmatic construction / testing)."""
+        return cls(CompositionBlueprint.from_dict(raw), event_sink=event_sink)
+
+    # ── Composition ─────────────────────────────────────────────
+
+    def compose_for_sources(
+        self, source_paths: List[str], documents: Dict[str, ContentBlock]
+    ) -> RetrieverStep:
+        """Full pipeline: resolve rules → assemble → RetrieverStep.
+
+        Args:
+            source_paths: File paths (e.g. ["docs/api/auth.md", "kb/security.md"])
+            documents:    {path: ContentBlock} pre-loaded by caller
+
+        Returns:
+            RetrieverStep ready for Planning context injection.
+        """
+        resolved = self._router.resolve_all(source_paths)
+        return self._assembler.assemble(
+            resolved, documents, blueprint_version=str(self._blueprint.version)
+        )
+
+    # ── Audit & Diagnostics ─────────────────────────────────────
+
+    @property
+    def audit_manifest(self) -> Dict[str, Any]:
+        """Runtime identity snapshot for audit trails and incident replay.
+
+        Returns a dict containing:
+          - blueprint_fingerprint: deterministic hash of the config content
+          - blueprint_version:     SemVer string
+          - config_origin:         how this blueprint was created
+          - router_type:           qualified class name
+          - registered_chunkers:   all chunker strategies available at init time
+          - initialized_at:        epoch timestamp
+        """
+        return {
+            "blueprint_fingerprint": self._blueprint.fingerprint,
+            "blueprint_version": str(self._blueprint.version),
+            "router_type": type(self._router).__name__,
+            "initialized_at": self._init_timestamp,
+        }
+
+    @property
+    def blueprint(self) -> CompositionBlueprint:
+        return self._blueprint
+
+    @property
+    def diagnostics(self) -> List[AssemblyDiagnostic]:
+        return self._assembler.diagnostics
+
+    def health_check(self) -> HealthStatus:
+        return self._router.health_check()
+
+
+class AssemblyError(Exception):
+    """Raised when ALL documents fail chunking. Partial failures are non-fatal."""
+```
+
+---
+
+### 3. SourceRule glob 匹配语义
+
+#### 优先级规则
+
+```
+1. 按 priority 升序（0 = 最高优先级）
+2. 同 priority 时按 YAML 声明顺序
+3. fnmatch 第一个命中即生效（first-match-wins）
+4. 无命中时 fallback 到 default_chunker，生成 rule_id 为空的临时 SourceRule
+```
+
+#### 冲突处理
+
+| 场景 | 行为 |
+|------|------|
+| 两个 rule 匹配同一文件 | priority 低者胜；同 priority 时声明顺序胜 |
+| rule 引用不存在的 chunker | `health_check()` 返回 degraded；运行时记录 `AssemblyDiagnostic(error_type="instantiation")` |
+| chunk_params 与 __init__ 签名不匹配 | `health_check()` 阶段通过 `inspect.signature.bind_partial()` 预检；运行时 TypeErrors 被 assemble() 捕获 |
+| 无匹配 rule | `SourceRouter.resolve()` 发出 `fallback_used` 事件，返回 default_chunker 的临时 SourceRule |
+
+---
+
+### 4. `configs/default_pipeline.yaml` schema
+
+```yaml
+version: "1.0.0"
+
+default_chunker: recursive
+default_params:
+  chunk_size: 512
+  chunk_overlap: 64
+
+source_rules:
+  - pattern: "docs/api/**/*.md"
+    chunker: fixed
+    chunk_params:
+      chunk_size: 256
+      chunk_overlap: 32
+    priority: 10
+    description: "API docs: small fixed chunks for per-endpoint retrieval"
+    rule_id: "api-fixed-v1"  # ← 显式 rule_id，便于人工识别
+
+  - pattern: "kb/**/*.md"
+    chunker: recursive
+    chunk_params:
+      chunk_size: 512
+      chunk_overlap: 64
+    priority: 20
+    description: "Knowledge base: recursive separator chunking"
+
+  - pattern: "docs/security/**/*.md"
+    chunker: multi_granularity
+    chunk_params:
+      fine_size: 256
+      coarse_size: 512
+    priority: 5
+    description: "Security docs: multi-granularity for defense-in-depth"
+```
+
+#### 字段约束
+
+| 字段 | 必需 | 类型 | 默认值 | 约束 |
+|------|------|------|--------|------|
+| `version` | ✅ | string | — | 合法 SemVer |
+| `default_chunker` | ❌ | string | `recursive` | COMPONENT_REGISTRY 中存在 |
+| `default_params` | ❌ | dict | `{}` | kwargs 需通过 `__init__` 签名校验 |
+| `source_rules[].pattern` | ✅ | string | — | glob，非空 |
+| `source_rules[].chunker` | ✅ | string | — | COMPONENT_REGISTRY 中存在 |
+| `source_rules[].chunk_params` | ❌ | dict | `{}` | kwargs 需通过 `__init__` 签名校验 |
+| `source_rules[].priority` | ❌ | int | `100` | 越小优先级越高 |
+| `source_rules[].description` | ❌ | string | `""` | 仅文档，不影响路由 |
+| `source_rules[].rule_id` | ❌ | string | auto | 显式声明或自动生成（sha256 前 12 位） |
+
+---
+
+### 5. 与现有组件的交互时序
+
+```
+调用方（demo_rag.py）
+  │
+  ├─ 1. documents = {p: _load_document(p) for p in paths}
+  │
+  ├─ 2. composer = PipelineComposer.from_yaml("configs/default_pipeline.yaml")
+  │      │                                     ↑ 便捷工厂
+  │      └─ CompositionBlueprint.from_yaml(path)
+  │           ├─ yaml.safe_load()
+  │           ├─ SemVer.parse(version)
+  │           ├─ [SourceRule(...), ...]  # sorted by priority, rule_id assigned
+  │           └─ CompositionBlueprint(version, default_chunker, default_params, rules)
+  │      └─ SourceRouter(blueprint, event_sink=...)
+  │           └─ health_check() → inspect.signature 预检所有 chunker + params
+  │      └─ PipelineAssembler(event_sink=...)
+  │
+  ├─ 3. retriever = composer.compose_for_sources(paths, documents)
+  │      │
+  │      ├─ 3a. resolved = router.resolve_all(paths)
+  │      │      └─ for each path:
+  │      │           router.resolve(path)
+  │      │             ├─ emit: rule_matched | rule_skipped | fallback_used
+  │      │             └─ return SourceRule
+  │      │
+  │      └─ 3b. retriever = assembler.assemble(resolved, documents, blueprint_version)
+  │             ├─ for each (path, doc):
+  │             │    ├─ COMPONENT_REGISTRY.get("chunker", rule.chunker)
+  │             │    ├─ chunker = cls(**rule.chunk_params)
+  │             │    │    └─ emit: chunker_instantiated {rule_id, params_hash, version}
+  │             │    ├─ adapter = ChunkerAdapter(chunker)
+  │             │    ├─ output = adapter.run({"content": doc}, resources)
+  │             │    └─ ch.with_metadata(
+  │             │         source_path, chunker_strategy, chunker_version,
+  │             │         rule_id, blueprint_version, composed_at  ← 完整血缘
+  │             │       )
+  │             │
+  │             ├─ emit: assembly_complete {total_docs, success, fail, total_chunks}
+  │             └─ InMemoryVectorBackend(all_chunks) → RetrieverStep
+  │
+  ├─ 4. 审计: composer.audit_manifest → {fingerprint, version, router_type, ...}
+  │
+  └─ 5. 注入 Pipeline: PlanningContext(knowledge_context=retriever)
+```
+
+#### 与 factory.py 的关系
+
+```
+factory.py                           composer.py
+─────────────────────────────────────────────────────────
+StepConfig → PipelineStep            Blueprint → RetrieverStep
+单步创建                              多步编排
+@lru_cache 缓存                       不缓存（组合结果不重用）
+引擎不可见                              引擎不可见
+```
+
+---
+
+### 6. 错误处理 + 审计矩阵
+
+| 场景 | 阶段 | 行为 |
+|------|------|------|
+| YAML 语法错误 | from_yaml() | `yaml.YAMLError`，启动失败 |
+| version 非法 | from_yaml() | `SemVer.parse()` 抛 `ValueError`，启动失败 |
+| chunker 策略不存在 | health_check() | status=degraded，列出缺失策略 |
+| chunk_params 签名不匹配 | health_check() | status=degraded，列出不合法的参数名 |
+| 单个文档无匹配规则 | Router.resolve() | 发出 `fallback_used` 事件，使用 default_chunker |
+| 单文档 chunker 不存在 | Assembler.assemble() | `AssemblyDiagnostic(error_type="instantiation")`，跳过该文档 |
+| 单文档 chunk_params 错误 | Assembler.assemble() | `AssemblyDiagnostic(error_type="instantiation")`，跳过该文档 |
+| 单文档 adapter 执行失败 | Assembler.assemble() | `AssemblyDiagnostic(error_type="execution")`，跳过该文档 |
+| 单文档 contract validation 失败 | Assembler.assemble() | `AssemblyDiagnostic(error_type="validation")`，跳过该文档 |
+| 全部文档失败 | Assembler.assemble() | `AssemblyError` 抛出，含全部 `AssemblyDiagnostic` |
+| 部分文档失败 | Assembler.assemble() | 成功 chunk 聚合，失败在 `composer.diagnostics` |
+| 运行时审计查询 | composer.audit_manifest | `{fingerprint, version, router_type, timestamp}` |
+
+---
+
+### 7. VIOLATION INDICATOR 更新
+
+Phase 19 引入后，以下行为视为架构退化：
+
+| 指标 | 说明 |
+|------|------|
+| Blueprint 包含 `resolve()` 或任何匹配算法 | 数据模型与算法耦合 |
+| `SourceRouter.resolve()` 产生副作用（I/O、网络、状态变更） | Router 是纯函数 |
+| `PipelineAssembler.assemble()` 直接 `logging.info()` | 引擎零日志框架依赖；使用 event_sink |
+| 调用方绕过 `PipelineComposer` 直接创建 Router/Assembler | 破坏 Facade 封装（测试除外） |
+| `AssemblyDiagnostic` 使用 `Dict[str, Any]` 代替 frozen dataclass | 非结构化错误不可过滤/序列化 |
+| Chunk metadata 缺少 `rule_id` 或 `blueprint_version` | 血缘断裂，不可追溯 |
+| `audit_manifest` 缺少 `blueprint_fingerprint` | 事故不可复现 |
+| Composer 构造函数接受文件路径而非 Blueprint | 配置源与引擎耦合 |
+
+---
+
+### 8. 测试规格 `tests/unit/test_pipeline_composer.py`
+
+```python
+# 测试范围 (~80 行)
+
+class TestSourceRule:
+    def test_matches_simple_glob(self): ...
+    def test_matches_deep_glob(self): ...
+    def test_no_match(self): ...
+    def test_rule_id_deterministic(self): ...
+    def test_rule_id_explicit_overrides_auto(self): ...
+
+class TestCompositionBlueprint:
+    def test_from_yaml_valid(self): ...
+    def test_from_yaml_invalid_version_raises(self): ...
+    def test_from_yaml_missing_pattern_raises(self): ...
+    def test_from_dict_programmatic(self): ...
+    def test_rules_sorted_by_priority(self): ...
+    def test_fingerprint_deterministic(self): ...
+    def test_fingerprint_changes_on_config_change(self): ...
+
+class TestSourceRouter:
+    def test_resolve_first_match_wins(self): ...
+    def test_resolve_fallback_to_default(self): ...
+    def test_events_emitted_for_match_skip_fallback(self): ...
+    def test_health_check_all_resolvable(self): ...
+    def test_health_check_missing_strategy(self): ...
+    def test_health_check_invalid_params_caught(self): ...
+
+class TestPipelineAssembler:
+    def test_assemble_single_document(self): ...
+    def test_assemble_chunk_lineage_complete(self): ...  # rule_id, blueprint_version, composed_at
+    def test_assemble_partial_failure_yields_diagnostics(self): ...
+    def test_diagnostics_are_AssemblyDiagnostic_instances(self): ...
+    def test_assemble_all_failure_raises_AssemblyError(self): ...
+    def test_events_emitted_for_chunker_instantiation_and_completion(self): ...
+
+class TestPipelineComposer:
+    def test_from_yaml_end_to_end(self): ...
+    def test_from_dict_test_friendly(self): ...
+    def test_audit_manifest_contains_fingerprint(self): ...
+    def test_compose_for_sources_returns_RetrieverStep(self): ...
+
+class TestArchitectureInvariants:
+    """Tests that verify the constitutional integrity of the kernel itself.
+
+    These are NOT feature tests — they are automated enforcement of the
+    architectural constitution. If any of these fail, the kernel's soul has
+    been compromised, regardless of whether feature tests pass.
+    """
+    def test_blueprint_has_no_resolve_method(self): ...
+    def test_blueprint_has_no_algorithm_logic(self): ...
+    def test_router_is_pure_function_no_side_effects(self): ...
+    def test_assembler_never_imports_logging(self): ...
+    def test_assembler_never_calls_print(self): ...
+    def test_registry_frozen_after_bootstrap(self): ...
+    def test_contracts_layer_has_zero_external_imports(self): ...
+    def test_pipeline_layer_never_imports_chunk_types(self): ...
+    def test_all_chunkers_declare_VERSION(self): ...
+    def test_all_rules_have_deterministic_rule_id(self): ...
+    def test_event_has_correlation_id(self): ...
+    def test_diagnostic_has_contract_violation_field_present(self): ...
+```
+
+---
+
+### 改动清单
+
+| 文件 | 操作 | 行数 |
+|------|------|------|
+| `core/contracts/composition.py` | 新增 | ~180 |
+| `core/adapters/composer.py` | 新增 | ~230 |
+| `configs/default_pipeline.yaml` | 新增 | ~30 |
+| `tests/unit/test_pipeline_composer.py` | 新增 | ~80 |
+
+**总计**: 4 个新文件，~520 行，零改动现有文件
+
+---
+
+### 验证
+
+- [ ] `pytest tests/unit/test_pipeline_composer.py -q` — 新增测试全部通过
+- [ ] `pytest tests/ -q` — 全量零回归
+- [ ] `python -m guardrails check --all` — 16/16 通过，无新增违规
+- [ ] `CompositionBlueprint.from_yaml("configs/default_pipeline.yaml")` 成功解析
+- [ ] `blueprint.fingerprint` 确定性：相同内容 → 相同 hash
+- [ ] `SourceRouter.health_check()` 预检所有 chunker 策略存在 + params 合法
+- [ ] `SourceRouter.resolve()` 正确路由，emit 完整事件链
+- [ ] `PipelineAssembler.assemble()` 返回的每个 Chunk 携带 `rule_id` + `blueprint_version` + `composed_at`
+- [ ] 部分文档失败时 `diagnostics` 包含 `AssemblyDiagnostic` 实例
+- [ ] 全部文档失败时抛出 `AssemblyError`
+- [ ] `PipelineComposer.audit_manifest` 包含 `blueprint_fingerprint`
+- [ ] `PipelineComposer.from_dict(raw)` 测试友好，无需临时文件
+
+---
+
+## Phase 19.5: 让事件流动起来 — ContractAwareEventSink
+
+### 定位
+
+Phase 19 定义了 `event_sink` 依赖注入和 `CompositionEvent`，但它只是 `list.append` 占位符。Phase 19.5 给它装上脊柱：**结构化存储、查询能力、契约违约感知**。这是从"指令执行"迈向"契约感知"的最小可行一步。
+
+```
+Phase 19                      Phase 19.5
+─────────────────────────────────────────────────
+event_sink = list.append      event_sink = ContractAwareEventSink()
+事件只是发射出去               事件可查询、可分类、可审计
+contract_violation = None     contract_violation = "unknown_chunker_strategy" | ...
+诊断是技术错误描述             诊断开始承载契约语义
+```
+
+### 新增文件
+
+```
+core/adapters/
+└── event_sink.py              ← [新增] ContractAwareEventSink (~140 LOC)
+```
+
+### ContractAwareEventSink — 设计
+
+```python
+class ContractAwareEventSink:
+    """Callable — drop-in for any event_sink parameter.
+    Queryable — by correlation_id, by event_type, by contract violation."""
+
+    def __call__(self, event: CompositionEvent) -> None:  # thread-safe append
+    def by_correlation(self, correlation_id: str) -> List[CompositionEvent]:
+    def by_type(self, event_type: str) -> List[CompositionEvent]:
+    @property
+    def violations(self) -> List[CompositionEvent]:  # events with contract_violation
+    @property
+    def violation_count(self) -> int:
+    def violations_by_type(self) -> Dict[str, List[CompositionEvent]]:
+    @property
+    def summary(self) -> Dict[str, Any]:  # JSON-safe audit summary
+    def clear(self) -> None:
+```
+
+### PipelineAssembler._classify_violation — 违约分类
+
+将技术错误类型映射为契约违约类别：
+
+| error_type | 条件 | contract_violation |
+|-----------|------|-------------------|
+| routing | 文档无匹配规则 | `routing_contract_breach` |
+| instantiation | chunker 策略不存在 | `unknown_chunker_strategy` |
+| instantiation | 参数签名不匹配 | `invalid_chunk_params` |
+| execution | 适配器运行失败 | `None` (技术故障，非契约违约) |
+| validation | 输出契约校验失败 | `output_contract_violation` |
+
+违约信息同时写入 `AssemblyDiagnostic.contract_violation` 和 `CompositionEvent.context["contract_violation"]`。
+
+### 关键设计决策
+
+**为什么 `execution` 不算契约违约**
+
+适配器运行时抛异常的原因可能是 bug、OOM、网络抖动——这些是技术故障，不是契约违约。契约违约意味着"Blueprint 声明的条款无法被满足"（chunker 不存在、参数非法）。区分二者是 Phase 25+ 优雅降级的基础：技术故障 → 重试/降级；契约违约 → renegotiate。
+
+**为什么 `ContractAwareEventSink` 用线程锁**
+
+当前引擎是同步的，但 Phase 20+ 将引入 async 并发执行。`threading.Lock` 的一次性成本（~50ns per uncontended acquire）确保未来不需要重构存储层。
+
+### 两个在实现中暴露的 Bug
+
+#### Bug 1: `threading.Lock` 死锁
+
+`summary` 属性持有 `_lock` 后调用 `violations_by_type()`，后者再次尝试获取同一把非可重入锁 → 死锁。修复：在单个锁获取内内联计算所有数据。教训：持有锁的公共方法永远不能调用同样获取该锁的兄弟方法。
+
+#### Bug 2: Python `__len__` truthiness 陷阱
+
+```python
+# ❌ 有缺陷的模式（composer.py line 46/52/168）
+self._emit = event_sink or (lambda e: None)
+
+# ContractAwareEventSink 实现了 __len__ → 返回 0 → Python 判为 falsy
+# → sink 被静默替换为 no-op lambda → 所有事件丢失
+```
+
+修复：`event_sink if event_sink is not None else (lambda _e: None)`。教训：对实现了 `__len__` 的可调用对象，用 `is not None` 而非 `or`。`list.append` 是 bound method（永远 truthy），所以之前所有测试从未暴露此 bug。
+
+### 测试覆盖
+
+| 测试类 | 测试数 | 核心验证 |
+|--------|--------|---------|
+| `TestContractViolationDetection` | 5 | unknown strategy → contract_violation 正确分类，事件 context 包含违约信息，execution 不分类为违约，所有四个类别覆盖 |
+| `TestContractAwareEventSink` | 11 | callable 接口，by_correlation 单文档追踪，by_type 筛选，violations/violations_by_type 违约提取，summary JSON 审计，clear 重置，e2e 端到端，repr |
+
+### 改动清单
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `core/adapters/event_sink.py` | 新增 | ContractAwareEventSink (~140 LOC) |
+| `core/adapters/composer.py` | 修改 | `_classify_violation()`, `_record_failure` 填充 contract_violation, `is not None` 修复 |
+| `core/adapters/__init__.py` | 修改 | 导出 ContractAwareEventSink |
+| `tests/unit/test_pipeline_composer.py` | 修改 | +16 测试 (5 违约检测 + 11 Sink) |
+
+### 验证
+
+- [x] `pytest tests/unit/test_pipeline_composer.py -q` — 67/67 通过
+- [x] `pytest tests/ -q` — 740/740 通过, 0 回归
+- [x] `python -m guardrails check --all` — 39 files, 16 rules, 0 violations

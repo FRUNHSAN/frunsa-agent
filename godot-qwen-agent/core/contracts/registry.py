@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import inspect
 from pathlib import Path
 from typing import Dict, Generic, List, Set, Tuple, Type, TypeVar
 
@@ -21,13 +22,25 @@ class ComponentRegistry(Generic[T]):
 
     def __init__(self) -> None:
         self._registry: Dict[str, Dict[str, Type[T]]] = {}
+        self._signatures: Dict[str, Dict[str, inspect.Signature]] = {}
+        self._frozen = False
 
     def register(self, component_type: str, name: str, cls: Type[T]) -> None:
+        if self._frozen:
+            raise RuntimeError(
+                f"Cannot register '{component_type}/{name}' after freeze(). "
+                "All components must be registered during initialization."
+            )
         if not hasattr(cls, "VERSION") or not isinstance(cls.VERSION, SemVer):
             raise ValueError(
                 f"{cls.__name__}: VERSION must be a SemVer instance"
             )
         self._registry.setdefault(component_type, {})[name] = cls
+        try:
+            sig = inspect.signature(cls.__init__)
+            self._signatures.setdefault(component_type, {})[name] = sig
+        except (ValueError, TypeError):
+            pass
 
     def get(self, component_type: str, name: str) -> Type[T]:
         if component_type not in self._registry:
@@ -41,6 +54,42 @@ class ComponentRegistry(Generic[T]):
                 f"Available: {list(self._registry[component_type].keys())}"
             )
         return self._registry[component_type][name]
+
+    def validate_params(
+        self, component_type: str, name: str, params: dict
+    ) -> str | None:
+        """Validate params against cached signature from @register time.
+
+        Returns None if valid, or an error string if invalid.
+        """
+        sig = self._signatures.get(component_type, {}).get(name)
+        if sig is None:
+            return None
+        try:
+            sig.bind_partial(**params)
+            return None
+        except TypeError as e:
+            return str(e)
+
+    def freeze(self) -> None:
+        """Lock the registry: no further registrations allowed.
+
+        Must be called after all discover() calls complete.
+        This is Anti-WinReg Firewall #1.
+        """
+        self._frozen = True
+
+    @property
+    def is_frozen(self) -> bool:
+        return self._frozen
+
+    def print_summary(self) -> str:
+        """Return a formatted summary of all registered components."""
+        lines = ["Component Registry Summary:"]
+        for ctype in sorted(self._registry.keys()):
+            strategies = sorted(self._registry[ctype].keys())
+            lines.append(f"  {ctype}: {', '.join(strategies)}")
+        return "\n".join(lines)
 
     def list_types(self) -> List[str]:
         return list(self._registry.keys())

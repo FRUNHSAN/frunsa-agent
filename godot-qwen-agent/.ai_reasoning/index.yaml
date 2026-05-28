@@ -13,7 +13,7 @@
 # Schema: schemas/reasoning_chain.schema.json
 
 library_version: 1
-last_updated: "2026-05-25T23:00:00Z"
+last_updated: "2026-05-28T20:00:00Z"
 
 # ── Chains by architectural layer ────────────────────────────────────
 
@@ -178,6 +178,14 @@ chains:
     tags: [orchestration, chaos, retry, multi_pool, multi_agent, critic, engine, sufficiency_report]
     status: active
 
+  # ── Composition / Grammar layer ──
+  - chain_id: phase_19_pipeline_composition
+    file: chains/phase_19_pipeline_composition.yaml
+    title: "Pipeline Composition: grammar layer for the three-platform architecture"
+    layer: adapters
+    tags: [composition, grammar_engine, pipeline, adapter, registry, blueprint, traceability, auditability]
+    status: active
+
   # ── Real LLM Orchestration + Critic Engines ──
   - chain_id: phase_18_real_orch_critic
     file: chains/phase_18_real_orch_critic.yaml
@@ -192,9 +200,9 @@ tag_index:
   architecture: [phase_01_three_platform]
   data_model: [phase_01_data_integrity]
   immutability: [phase_01_data_integrity]
-  pipeline: [phase_02_skip_propagation, phase_04_observability]
+  pipeline: [phase_02_skip_propagation, phase_04_observability, phase_19_pipeline_composition]
   skip: [phase_02_skip_propagation]
-  adapter: [phase_03_adapter_pattern, phase_05_external_io]
+  adapter: [phase_03_adapter_pattern, phase_05_external_io, phase_19_pipeline_composition]
   protocol: [phase_03_adapter_pattern]
   observability: [phase_04_observability]
   health_check: [phase_04_observability, phase_05_external_io]
@@ -212,6 +220,7 @@ tag_index:
   anti_patterns: [phase_07_llm_risks, phase_07_implementation_reality]
   frozen_dataclass: [phase_07_implementation_reality]
   budget: [phase_07_implementation_reality]
+  grammar_engine: [phase_19_pipeline_composition]
   graceful_degradation: [phase_07_implementation_reality]
   mock_backend: [phase_07_implementation_reality]
   streaming: [phase_08_async_native_evolution, phase_08_dag_streaming_semantics]
@@ -235,6 +244,8 @@ tag_index:
   sufficiency_report: [phase_15_planning_engine, phase_16_chaos_multi_agent, phase_18_real_orch_critic]
   stress_test: [phase_15_planning_engine]
   orchestration_contract: [phase_15_planning_engine]
+  auditability: [phase_19_pipeline_composition]
+  blueprint: [phase_19_pipeline_composition]
   chaos: [phase_16_chaos_multi_agent]
   retry: [phase_16_chaos_multi_agent]
   multi_pool: [phase_16_chaos_multi_agent]
@@ -250,7 +261,7 @@ tag_index:
   observability: [phase_04_observability, phase_05_external_io, phase_11_trace_contract_verification]
   file_exporter: [phase_11_trace_contract_verification]
   json_lines: [phase_11_trace_contract_verification]
-  registry: [phase_11_trace_contract_verification]
+  registry: [phase_11_trace_contract_verification, phase_19_pipeline_composition]
   component_candidate: [phase_11_trace_contract_verification, phase_12_observability_closed_loop]
   streaming_trace: [phase_12_observability_closed_loop]
   sqlite_sink: [phase_12_observability_closed_loop]
@@ -262,9 +273,11 @@ tag_index:
   observability_closed_loop: [phase_12_observability_closed_loop, phase_12_orchestration_trace_pre_design]
   orchestration: [phase_12_orchestration_trace_pre_design, phase_14_orchestration_engine, phase_16_chaos_multi_agent, phase_18_real_orch_critic]
   trace_keys: [phase_12_orchestration_trace_pre_design, phase_13_component_trace_contracts]
+  traceability: [phase_19_pipeline_composition]
   pre_design: [phase_12_orchestration_trace_pre_design]
   schema_planning: [phase_12_orchestration_trace_pre_design]
   component_trace: [phase_13_component_trace_contracts]
+  composition: [phase_19_pipeline_composition]
   component_platform: [phase_13_component_trace_contracts]
   engine_mapping: [phase_13_component_trace_contracts]
   ast_scanning: [phase_14_orchestration_engine]

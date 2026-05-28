@@ -1,0 +1,49 @@
+# Phase 19 Pipeline Composition Blueprint
+# =========================================
+# This file defines how source documents are matched to chunking strategies.
+# The Blueprint is pure data — all matching algorithms live in SourceRouter.
+#
+# Field reference:
+#   version:          SemVer of the blueprint schema (required)
+#   default_chunker:  Fallback strategy when no rule matches (default: recursive)
+#   default_params:   Fallback params for the default chunker
+#   source_rules:     Glob-pattern → chunker mappings, sorted by priority ascending
+#     pattern:        Glob pattern for source file paths (required)
+#     chunker:        Strategy name registered in COMPONENT_REGISTRY (required)
+#     chunk_params:   kwargs forwarded to chunker constructor
+#     priority:       Lower = higher priority (default: 100)
+#     description:    Human-readable rule explanation
+#     rule_id:        Explicit stable identifier (auto-generated if empty)
+
+version: "1.0.0"
+
+default_chunker: recursive
+default_params:
+  chunk_size: 512
+  chunk_overlap: 64
+
+source_rules:
+  - pattern: "docs/api/**/*.md"
+    chunker: fixed
+    chunk_params:
+      chunk_size: 256
+      chunk_overlap: 32
+    priority: 10
+    description: "API docs: small fixed chunks for per-endpoint retrieval"
+    rule_id: "api-fixed-v1"
+
+  - pattern: "kb/**/*.md"
+    chunker: recursive
+    chunk_params:
+      chunk_size: 512
+      chunk_overlap: 64
+    priority: 20
+    description: "Knowledge base: recursive separator chunking"
+
+  - pattern: "docs/security/**/*.md"
+    chunker: multi_granularity
+    chunk_params:
+      fine_size: 256
+      coarse_size: 512
+    priority: 5
+    description: "Security docs: multi-granularity for defense-in-depth"
