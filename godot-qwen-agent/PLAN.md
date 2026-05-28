@@ -5415,3 +5415,144 @@ class ContractHealthEvaluator:
 - [x] `pytest tests/unit/test_pipeline_composer.py -q` — 94/94 通过
 - [x] `pytest tests/ -q` — 767/767 通过, 0 回归
 - [x] `python -m guardrails check --all` — 40 files, 16 rules, 0 violations
+
+---
+
+## Phase 21: Blueprint Lifecycle — 为契约注入时间维度 (~40 行核心代码)
+
+### 完成日期
+
+2026-05-28
+
+### 定位
+
+Phase 20 让系统"感知履约状态"，但所有违规都被等同视之。Phase 21 解决：
+**不是所有违约都同等重要。Active 契约的违约是"正在流血的伤口"，Deprecated 契约的违约是"已经结痂的旧伤"。**
+
+这是 Phase 20 的 `trend` 从"比较两个无时间的快照"升级为"演化分析"的关键前置：
+没有 lifecycle，trend 只是在说"变好/变坏"；有了 lifecycle，trend 可以区分"Active 契约在恶化"vs"只是 Deprecated 残留噪声"。
+
+### 核心数据结构
+
+```python
+class ContractLifecycle(str, Enum):
+    DRAFT = "draft"         # 实验性, 违约 0.5x 权重
+    ACTIVE = "active"       # 生产契约, 违约 1.0x 全权重
+    DEPRECATED = "deprecated"  # 遗留契约, 违约 0.3x 权重, 禁止新路由
+
+@dataclass(frozen=True)
+class CompositionBlueprint:
+    version: SemVer
+    lifecycle: ContractLifecycle = ContractLifecycle.ACTIVE  # ← 新增
+    # ... 其余字段不变 ...
+```
+
+**向后兼容**：`lifecycle` 默认值 `ACTIVE`。所有现有 YAML、测试、程序化构造无需修改即可通过——零迁移负担。
+
+### 三条行为规则
+
+| # | 规则 | 实现位置 |
+|---|------|---------|
+| 1 | **默认 ACTIVE** — 无 `lifecycle` 字段的旧配置自动视为 ACTIVE | `CompositionBlueprint.__post_init__` 字符串→枚举归一化 |
+| 2 | **DEPRECATED 拦截** — 新路由请求遇到 DEPRECATED 蓝图直接抛 `AssemblyError` | `SourceRouter.resolve()` 开头硬检查 |
+| 3 | **权重感知评估** — HealthEvaluator 按 lifecycle 加权计算 severity | `ContractHealthEvaluator._compute_weighted_violations()` |
+
+### 生命周期权重
+
+```
+HealthEvaluator._LIFECYCLE_WEIGHTS = {
+    "active":     1.0,   # 全权重
+    "draft":      0.5,   # 减半
+    "deprecated": 0.3,   # 降至 30%
+}
+```
+
+这意味着：
+- 1 次 ACTIVE `unknown_chunker_strategy` → critical（≥1 阈值）
+- 2 次 DRAFT 同类违规 → 加权 1.0 → 刚好 critical
+- 4 次 DEPRECATED 同类违规 → 加权 1.2 → 刚超过 critical 阈值
+
+### SourceRouter 的"优雅拒绝"
+
+```python
+def resolve(self, path: str) -> SourceRule:
+    if self._blueprint.lifecycle == ContractLifecycle.DEPRECATED:
+        raise AssemblyError(
+            f"Cannot route to deprecated blueprint "
+            f"(version {self._blueprint.version}). "
+            f"Use an active or draft alternative."
+        )
+    # ... normal routing logic ...
+```
+
+关键设计：只拦截**新**路由请求，不中断**已运行**的 Pipeline。`PipelineComposer` 创建时持有 Blueprint 引用——已运行的实例不受影响。这是"优雅降级"（graceful rejection）而非"暴力中断"。
+
+### HealthEvaluator 增强
+
+```python
+def evaluate(self, sink, previous=None):
+    # Phase 21: 计算 lifecycle 加权违规计数 + 分布
+    weighted_by_cat, lifecycle_dist = self._compute_weighted_violations(sink)
+
+    # severity 使用加权计数（非原始计数）
+    severity = self._compute_severity(weighted_by_cat)
+
+    return ContractHealthReport(
+        # ...
+        lifecycle_distribution=lifecycle_dist,  # ← 新字段
+    )
+```
+
+### 事件上下文传递
+
+`blueprint_lifecycle` 随 `document_failed` 事件流入 sink：
+
+```python
+# PipelineAssembler._record_failure
+context = {
+    # ...
+    "blueprint_lifecycle": self._blueprint_lifecycle,  # StrEnum, 直接可用
+}
+```
+
+### 与 Phase 20 的协同
+
+```
+之前: report = evaluator.evaluate(sink)
+      → 只知道"有3次违约，趋势恶化"
+
+现在: report = evaluator.evaluate(sink)
+      → 3次违约中2次来自 deprecated 契约 → 实际 severity=degraded 而非 critical
+      → trend=deteriorating 是因为 active 违约在增加，而非 deprecated 残留噪声
+      → lifecycle_distribution={active: 5, deprecated: 2} → 提示需要清理遗留契约
+```
+
+### 测试覆盖
+
+| 测试类 | 测试数 | 核心验证 |
+|--------|--------|---------|
+| `TestContractLifecycle` | 5 | str 子类, 字符串相等, from_string, 非法值抛异常, 三阶段完整性 |
+| `TestBlueprintLifecycle` | 6 | 默认 ACTIVE, 显式赋值, from_yaml, fingerprint 差异, 字符串归一化, 类型保证 |
+| `TestSourceRouterDeprecatedRejection` | 4 | deprecated 抛 AssemblyError, active 正常, draft 正常, resolve_all 拦截 |
+| `TestPipelineAssemblerLifecycleEvents` | 2 | 事件携带 blueprint_lifecycle, 默认 lifecycle=ACTIVE |
+| `TestLifecycleWeightedHealthEvaluation` | 11 | active 全权重, draft 半权重, 2×draft=critical, deprecated 0.3× 权重, 4×deprecated=critical, active 优先, lifecycle_distribution, 默认 lifecycle, routing+draft, routing+deprecated |
+| `TestAuditManifestLifecycle` | 2 | draft 在 manifest, 默认 active |
+| `TestPhase21ArchitectureInvariants` | 3 | #28 默认 ACTIVE ≠ None, #29 拒绝 deprecated, active/draft 不拒绝 |
+| `TestContractHealthReport` | +1 | lifecycle_distribution 深拷贝 |
+
+### 改动清单
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `core/contracts/composition.py` | 修改 | ContractLifecycle enum, CompositionBlueprint.lifecycle 字段, fingerprint 含 lifecycle, _from_raw 解析, ContractHealthReport.lifecycle_distribution |
+| `core/adapters/composer.py` | 修改 | SourceRouter DEPRECATED 拦截, PipelineAssembler 接收+传递 lifecycle, PipelineComposer 传递 lifecycle, audit_manifest 含 lifecycle |
+| `core/adapters/health_evaluator.py` | 修改 | _compute_weighted_violations, lifecycle 权重常数, lifecycle_distribution |
+| `core/contracts/__init__.py` | 修改 | 导出 ContractLifecycle |
+| `CLAUDE.md` | 修改 | 新增不变量 #28-#29 |
+| `tests/unit/test_pipeline_composer.py` | 修改 | +33 测试 (127 total) |
+
+### 验证
+
+- [x] `pytest tests/unit/test_pipeline_composer.py -q` — 127/127 通过
+- [x] `pytest tests/ -q` — 800/800 通过, 0 回归
+- [x] `python -m guardrails check --all` — 通过

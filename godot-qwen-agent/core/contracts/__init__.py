@@ -6,6 +6,7 @@ from .composition import (
     CompositionBlueprint,
     CompositionEvent,
     ContractHealthReport,
+    ContractLifecycle,
     ContractViolation,
     SeverityMapping,
     SeverityRule,
@@ -49,11 +50,12 @@ __all__ = [
     "RetrievalResult",
     "GenerationResult",
     "StreamItem",
-    # Composition contracts (Phase 19-20)
+    # Composition contracts (Phase 19-21)
     "AssemblyDiagnostic",
     "CompositionBlueprint",
     "CompositionEvent",
     "ContractHealthReport",
+    "ContractLifecycle",
     "ContractViolation",
     "SeverityMapping",
     "SeverityRule",

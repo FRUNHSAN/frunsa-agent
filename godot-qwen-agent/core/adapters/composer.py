@@ -26,6 +26,7 @@ from core.contracts.composition import (
     AssemblyDiagnostic,
     CompositionBlueprint,
     CompositionEvent,
+    ContractLifecycle,
     ContractViolation,
     SourceRule,
 )
@@ -57,7 +58,19 @@ class SourceRouter:
 
         Algorithm: iterate rules_by_priority (ascending), first fnmatch hit wins.
         Falls back to a synthetic SourceRule using default_chunker.
+
+        Raises:
+            AssemblyError: if the blueprint lifecycle is DEPRECATED.
+                Already-executing pipelines are unaffected; this only blocks
+                new routing requests.
         """
+        if self._blueprint.lifecycle == ContractLifecycle.DEPRECATED:
+            raise AssemblyError(
+                f"Cannot route to deprecated blueprint "
+                f"(version {self._blueprint.version}). "
+                f"Use an active or draft alternative."
+            )
+
         correlation_id = hashlib.sha256(path.encode()).hexdigest()[:12]
 
         for rule in self._blueprint.rules_by_priority:
@@ -169,9 +182,11 @@ class PipelineAssembler:
     def __init__(
         self,
         event_sink: Callable[[CompositionEvent], None] | None = None,
+        blueprint_lifecycle: ContractLifecycle = ContractLifecycle.ACTIVE,
     ) -> None:
         self._diagnostics: List[AssemblyDiagnostic] = []
         self._emit = event_sink if event_sink is not None else (lambda _e: None)
+        self._blueprint_lifecycle = blueprint_lifecycle
 
     def assemble(
         self,
@@ -353,6 +368,7 @@ class PipelineAssembler:
                 "error_type": error_type,
                 "message": message,
                 "contract_violation": contract_violation,
+                "blueprint_lifecycle": self._blueprint_lifecycle,
             },
         ))
 
@@ -376,7 +392,10 @@ class PipelineComposer:
         self._blueprint = blueprint
         self._init_timestamp = time.time()
         self._router = SourceRouter(blueprint, event_sink=event_sink)
-        self._assembler = PipelineAssembler(event_sink=event_sink)
+        self._assembler = PipelineAssembler(
+            event_sink=event_sink,
+            blueprint_lifecycle=blueprint.lifecycle,
+        )
 
     @classmethod
     def from_yaml(
@@ -406,6 +425,7 @@ class PipelineComposer:
         return {
             "blueprint_fingerprint": self._blueprint.fingerprint,
             "blueprint_version": str(self._blueprint.version),
+            "blueprint_lifecycle": self._blueprint.lifecycle,
             "router_type": type(self._router).__name__,
             "initialized_at": self._init_timestamp,
         }

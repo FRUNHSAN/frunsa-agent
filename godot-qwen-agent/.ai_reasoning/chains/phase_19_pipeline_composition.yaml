@@ -162,8 +162,15 @@ evidence:
     - "TestContractHealthEvaluator: 18 tests (severity, compliance, trend, determinism)"
     - "TestContractViolationEnum: 4 tests (str subclass, equality, dict key)"
     - "TestSeverityMappingDefaults: 4 tests (default rules, thresholds)"
-    - "TestContractHealthReport: 2 tests (range validation, copy)"
-    - "Full suite: 767 passed, 0 regression, 0 guardrail errors"
+    - "TestContractHealthReport: 3 tests (range validation, copy, lifecycle_distribution)"
+    - "TestContractLifecycle: 5 tests (str subclass, equality, from_string, invalid, stages)"
+    - "TestBlueprintLifecycle: 6 tests (default active, explicit, from_yaml, fingerprint, normalization, enum)"
+    - "TestSourceRouterDeprecatedRejection: 4 tests (deprecated raises, active ok, draft ok, resolve_all)"
+    - "TestPipelineAssemblerLifecycleEvents: 2 tests (event context, default lifecycle)"
+    - "TestLifecycleWeightedHealthEvaluation: 11 tests (full weight, half weight, 2x draft, deprecated, 4x deprecated, active overrides, distribution, default lifecycle, routing draft, routing deprecated)"
+    - "TestAuditManifestLifecycle: 2 tests (draft in manifest, default active)"
+    - "TestPhase21ArchitectureInvariants: 3 tests (no None default, router rejects deprecated, active/draft not rejected)"
+    - "Full suite: 800 passed, 0 regression, 0 guardrail errors"
 
 # ── 6. Future Guidance ───────────────────────────────────────────────
 
@@ -299,6 +306,47 @@ future_guidance:
     priority: high
     phase_applicable: "Phase 20+"
 
+  contract_lifecycle:
+    summary: "ContractLifecycle StrEnum gives Blueprints a time dimension — DRAFT/ACTIVE/DEPRECATED"
+    detail: "Phase 21 introduces ContractLifecycle (draft/active/deprecated) and
+      integrates it into CompositionBlueprint, SourceRouter, PipelineAssembler,
+      and ContractHealthEvaluator. Key behaviors: (1) default is ACTIVE for
+      backward compatibility — old YAML without 'lifecycle' key works unchanged;
+      (2) SourceRouter.resolve() rejects DEPRECATED blueprints with AssemblyError
+      for new routing requests — already-running pipelines are unaffected;
+      (3) ContractHealthEvaluator applies lifecycle weights when computing severity:
+      ACTIVE=1.0x, DRAFT=0.5x, DEPRECATED=0.3x — violations from deprecated
+      contracts are heavily down-weighted, meaning '10 deprecated routing misses'
+      may be less severe than '1 active unknown_strategy'; (4) ContractHealthReport
+      includes lifecycle_distribution for visibility into where violations originate."
+    priority: high
+    phase_applicable: "Phase 21+"
+
+  lifecycle_weighting_in_evaluator:
+    summary: "HealthEvaluator uses lifecycle-weighted counts, not raw violation counts"
+    detail: "The evaluator's _compute_weighted_violations() iterates violation events,
+      reads blueprint_lifecycle from event context, and multiplies each violation
+      by the lifecycle weight before checking SeverityMapping thresholds. This
+      means a SeverityRule with count_threshold=1 is only triggered by 1 ACTIVE
+      violation, but requires 2 DRAFT or 4 DEPRECATED violations of the same type.
+      The lifecycle weights are class-level constants (injectable in future Phase).
+      Events without blueprint_lifecycle in context default to 'active' (full weight)."
+    priority: high
+    phase_applicable: "Phase 21+"
+
+  deprecated_rejection_scope:
+    summary: "DEPRECATED rejection only blocks new routing, never interrupts running pipelines"
+    detail: "SourceRouter.resolve() checks self._blueprint.lifecycle at the start
+      of each resolve() call. If DEPRECATED, it raises AssemblyError. This means:
+      (1) PipelineComposer instances created BEFORE the Blueprint was deprecated
+      continue to function — their router was initialized with the active blueprint;
+      (2) Only NEW PipelineComposer.from_yaml() calls against a deprecated config
+      will fail at resolve() time; (3) The gate is at routing time, not construction
+      time — a composer CAN be created with a deprecated blueprint, but any
+      resolve() call will raise. This is 'graceful rejection.'"
+    priority: medium
+    phase_applicable: "Phase 21+"
+
 anti_patterns:
   - "Putting resolve() or any matching algorithm on CompositionBlueprint (data model)"
   - "SourceRouter producing I/O, network calls, or state mutation (must be pure)"
@@ -326,3 +374,11 @@ anti_patterns:
   - "Using bare strings for contract_violation instead of ContractViolation enum"
   - "Evaluator modifying sink state during evaluation (must be read-only)"
   - "Computing trend from same report object (need previous snapshot for comparison)"
+  - "Using str() on a StrEnum member — produces 'ClassName.MEMBER' not the value. Use the member directly or .value"
+  - "CompositionBlueprint.lifecycle defaulting to None or any non-ACTIVE value — breaks backward compatibility with all existing YAML"
+  - "SourceRouter allowing routing through DEPRECATED blueprints — violates the lifecycle contract"
+  - "Deprecated rejection at construction time instead of resolve() time — would kill already-running pipelines"
+  - "HealthEvaluator ignoring blueprint_lifecycle in event context — makes lifecycle weighting a dead letter"
+  - "Hardcoding lifecycle weights inside _compute_severity instead of as injectable class-level constants"
+  - "Adding lifecycle field to CompositionBlueprint without updating fingerprint — makes different-lifecycle blueprints collide"
+  - "Allowing invalid lifecycle strings to pass silently instead of raising ValueError"

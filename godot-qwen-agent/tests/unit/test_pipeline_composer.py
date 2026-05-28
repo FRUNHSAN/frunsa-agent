@@ -22,6 +22,7 @@ from core.contracts.composition import (
     CompositionBlueprint,
     CompositionEvent,
     ContractHealthReport,
+    ContractLifecycle,
     ContractViolation,
     SeverityMapping,
     SeverityRule,
@@ -1099,3 +1100,358 @@ class TestContractHealthReport:
         )
         vc["test"] = 999
         assert report.violation_counts["test"] == 5
+
+    def test_lifecycle_distribution_is_copied(self):
+        ld = {"active": 3}
+        report = ContractHealthReport(
+            compliance_rate=1.0, severity="healthy",
+            dominant_violation_type=None, trend=None,
+            total_documents=0, total_events=0,
+            violation_counts={}, evaluated_at=1.0,
+            lifecycle_distribution=ld,
+        )
+        ld["active"] = 999
+        assert report.lifecycle_distribution["active"] == 3
+
+
+# ── Phase 21: ContractLifecycle + Blueprint Lifecycle ──────────────
+
+class TestContractLifecycle:
+    """Verify ContractLifecycle StrEnum invariants."""
+
+    def test_enum_is_str_subclass(self):
+        assert issubclass(ContractLifecycle, str)
+
+    def test_enum_equals_string(self):
+        assert ContractLifecycle.ACTIVE == "active"
+        assert ContractLifecycle.DRAFT == "draft"
+        assert ContractLifecycle.DEPRECATED == "deprecated"
+
+    def test_enum_from_string(self):
+        assert ContractLifecycle("active") == ContractLifecycle.ACTIVE
+        assert ContractLifecycle("draft") == ContractLifecycle.DRAFT
+        assert ContractLifecycle("deprecated") == ContractLifecycle.DEPRECATED
+
+    def test_invalid_lifecycle_raises(self):
+        with pytest.raises(ValueError):
+            ContractLifecycle("nonexistent")
+
+    def test_all_three_stages_defined(self):
+        names = {m.name for m in ContractLifecycle}
+        assert names == {"DRAFT", "ACTIVE", "DEPRECATED"}
+
+
+class TestBlueprintLifecycle:
+    """Verify CompositionBlueprint lifecycle integration."""
+
+    def test_default_lifecycle_is_active(self):
+        bp = CompositionBlueprint.from_dict({"version": "1.0.0"})
+        assert bp.lifecycle == ContractLifecycle.ACTIVE
+
+    def test_explicit_lifecycle_from_dict(self):
+        bp = CompositionBlueprint.from_dict({
+            "version": "1.0.0",
+            "lifecycle": "draft",
+        })
+        assert bp.lifecycle == ContractLifecycle.DRAFT
+
+    def test_lifecycle_from_yaml_string(self):
+        yaml_content = """version: "1.0.0"
+lifecycle: deprecated
+"""
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".yaml", delete=False, encoding="utf-8"
+        ) as f:
+            f.write(yaml_content)
+            tmp = f.name
+        try:
+            bp = CompositionBlueprint.from_yaml(tmp)
+            assert bp.lifecycle == ContractLifecycle.DEPRECATED
+        finally:
+            Path(tmp).unlink()
+
+    def test_lifecycle_affects_fingerprint(self):
+        a = CompositionBlueprint.from_dict({"version": "1.0.0"})
+        b = CompositionBlueprint.from_dict({
+            "version": "1.0.0", "lifecycle": "draft",
+        })
+        assert a.fingerprint != b.fingerprint
+
+    def test_lifecycle_normalized_from_string(self):
+        """Passing a string lifecycle to constructor normalizes to enum."""
+        bp = CompositionBlueprint(
+            version=SemVer.parse("1.0.0"),
+            lifecycle="draft",  # type: ignore[arg-type]
+        )
+        assert isinstance(bp.lifecycle, ContractLifecycle)
+        assert bp.lifecycle == ContractLifecycle.DRAFT
+
+    def test_lifecycle_stored_as_enum_not_string(self):
+        bp = CompositionBlueprint.from_dict({"version": "1.0.0"})
+        assert isinstance(bp.lifecycle, ContractLifecycle)
+
+
+class TestSourceRouterDeprecatedRejection:
+    """Verify SourceRouter rejects DEPRECATED blueprints."""
+
+    def test_deprecated_blueprint_raises_assembly_error(self):
+        bp = CompositionBlueprint.from_dict({
+            "version": "1.0.0",
+            "lifecycle": "deprecated",
+        })
+        router = SourceRouter(bp)
+        with pytest.raises(AssemblyError, match="deprecated blueprint"):
+            router.resolve("readme.md")
+
+    def test_active_blueprint_resolves_normally(self):
+        bp = CompositionBlueprint.from_dict({
+            "version": "1.0.0",
+            "lifecycle": "active",
+            "default_chunker": "identity",
+        })
+        router = SourceRouter(bp)
+        rule = router.resolve("readme.md")
+        assert rule.chunker == "identity"
+
+    def test_draft_blueprint_resolves_normally(self):
+        bp = CompositionBlueprint.from_dict({
+            "version": "1.0.0",
+            "lifecycle": "draft",
+            "default_chunker": "identity",
+        })
+        router = SourceRouter(bp)
+        rule = router.resolve("readme.md")
+        assert rule.chunker == "identity"
+
+    def test_deprecated_blueprint_raises_for_resolve_all(self):
+        bp = CompositionBlueprint.from_dict({
+            "version": "1.0.0",
+            "lifecycle": "deprecated",
+        })
+        router = SourceRouter(bp)
+        with pytest.raises(AssemblyError, match="deprecated blueprint"):
+            router.resolve_all(["readme.md"])
+
+
+class TestPipelineAssemblerLifecycleEvents:
+    """Verify blueprint_lifecycle is threaded into event context."""
+
+    def test_document_failed_event_has_blueprint_lifecycle(self):
+        events = []
+        bp = CompositionBlueprint.from_dict({
+            "version": "1.0.0",
+            "lifecycle": "draft",
+            "source_rules": [
+                {"pattern": "*.md", "chunker": "nonexistent", "priority": 10},
+            ],
+        })
+        router = SourceRouter(bp)
+        rules = router.resolve_all(["test.md"])
+        doc = _make_doc("hello", "test.md")
+        assembler = PipelineAssembler(
+            event_sink=events.append,
+            blueprint_lifecycle=bp.lifecycle,
+        )
+        with pytest.raises(AssemblyError):
+            assembler.assemble(rules, {"test.md": doc}, "1.0.0")
+        failed = [e for e in events if e.event_type == "document_failed"]
+        assert len(failed) == 1
+        assert failed[0].context["blueprint_lifecycle"] == "draft"
+
+    def test_assembler_default_lifecycle_is_active(self):
+        assembler = PipelineAssembler()
+        assert assembler._blueprint_lifecycle == ContractLifecycle.ACTIVE
+
+
+class TestLifecycleWeightedHealthEvaluation:
+    """Verify lifecycle-aware severity weighting in HealthEvaluator."""
+
+    @pytest.fixture
+    def evaluator(self):
+        return ContractHealthEvaluator()
+
+    @pytest.fixture
+    def sink(self):
+        from core.adapters.event_sink import ContractAwareEventSink
+        return ContractAwareEventSink()
+
+    def _violation_event(self, correlation_id, violation_type, lifecycle="active"):
+        return CompositionEvent(
+            event_type="document_failed",
+            correlation_id=correlation_id,
+            timestamp=1.0,
+            context={
+                "contract_violation": violation_type,
+                "blueprint_lifecycle": lifecycle,
+            },
+        )
+
+    def test_active_violation_full_weight(self, evaluator, sink):
+        """ACTIVE unknown_chunker_strategy → threshold 1 → critical."""
+        sink(self._violation_event(
+            "doc-1", ContractViolation.UNKNOWN_CHUNKER_STRATEGY,
+            lifecycle="active",
+        ))
+        report = evaluator.evaluate(sink)
+        assert report.severity == "critical"
+
+    def test_draft_violation_half_weight(self, evaluator, sink):
+        """DRAFT unknown_chunker_strategy → weight 0.5 < threshold 1 → healthy."""
+        sink(self._violation_event(
+            "doc-1", ContractViolation.UNKNOWN_CHUNKER_STRATEGY,
+            lifecycle="draft",
+        ))
+        report = evaluator.evaluate(sink)
+        assert report.severity == "healthy"
+
+    def test_two_draft_critical_violations_equal_one_active(self, evaluator, sink):
+        """2 DRAFT unknown_chunker_strategy = weighted 1.0 → just hits critical."""
+        sink(self._violation_event(
+            "doc-1", ContractViolation.UNKNOWN_CHUNKER_STRATEGY,
+            lifecycle="draft",
+        ))
+        sink(self._violation_event(
+            "doc-2", ContractViolation.UNKNOWN_CHUNKER_STRATEGY,
+            lifecycle="draft",
+        ))
+        report = evaluator.evaluate(sink)
+        assert report.severity == "critical"
+
+    def test_deprecated_violation_heavily_downweighted(self, evaluator, sink):
+        """DEPRECATED unknown_chunker_strategy → weight 0.3 < threshold 1 → healthy."""
+        sink(self._violation_event(
+            "doc-1", ContractViolation.UNKNOWN_CHUNKER_STRATEGY,
+            lifecycle="deprecated",
+        ))
+        report = evaluator.evaluate(sink)
+        assert report.severity == "healthy"
+
+    def test_four_deprecated_critical_violations_hit_threshold(self, evaluator, sink):
+        """4 DEPRECATED = 4 × 0.3 = 1.2 ≥ 1 → critical."""
+        for i in range(4):
+            sink(self._violation_event(
+                f"doc-{i}", ContractViolation.UNKNOWN_CHUNKER_STRATEGY,
+                lifecycle="deprecated",
+            ))
+        report = evaluator.evaluate(sink)
+        assert report.severity == "critical"
+
+    def test_active_overrides_deprecated_in_severity(self, evaluator, sink):
+        """1 ACTIVE violation + many deprecated → critical from active."""
+        sink(self._violation_event(
+            "doc-active", ContractViolation.UNKNOWN_CHUNKER_STRATEGY,
+            lifecycle="active",
+        ))
+        sink(self._violation_event(
+            "doc-dep-1", ContractViolation.INVALID_CHUNK_PARAMS,
+            lifecycle="deprecated",
+        ))
+        report = evaluator.evaluate(sink)
+        assert report.severity == "critical"
+
+    def test_lifecycle_distribution_in_report(self, evaluator, sink):
+        """lifecycle_distribution counts unique docs per lifecycle stage."""
+        sink(self._violation_event(
+            "doc-a1", ContractViolation.UNKNOWN_CHUNKER_STRATEGY,
+            lifecycle="active",
+        ))
+        sink(self._violation_event(
+            "doc-a2", ContractViolation.INVALID_CHUNK_PARAMS,
+            lifecycle="active",
+        ))
+        sink(self._violation_event(
+            "doc-d1", ContractViolation.UNKNOWN_CHUNKER_STRATEGY,
+            lifecycle="deprecated",
+        ))
+        sink(self._violation_event(
+            "doc-d1", ContractViolation.INVALID_CHUNK_PARAMS,
+            lifecycle="deprecated",
+        ))
+        report = evaluator.evaluate(sink)
+        ld = dict(report.lifecycle_distribution)
+        assert ld.get("active") == 2
+        assert ld.get("deprecated") == 1
+
+    def test_default_lifecycle_for_events_without_explicit_field(self, evaluator, sink):
+        """Events without blueprint_lifecycle default to active."""
+        sink(CompositionEvent(
+            event_type="document_failed",
+            correlation_id="doc-1",
+            timestamp=1.0,
+            context={
+                "contract_violation": ContractViolation.UNKNOWN_CHUNKER_STRATEGY,
+            },
+        ))
+        report = evaluator.evaluate(sink)
+        assert report.severity == "critical"  # full weight
+        ld = dict(report.lifecycle_distribution)
+        assert ld.get("active") == 1
+
+    def test_routing_breach_with_lifecycle_weighting(self, evaluator, sink):
+        """routing_contract_breach threshold=3. 6 DRAFT = 6×0.5 = 3 → critical."""
+        for i in range(6):
+            sink(self._violation_event(
+                f"doc-{i}", ContractViolation.ROUTING_CONTRACT_BREACH,
+                lifecycle="draft",
+            ))
+        report = evaluator.evaluate(sink)
+        assert report.severity == "critical"
+
+    def test_routing_breach_deprecated_stays_below_threshold(self, evaluator, sink):
+        """routing_contract_breach threshold=3. 9 DEPRECATED = 9×0.3 = 2.7 < 3."""
+        for i in range(9):
+            sink(self._violation_event(
+                f"doc-{i}", ContractViolation.ROUTING_CONTRACT_BREACH,
+                lifecycle="deprecated",
+            ))
+        report = evaluator.evaluate(sink)
+        assert report.severity == "healthy"
+
+
+class TestAuditManifestLifecycle:
+    """Verify audit_manifest includes blueprint lifecycle."""
+
+    def test_audit_manifest_includes_lifecycle(self):
+        composer = PipelineComposer.from_dict({
+            "version": "1.0.0",
+            "lifecycle": "draft",
+        })
+        manifest = composer.audit_manifest
+        assert manifest["blueprint_lifecycle"] == "draft"
+
+    def test_audit_manifest_default_lifecycle(self):
+        composer = PipelineComposer.from_dict({"version": "1.0.0"})
+        manifest = composer.audit_manifest
+        assert manifest["blueprint_lifecycle"] == "active"
+
+
+class TestPhase21ArchitectureInvariants:
+    """Constitutional integrity tests for Phase 21."""
+
+    def test_blueprint_lifecycle_default_is_active_not_none(self):
+        """Invariant #28: lifecycle default must be ACTIVE, never None."""
+        bp = CompositionBlueprint.from_dict({"version": "1.0.0"})
+        assert bp.lifecycle is not None
+        assert bp.lifecycle == ContractLifecycle.ACTIVE
+
+    def test_deprecated_blueprint_rejected_by_router(self):
+        """Invariant #29: SourceRouter must reject DEPRECATED blueprints."""
+        bp = CompositionBlueprint.from_dict({
+            "version": "1.0.0",
+            "lifecycle": "deprecated",
+        })
+        router = SourceRouter(bp)
+        with pytest.raises(AssemblyError):
+            router.resolve("any/path.md")
+
+    def test_active_and_draft_not_rejected(self):
+        """DEPRECATED rejection must not affect ACTIVE or DRAFT blueprints."""
+        for lifecycle in ("active", "draft"):
+            bp = CompositionBlueprint.from_dict({
+                "version": "1.0.0",
+                "lifecycle": lifecycle,
+                "default_chunker": "identity",
+            })
+            router = SourceRouter(bp)
+            rule = router.resolve("test.md")
+            assert rule is not None

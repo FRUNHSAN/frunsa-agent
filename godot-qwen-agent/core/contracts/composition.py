@@ -66,6 +66,26 @@ class SourceRule:
         return fnmatch(path, self.pattern)
 
 
+# ── Contract Lifecycle Enum (Phase 21) ──────────────────────────────
+
+class ContractLifecycle(str, Enum):
+    """Blueprint lifecycle stages.
+
+    str subclass — drop-in compatible with all existing string comparisons.
+    Enum — IDE autocomplete, mypy exhaustiveness checking.
+
+    Semantics:
+      - DRAFT:      Experimental; violations are down-weighted (0.5x)
+      - ACTIVE:     Production contract; violations at full severity (1.0x)
+      - DEPRECATED: Legacy contract; violations heavily down-weighted (0.3x),
+                    and new routing requests MUST be rejected.
+    """
+
+    DRAFT = "draft"
+    ACTIVE = "active"
+    DEPRECATED = "deprecated"
+
+
 # ── Composition Blueprint ───────────────────────────────────────────
 
 @dataclass(frozen=True)
@@ -78,6 +98,7 @@ class CompositionBlueprint:
     """
 
     version: SemVer
+    lifecycle: ContractLifecycle = ContractLifecycle.ACTIVE
     default_chunker: str = "recursive"
     default_params: MappingProxyType[str, Any] = field(
         default_factory=lambda: MappingProxyType({})
@@ -89,6 +110,11 @@ class CompositionBlueprint:
             self, "default_params",
             MappingProxyType(deepcopy(dict(self.default_params)))
         )
+        # Normalize lifecycle from string (YAML/JSON) to enum
+        if isinstance(self.lifecycle, str):
+            object.__setattr__(
+                self, "lifecycle", ContractLifecycle(self.lifecycle)
+            )
         sorted_rules = tuple(sorted(self.source_rules, key=lambda r: r.priority))
         if sorted_rules != self.source_rules:
             object.__setattr__(self, "source_rules", sorted_rules)
@@ -102,6 +128,7 @@ class CompositionBlueprint:
         """Deterministic hash of the entire blueprint content."""
         canonical = json.dumps({
             "version": str(self.version),
+            "lifecycle": str(self.lifecycle),
             "default_chunker": self.default_chunker,
             "default_params": dict(self.default_params),
             "rules": [
@@ -133,6 +160,8 @@ class CompositionBlueprint:
     @classmethod
     def _from_raw(cls, raw: dict) -> CompositionBlueprint:
         version = SemVer.parse(raw["version"])
+        lifecycle_raw = raw.get("lifecycle", "active")
+        lifecycle = ContractLifecycle(lifecycle_raw)
         default_chunker = raw.get("default_chunker", "recursive")
         default_params = raw.get("default_params", {})
 
@@ -153,6 +182,7 @@ class CompositionBlueprint:
 
         return cls(
             version=version,
+            lifecycle=lifecycle,
             default_chunker=default_chunker,
             default_params=default_params,
             source_rules=tuple(rules),
@@ -327,11 +357,18 @@ class ContractHealthReport:
     total_events: int
     violation_counts: MappingProxyType[str, int]
     evaluated_at: float
+    lifecycle_distribution: MappingProxyType[str, int] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
 
     def __post_init__(self) -> None:
         object.__setattr__(
             self, "violation_counts",
             MappingProxyType(deepcopy(dict(self.violation_counts)))
+        )
+        object.__setattr__(
+            self, "lifecycle_distribution",
+            MappingProxyType(deepcopy(dict(self.lifecycle_distribution)))
         )
         if not 0.0 <= self.compliance_rate <= 1.0:
             raise ValueError(

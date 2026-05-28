@@ -1,38 +1,46 @@
-"""Contract Health Evaluator — Phase 20.
+"""Contract Health Evaluator — Phase 20 + Phase 21 lifecycle weighting.
 
 Aggregates discrete violation signals from ContractAwareEventSink into
 a structured ContractHealthReport. This is the first layer that "understands"
 the system's compliance state — transforming raw events into a decision-ready
 health assessment.
 
+Phase 21 adds lifecycle-aware severity: DRAFT violations are down-weighted (0.5x),
+DEPRECATED violations are heavily down-weighted (0.3x), and ACTIVE violations
+carry full weight (1.0x). This means 10 deprecated-routing violations may be
+less severe than 1 active unknown_strategy violation.
+
 Design invariants:
   - Pure function: no locks, no state mutation, no internal caching
   - Trend requires caller-provided previous report (stateless)
   - Severity mapping is injectable (testable, configurable)
+  - Lifecycle weights are class-level constants (injectable in future Phase)
   - Zero truthiness checks on sink — all accesses are explicit method calls
   - Same input → same output (deterministic, offline-verifiable)
 
 Future Phase 25+ consumers:
   - severity == 'critical' + trend == 'deteriorating' → trigger renegotiate
-  - compliance_rate < threshold → notify relationship layer
+  - lifecycle_distribution shows deprecated-heavy → prompt cleanup
 """
 
 from __future__ import annotations
 
 import time
-from typing import List
+from typing import Dict
 
 from core.contracts.composition import (
     ContractHealthReport,
-    ContractViolation,
+    ContractLifecycle,
     SeverityMapping,
-    SeverityRule,
 )
 from core.adapters.event_sink import ContractAwareEventSink
 
 
 class ContractHealthEvaluator:
     """Pure evaluator: violation signals → health assessment.
+
+    Phase 21: lifecycle-aware — violations from deprecated blueprints
+    are down-weighted; violations from draft blueprints are softened.
 
     Usage:
         evaluator = ContractHealthEvaluator()
@@ -41,6 +49,15 @@ class ContractHealthEvaluator:
         next_report = evaluator.evaluate(sink, previous=report)
         # next_report.trend → 'improving' | 'stable' | 'deteriorating'
     """
+
+    # Phase 21: lifecycle severity weights.
+    # Active violations at full force; draft at half; deprecated at 0.3x.
+    # Made class-level for transparency; injectable in future Phase.
+    _LIFECYCLE_WEIGHTS: Dict[str, float] = {
+        ContractLifecycle.ACTIVE: 1.0,
+        ContractLifecycle.DRAFT: 0.5,
+        ContractLifecycle.DEPRECATED: 0.3,
+    }
 
     def __init__(
         self, severity_mapping: SeverityMapping | None = None
@@ -69,7 +86,9 @@ class ContractHealthEvaluator:
 
         total_docs = summary["documents_tracked"]
         total_events = summary["total_events"]
-        violation_total = summary["violation_count"]
+
+        # Phase 21: compute lifecycle-weighted violation counts and distribution
+        weighted_by_cat, lifecycle_dist = self._compute_weighted_violations(sink)
 
         # Compliance rate: fraction of documents without violations
         if total_docs == 0:
@@ -79,10 +98,10 @@ class ContractHealthEvaluator:
             compliance_rate = (total_docs - docs_with_violations) / total_docs
             compliance_rate = max(0.0, min(1.0, compliance_rate))
 
-        # Determine severity via injectable mapping
-        severity = self._compute_severity(violations_by_cat)
+        # Phase 21: severity uses lifecycle-weighted counts
+        severity = self._compute_severity(weighted_by_cat)
 
-        # Dominant violation type
+        # Dominant violation type (from raw counts — what's most frequent)
         dominant = self._dominant_violation(violations_by_cat)
 
         # Trend (stateless — requires caller-provided history)
@@ -96,15 +115,57 @@ class ContractHealthEvaluator:
             total_documents=total_docs,
             total_events=total_events,
             violation_counts=violations_by_cat,
+            lifecycle_distribution=lifecycle_dist,
             evaluated_at=time.time(),
         )
+
+    # ── Phase 21: Lifecycle-weighted violations ──────────────────
+
+    @classmethod
+    def _compute_weighted_violations(
+        cls, sink: ContractAwareEventSink,
+    ) -> tuple[Dict[str, float], Dict[str, int]]:
+        """Compute lifecycle-weighted violation counts and distribution.
+
+        Returns:
+            (weighted_by_category, lifecycle_distribution)
+            - weighted_by_category: {violation_type: weighted_count}
+            - lifecycle_distribution: {lifecycle: unique_doc_count}
+        """
+        weighted: Dict[str, float] = {}
+        lifecycle_docs: Dict[str, set] = {}
+
+        for e in sink.violations:
+            cv = e.context.get("contract_violation")
+            lc = e.context.get("blueprint_lifecycle", ContractLifecycle.ACTIVE)
+            weight = cls._LIFECYCLE_WEIGHTS.get(lc, 1.0)
+
+            if cv:
+                weighted[cv] = weighted.get(cv, 0.0) + weight
+
+            # Track unique document correlation_ids per lifecycle
+            cid = e.correlation_id
+            if cid and cid != "batch":
+                if lc not in lifecycle_docs:
+                    lifecycle_docs[lc] = set()
+                lifecycle_docs[lc].add(cid)
+
+        lifecycle_dist = {
+            lc: len(docs) for lc, docs in lifecycle_docs.items()
+        }
+
+        return weighted, lifecycle_dist
 
     # ── Internal (pure, testable) ────────────────────────────────
 
     def _compute_severity(
         self, violations_by_cat: dict
-    ) -> ContractHealthReport.__dataclass_fields__:
-        # Return type is Literal["healthy", "degraded", "critical"]
+    ) -> str:
+        """Compute severity from violation counts (raw or weighted).
+
+        Accepts both int (Phase 20) and float (Phase 21 weighted) counts.
+        The comparison is numeric — 0.6 weighted violations < 1 threshold.
+        """
         result: str = "healthy"
         for rule in self._mapping.rules:
             count = violations_by_cat.get(rule.violation_type, 0)
@@ -113,7 +174,7 @@ class ContractHealthEvaluator:
                     return "critical"
                 if rule.severity == "degraded":
                     result = "degraded"
-        return result  # type: ignore[return-value]
+        return result
 
     @staticmethod
     def _dominant_violation(violations_by_cat: dict) -> str | None:
