@@ -98,6 +98,33 @@ class ToolAdapter:
             timestamp=time.time(),
         )
 
+    def from_llm_response(self, response: Any) -> ToolCall:
+        """Convert an LLMResponse into a ToolCall — the type-safe bridge.
+
+        Phase 22 P0: eliminates the fragile dict intermediate step.
+        Accepts LLMResponse (from LLM/base.py) directly, extracting
+        tool_name and tool_input with type safety instead of bare dict keys.
+
+        Args:
+            response: LLMResponse with type="tool_call"
+
+        Returns:
+            ToolCall ready for execute()
+
+        Raises:
+            ValueError: if response is not a tool_call type
+        """
+        if not hasattr(response, "is_tool_call") or not response.is_tool_call():
+            raise ValueError(
+                f"Expected LLMResponse with type='tool_call', "
+                f"got type='{getattr(response, 'type', 'unknown')}'"
+            )
+        return ToolCall(
+            tool_name=response.tool_name,
+            parameters=dict(response.tool_input),
+            timestamp=time.time(),
+        )
+
     # ── Execution (ToolCall → ToolResult) ───────────────────────────
 
     def execute(self, tool_call: ToolCall) -> ToolResult:

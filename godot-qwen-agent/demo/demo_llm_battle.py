@@ -137,10 +137,7 @@ def main():
             print(f"   LLM chose tool: {tool_name}")
             print(f"   Arguments: {json.dumps(response.tool_input, ensure_ascii=False)[:120]}")
 
-            tc = adapter.parse_function_call({
-                "name": tool_name,
-                "arguments": json.dumps(response.tool_input),
-            })
+            tc = adapter.from_llm_response(response)
             result = adapter.execute(tc)
 
             if result.success:
