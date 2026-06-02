@@ -5556,3 +5556,198 @@ context = {
 - [x] `pytest tests/unit/test_pipeline_composer.py -q` — 127/127 通过
 - [x] `pytest tests/ -q` — 800/800 通过, 0 回归
 - [x] `python -m guardrails check --all` — 通过
+
+---
+
+## Phase 22: Contract-Adaptive Muscle Layer — 从被动认知到主动修复 (22a+22b+22c)
+
+### 完成日期
+
+2026-05-29
+
+### 定位
+
+Phase 19-21 构建了"神经系统"——能感知违约、评估健康、区分严重程度。但它是被动的：能感觉到痛，不会止血。
+
+Phase 22 是"肌肉层"——三个能力协同工作，让契约关系体从"能感受自己正在违约"进化到"能为此做些什么"。
+
+### 三块肌肉
+
+| 子阶段 | 文件 | 角色 | 范式 |
+|--------|------|------|------|
+| 22a Tool Contract | `contracts/tool.py` + `adapters/tool_adapter.py` | LLM function_call → ToolCall → ToolResult，带 blueprint 校验 | 组件适配器 (1:1 翻译) |
+| 22b Self-Repair | `adapters/repair_engine.py` | 消费 HealthReport → 决策修复策略 → 消耗 RepairBudget → 优雅降级 | 语法引擎 (N:M 编排) |
+| 22c Memory | `adapters/persistence.py` | SQLite 持久化 health transition（delta），跨会话关系历史 | 基础设施 |
+
+### 22a: Tool Contract — 工具调用进入契约体系
+
+**核心设计**：
+
+```
+LLM function_call (raw dict)
+    ↓ ToolAdapter.parse_function_call()
+ToolCall (deterministic call_id, frozen)
+    ↓ ToolAdapter._validate_against_blueprint()
+    ├── Tool 是否在 Registry 中存在？
+    ├── 参数是否匹配 ToolProtocol.parameters_schema？
+    └── 不通过 → ContractViolation → EventSink
+    ↓ 通过
+ToolAdapter.execute()
+    ↓ COMPONENT_REGISTRY.get("tool", name) ← USB 模型
+ToolResult (success/error/contract_violation)
+    ↓ tool_executed event → EventSink → HealthEvaluator
+```
+
+**新增 ContractViolation 类型**：
+
+```python
+TOOL_NOT_FOUND = "tool_not_found"        # critical, threshold=1
+TOOL_PARAM_MISMATCH = "tool_param_mismatch"  # degraded, threshold=1
+```
+
+**关键设计决策**：Tool 执行失败（exception during execute()）不是契约违规——与技术失败（chunker execution failure）同构。只有"工具不存在"和"参数不匹配"才是契约层面问题。
+
+### 22b: Self-Repair Engine — 违约→修复闭环
+
+**核心设计**：
+
+```
+ContractHealthReport (severity=degraded/critical)
+    ↓ SelfRepairEngine.decide(report, sink)
+    ├── 对每个 violation_type:
+    │   ├── 检查 RepairBudget.can_repair(type)
+    │   ├── 选择策略: RETRY_WITH_DEFAULT | REPLACE_COMPONENT | GIVE_UP
+    │   └── budget = budget.consume(type)
+    ├── budget 耗尽 → emit repair_budget_exhausted
+    └── 返回 List[RepairAction]
+    ↓ SelfRepairEngine.execute_all(actions)
+    ├── 记录 repair_attempted event → EventSink
+    └── 返回 results → 调用方重新执行 pipeline
+```
+
+**修复策略映射**：
+
+| ContractViolation | RepairStrategy | 说明 |
+|------------------|----------------|------|
+| UNKNOWN_CHUNKER_STRATEGY | REPLACE_COMPONENT | 用 default_chunker 替代 |
+| INVALID_CHUNK_PARAMS | RETRY_WITH_DEFAULT | 用 default_params 重试 |
+| ROUTING_CONTRACT_BREACH | RETRY_WITH_DEFAULT | 用 default_chunker 重试 |
+| OUTPUT_CONTRACT_VIOLATION | RETRY_WITH_DEFAULT | 重试一次（可能 transient） |
+| TOOL_NOT_FOUND | REPLACE_COMPONENT | 从 Registry 找替代工具 |
+| TOOL_PARAM_MISMATCH | RETRY_WITH_DEFAULT | 用默认参数重试 |
+
+**RepairBudget**：`max_total=5, max_per_type=2`。预算耗尽时发出 `repair_budget_exhausted` 事件——"承认自己无能为力"进入契约合规体系。系统不崩溃、不死锁、不无限重试。
+
+### 22c: Relationship Memory — 关系演化轨迹持久化
+
+**核心设计**：存 transition（delta），不存 snapshot（全量快照）。
+
+```
+不是:
+  snapshot_1: {compliance: 1.0, severity: healthy}
+  snapshot_2: {compliance: 0.6, severity: degraded}
+
+而是:
+  transition: {compliance_delta: -0.4, severity_before: healthy, severity_after: degraded}
+```
+
+**SQLite Schema**：
+
+```sql
+CREATE TABLE health_transitions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    blueprint_fingerprint TEXT NOT NULL,
+    timestamp REAL NOT NULL,
+    compliance_delta REAL NOT NULL,
+    severity_before TEXT NOT NULL DEFAULT 'healthy',
+    severity_after TEXT NOT NULL DEFAULT 'healthy',
+    dominant_violation TEXT,
+    violation_snapshot TEXT DEFAULT '{}',
+    lifecycle TEXT NOT NULL DEFAULT 'active'
+);
+CREATE INDEX idx_fingerprint_time ON health_transitions(blueprint_fingerprint, timestamp);
+CREATE INDEX idx_lifecycle ON health_transitions(lifecycle);
+```
+
+**查询能力**：
+- `get_history(fingerprint, days=7)` — 获取过去 N 天的 transition 序列
+- `get_latest(fingerprint)` — 最近一次 transition
+- `get_deterioration_count(fingerprint, days=7)` — 恶化次数
+- `count_transitions(fingerprint, days=7)` — 总 transition 数
+
+### 架构约束
+
+所有新代码严格遵循 adapters/ 作为唯一全权限中枢的约束：
+
+```
+ToolAdapter          → adapters/ (imports contracts + Registry)
+SelfRepairEngine     → adapters/ (imports contracts + event_sink + health_evaluator)
+RelationshipMemoryStore → adapters/ (imports contracts + threading.Lock)
+```
+
+修复了 Phase 22 之前的一个边界违规：`pace_stream()` 从 `pipeline/streaming.py` 移到 `adapters/stream_adapter.py`——因为它在构造 PaceShapingWrapper（一个适配器类），pipeline 不应 import adapters。
+
+### 新增 CompositionEvent 类型
+
+```
+"tool_executed"           — ToolAdapter 执行工具后发出
+"repair_attempted"        — SelfRepairEngine 执行修复后发出
+"repair_budget_exhausted" — RepairBudget 耗尽时发出
+```
+
+### 协同效应：完整闭环
+
+```
+ToolAdapter 校验 → tool_executed event
+    ↓
+EventSink 积累
+    ↓
+HealthEvaluator 评估 → ContractHealthReport
+    ↓
+SelfRepairEngine 决策 → RepairAction
+    ↓ 查询 Registry (USB)
+替代工具/策略 → 重新执行 → 成功
+    ↓
+HealthEvaluator 重新评估 → compliance 回升 → trend=improving
+    ↓
+RelationshipMemoryStore 记录 transition
+    ↓
+下次评估：MemoryStore 提供历史，trend 从查 transition 而非外部注入
+```
+
+### 测试覆盖
+
+| 测试类 | 测试数 | 核心验证 |
+|--------|--------|---------|
+| TestToolCall | 7 | 确定性 call_id, 参数拷贝, 排序无关, frozen |
+| TestToolResult | 3 | 成功, 失败+违规, frozen |
+| TestToolAdapterParse | 7 | 有效调用, 缺 name, JSON 字符串参数, 非法类型, 非法 JSON, 默认参数 |
+| TestToolAdapterValidate | 3 | 空工具名, 未注册工具, 无 blueprint |
+| TestToolAdapterExecute | 2 | 工具不存在, 空名称在 Registry 之前被拦截 |
+| TestSeverityMappingToolViolations | 2 | TOOL_NOT_FOUND=critical, TOOL_PARAM_MISMATCH=degraded |
+| TestPhase22aArchitectureInvariants | 3 | 确定性 call_id, ToolResult 携带 contract_violation, USB 模型 |
+| TestRepairBudget | 6 | 默认值, 预算内, consume, per_type, total, exhausted |
+| TestSelfRepairEngine | 10 | healthy=无动作, degraded→动作, unknown→replace, tool→replace, 预算限制, execute_all, budget exhausted 事件, repair_attempted 事件, 枚举值, frozen |
+| TestRelationshipMemoryStore | 11 | 空, 首个 transition, delta 追踪, get_latest, limit, count, deterioration, blueprint 隔离, clear, JSON snapshot, lifecycle 字段 |
+
+### 改动清单
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `core/contracts/tool.py` | 新增 | ToolProtocol, ToolCall, ToolResult |
+| `core/contracts/composition.py` | 修改 | +2 ContractViolation, +3 event_type, +2 SeverityRule |
+| `core/contracts/__init__.py` | 修改 | 导出 ToolCall, ToolProtocol, ToolResult |
+| `core/adapters/tool_adapter.py` | 新增 | ToolAdapter — 翻译+校验+执行 |
+| `core/adapters/repair_engine.py` | 新增 | SelfRepairEngine + RepairBudget + RepairStrategy |
+| `core/adapters/persistence.py` | 新增 | RelationshipMemoryStore — transition 持久化 |
+| `core/adapters/__init__.py` | 修改 | 导出所有 Phase 22 类型 |
+| `core/adapters/stream_adapter.py` | 修改 | +pace_stream (从 pipeline/ 移入) |
+| `core/pipeline/streaming.py` | 修改 | -pace_stream (移出), 修复边界违规 |
+| `CLAUDE.md` | 修改 | 新增不变量 #30-#31 (Tool USB 模型, ToolResult.contract_violation) |
+| `tests/unit/test_pipeline_composer.py` | 修改 | +54 测试 (181 total) |
+
+### 验证
+
+- [x] `pytest tests/unit/test_pipeline_composer.py -q` — 181/181 通过
+- [x] `pytest tests/ -q` — 854/854 通过, 0 回归
+- [x] `python -m guardrails check --all` — 通过

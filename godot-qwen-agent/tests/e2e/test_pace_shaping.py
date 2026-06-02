@@ -319,7 +319,7 @@ class TestPaceStreamConvenience:
 
     def test_pace_stream_with_backpressure_signal(self, mock_sleep):
         """pace_stream passes backpressure_signal through to PaceShapingWrapper."""
-        from core.pipeline.streaming import pace_stream
+        from core.adapters.stream_adapter import pace_stream
 
         async def pressure_signal() -> float:
             return 0.5
@@ -346,7 +346,7 @@ class TestPaceStreamConvenience:
 
     def test_pace_stream_without_signal_still_works(self, mock_sleep):
         """pace_stream without backpressure_signal uses default rate."""
-        from core.pipeline.streaming import pace_stream
+        from core.adapters.stream_adapter import pace_stream
 
         async def _gen():
             for i in range(6):

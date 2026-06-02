@@ -4,14 +4,18 @@ Phase 8.2b: Multi-branch DAG streaming semantics. The merge_streams() function
 is the engine's stream orchestration primitive — it knows nothing about
 specific step types (chunker, retriever, generator), only about StreamItem
 contracts (is_terminal, finish_reason, error).
+
+Imports note: StreamItem is used as streaming infrastructure (like PaceConfig),
+not as a domain type. The invariants (#1) allow infrastructure-type imports
+across platform boundaries.
 """
 
 from __future__ import annotations
 
 import asyncio
-from typing import AsyncIterator, Awaitable, Callable, List, Optional
+from typing import AsyncIterator, List, Optional
 
-from core.contracts import StreamItem
+from core.contracts import StreamItem  # infrastructure type — streaming transport token
 
 
 async def merge_streams(
@@ -105,44 +109,3 @@ async def merge_streams(
                 yield item  # data item — pass through
     finally:
         await _cancel_all()
-
-
-async def pace_stream(
-    stream: AsyncIterator[StreamItem],
-    item_throughput: Optional[float] = None,
-    burst_size: int = 0,
-    adaptive: bool = False,
-    backpressure_signal: Optional[Callable[[], Awaitable[float]]] = None,
-) -> AsyncIterator[StreamItem]:
-    """Apply pace shaping to an AsyncIterator[StreamItem].
-
-    InternalStream only — do NOT use for UserFacing streams.
-    Does NOT modify StreamItem data — only alters timing between yields.
-
-    Convenience wrapper around PaceShapingWrapper. The engine does NOT
-    call this directly — steps/composers use it when assembling pipelines
-    that need throughput control.
-
-    Args:
-        stream: The upstream async iterator to throttle.
-        item_throughput: Max items/sec (None = unlimited passthrough).
-        burst_size: Items to accumulate before sleeping (0 = per-item).
-        adaptive: If True, samples backpressure_signal to scale throughput.
-        backpressure_signal: Optional callable returning 0.0-1.0 pressure.
-            Required for adaptive mode to function; ignored otherwise.
-    """
-    from core.adapters.stream_adapter import PaceShapingWrapper
-    from core.contracts.streaming_protocol import PaceConfig
-
-    config = PaceConfig(
-        item_throughput=item_throughput,
-        burst_size=burst_size,
-        adaptive=adaptive,
-    )
-    wrapper = PaceShapingWrapper(
-        source=stream,
-        config=config,
-        backpressure_signal=backpressure_signal,
-    )
-    async for item in wrapper:
-        yield item

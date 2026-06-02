@@ -170,7 +170,17 @@ evidence:
     - "TestLifecycleWeightedHealthEvaluation: 11 tests (full weight, half weight, 2x draft, deprecated, 4x deprecated, active overrides, distribution, default lifecycle, routing draft, routing deprecated)"
     - "TestAuditManifestLifecycle: 2 tests (draft in manifest, default active)"
     - "TestPhase21ArchitectureInvariants: 3 tests (no None default, router rejects deprecated, active/draft not rejected)"
-    - "Full suite: 800 passed, 0 regression, 0 guardrail errors"
+    - "TestToolCall: 7 tests (deterministic call_id, params copy, ordering, frozen)"
+    - "TestToolResult: 3 tests (success, failure+victory, frozen)"
+    - "TestToolAdapterParse: 7 tests (valid, missing name, JSON string args, invalid type, invalid JSON, defaults)"
+    - "TestToolAdapterValidate: 3 tests (empty name, unregistered, no blueprint)"
+    - "TestToolAdapterExecute: 2 tests (not found, empty name caught before registry)"
+    - "TestSeverityMappingToolViolations: 2 tests (tool_not_found=critical, tool_param_mismatch=degraded)"
+    - "TestPhase22aArchitectureInvariants: 3 tests (deterministic call_id, ToolResult has contract_violation, USB model)"
+    - "TestRepairBudget: 6 tests (default, under budget, consume, per_type, total, exhausted)"
+    - "TestSelfRepairEngine: 10 tests (healthy=no actions, degraded→actions, unknown_strategy→replace, tool_not_found→replace, budget limits, execute_all, budget exhausted event, repair_attempted event, enum values, frozen action)"
+    - "TestRelationshipMemoryStore: 11 tests (empty, first transition, delta tracking, get_latest, limit, count, deterioration, blueprint isolation, clear, JSON snapshot, lifecycle stored)"
+    - "Full suite: 854 passed, 0 regression, 0 guardrail errors"
 
 # ── 6. Future Guidance ───────────────────────────────────────────────
 
@@ -347,6 +357,69 @@ future_guidance:
     priority: medium
     phase_applicable: "Phase 21+"
 
+  tool_contract_adapter:
+    summary: "ToolAdapter translates LLM function_call → ToolCall → ToolResult with blueprint validation"
+    detail: "Phase 22a introduces ToolProtocol, ToolCall, and ToolResult as first-class
+      contract types. ToolAdapter (adapters/tool_adapter.py) is a component adapter
+      in the same paradigm as ChunkerAdapter: 1:1 translation, stateless, with
+      an additional _validate_against_blueprint() step that checks tool existence
+      in COMPONENT_REGISTRY and parameter compatibility against the tool's declared
+      schema. Two new ContractViolation types: TOOL_NOT_FOUND (critical, threshold=1)
+      and TOOL_PARAM_MISMATCH (degraded, threshold=1). Tool discovery follows the
+      USB model: COMPONENT_REGISTRY.get('tool', name), never direct import."
+    priority: high
+    phase_applicable: "Phase 22a+"
+
+  self_repair_engine:
+    summary: "SelfRepairEngine consumes ContractHealthReport → produces RepairAction decisions"
+    detail: "Phase 22b closes the cognition→action loop. SelfRepairEngine
+      (adapters/repair_engine.py) is a grammar engine co-located with HealthEvaluator.
+      It maps each ContractViolation type to a RepairStrategy (RETRY_WITH_DEFAULT,
+      REPLACE_COMPONENT, ESCALATE_TO_HUMAN, GIVE_UP). RepairBudget limits attempts
+      per violation type to prevent infinite loops. When budget is exhausted,
+      repair_budget_exhausted event flows into EventSink — 'admitting inability'
+      is a first-class contract signal. repair_attempted events record each
+      repair for audit trail."
+    priority: high
+    phase_applicable: "Phase 22b+"
+
+  relationship_memory:
+    summary: "RelationshipMemoryStore persists health transitions as deltas, not snapshots"
+    detail: "Phase 22c stores transitions (compliance_delta, severity_before→after)
+      in SQLite, indexed by (blueprint_fingerprint, timestamp, lifecycle). This
+      captures the 'evolution trajectory' of a relationship. Contrast with
+      ContractAwareEventSink (working memory — current session) vs MemoryStore
+      (long-term memory — cross-session history). Queries: get_history(fingerprint,
+      days=7), get_latest(), get_deterioration_count(). Uses persistent single
+      connection to survive :memory: lifetime. Thread-safe via threading.Lock."
+    priority: high
+    phase_applicable: "Phase 22c+"
+
+  muscle_attachment_point:
+    summary: "All Phase 22 muscles attach to adapters/ — the only full-permission hub"
+    detail: "ToolAdapter, SelfRepairEngine, and RelationshipMemoryStore all live in
+      core/adapters/. This is not by convention but by physical necessity: only
+      adapters/ can import from contracts (ToolProtocol, ContractViolation,
+      ContractHealthReport) AND pipeline (HealthStatus, PipelineStep) AND other
+      adapters (event_sink, health_evaluator, composer). Placing these capabilities
+      anywhere else would either violate import boundaries or require awkward
+      abstraction layers. The pipeline boundary violation (PaceShapingWrapper) was
+      fixed before Phase 22 started, moving pace_stream from pipeline/ to adapters/."
+    priority: critical
+    phase_applicable: "Phase 22+"
+
+  repair_budget_as_contract_signal:
+    summary: "Budget exhaustion is NOT a failure — it's 'I cannot fix this' entering the contract system"
+    detail: "When RepairBudget is exhausted, SelfRepairEngine emits a
+      repair_budget_exhausted CompositionEvent. This flows into EventSink and is
+      visible to HealthEvaluator. The system doesn't crash, infinite-loop, or
+      silently give up — it formally declares its inability and continues degraded.
+      This is the engineering realization of 'admitting inability builds trust
+      more than infinite retrying.' Future Phase 25+ will escalate to human
+      when this event appears with trend=deteriorating."
+    priority: medium
+    phase_applicable: "Phase 22b+"
+
 anti_patterns:
   - "Putting resolve() or any matching algorithm on CompositionBlueprint (data model)"
   - "SourceRouter producing I/O, network calls, or state mutation (must be pure)"
@@ -382,3 +455,14 @@ anti_patterns:
   - "Hardcoding lifecycle weights inside _compute_severity instead of as injectable class-level constants"
   - "Adding lifecycle field to CompositionBlueprint without updating fingerprint — makes different-lifecycle blueprints collide"
   - "Allowing invalid lifecycle strings to pass silently instead of raising ValueError"
+  - "ToolAdapter importing a concrete tool class directly instead of using COMPONENT_REGISTRY.get('tool', name)"
+  - "Tool execution failures being classified as contract violations (they are technical, like chunker execution failures)"
+  - "ToolResult missing contract_violation field — tools are first-class contract participants"
+  - "SelfRepairEngine retrying infinitely without a RepairBudget — leads to deadlock or resource exhaustion"
+  - "RepairBudget being mutable (shared state) instead of returning a new frozen instance on consume()"
+  - "SelfRepairEngine storing budget as mutable instance variable instead of replacing on each consume()"
+  - "repair_budget_exhausted event NOT flowing into EventSink — makes 'admitting inability' invisible to HealthEvaluator"
+  - "RelationshipMemoryStore using per-operation connect/close with :memory: — tables are per-connection, data is lost"
+  - "Storing full health snapshots instead of transitions (deltas) — misses the 'evolution trajectory' semantic"
+  - "MemoryStore queries bypassing the threading.Lock — same deadlock risk as early event_sink"
+  - "Placing tool/repair/memory logic in contracts/ or pipeline/ instead of adapters/ — violates import boundary physics"

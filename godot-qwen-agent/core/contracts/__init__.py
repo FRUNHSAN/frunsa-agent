@@ -23,6 +23,7 @@ from .registry import (
 )
 from .retrieval import RetrievalResult, RetrievalStrategy
 from .scoring import ScoringStrategy
+from .tool import ToolCall, ToolProtocol, ToolResult
 from .trace_keys import (
     COMPONENT_TRACE_KEYS,
     ComponentTraceKeyDef,
@@ -60,6 +61,10 @@ __all__ = [
     "SeverityMapping",
     "SeverityRule",
     "SourceRule",
+    # Tool contracts (Phase 22a)
+    "ToolCall",
+    "ToolProtocol",
+    "ToolResult",
     # Strategy protocols
     "ChunkingStrategy",
     "RetrievalStrategy",

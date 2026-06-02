@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+import time
 from pathlib import Path
 
 import pytest
@@ -27,6 +28,10 @@ from core.contracts.composition import (
     SeverityMapping,
     SeverityRule,
     SourceRule,
+)
+from core.contracts.tool import ToolCall, ToolProtocol, ToolResult
+from core.adapters.repair_engine import (
+    RepairAction, RepairBudget, RepairStrategy, SelfRepairEngine,
 )
 from core.adapters.composer import (
     AssemblyError,
@@ -1039,22 +1044,24 @@ class TestContractViolationEnum:
         d = {ContractViolation.UNKNOWN_CHUNKER_STRATEGY: 1}
         assert d["unknown_chunker_strategy"] == 1
 
-    def test_all_four_categories_defined(self):
+    def test_all_six_categories_defined(self):
         names = {m.name for m in ContractViolation}
         assert names == {
             "UNKNOWN_CHUNKER_STRATEGY",
             "INVALID_CHUNK_PARAMS",
             "ROUTING_CONTRACT_BREACH",
             "OUTPUT_CONTRACT_VIOLATION",
+            "TOOL_NOT_FOUND",
+            "TOOL_PARAM_MISMATCH",
         }
 
 
 class TestSeverityMappingDefaults:
     """Verify SeverityMapping.default() produces sensible rules."""
 
-    def test_default_has_four_rules(self):
+    def test_default_has_six_rules(self):
         m = SeverityMapping.default()
-        assert len(m.rules) == 4
+        assert len(m.rules) == 6
 
     def test_default_unknown_strategy_is_critical(self):
         m = SeverityMapping.default()
@@ -1455,3 +1462,539 @@ class TestPhase21ArchitectureInvariants:
             router = SourceRouter(bp)
             rule = router.resolve("test.md")
             assert rule is not None
+
+
+# ── Phase 22a: Tool Contract + ToolAdapter ──────────────────────────
+
+class TestToolCall:
+    """Verify ToolCall frozen dataclass invariants."""
+
+    def test_create_basic(self):
+        tc = ToolCall(tool_name="web_search", parameters={"q": "hello"})
+        assert tc.tool_name == "web_search"
+        assert tc.parameters["q"] == "hello"
+        assert tc.call_id != ""
+        assert len(tc.call_id) == 12
+
+    def test_call_id_deterministic(self):
+        a = ToolCall(tool_name="web_search", parameters={"q": "hello"})
+        b = ToolCall(tool_name="web_search", parameters={"q": "hello"})
+        assert a.call_id == b.call_id
+
+    def test_call_id_different_for_different_params(self):
+        a = ToolCall(tool_name="web_search", parameters={"q": "hello"})
+        b = ToolCall(tool_name="web_search", parameters={"q": "world"})
+        assert a.call_id != b.call_id
+
+    def test_call_id_explicit_overrides_auto(self):
+        tc = ToolCall(tool_name="test", call_id="my-id")
+        assert tc.call_id == "my-id"
+
+    def test_parameters_are_copied(self):
+        params = {"q": "hello"}
+        tc = ToolCall(tool_name="test", parameters=params)
+        params["q"] = "modified"
+        assert tc.parameters["q"] == "hello"
+
+    def test_parameters_sorted_in_call_id(self):
+        """call_id should be the same regardless of parameter order."""
+        a = ToolCall(tool_name="test", parameters={"a": 1, "b": 2})
+        b = ToolCall(tool_name="test", parameters={"b": 2, "a": 1})
+        assert a.call_id == b.call_id
+
+    def test_frozen(self):
+        tc = ToolCall(tool_name="test")
+        with pytest.raises(Exception):
+            tc.tool_name = "other"  # type: ignore[misc]
+
+
+class TestToolResult:
+    """Verify ToolResult frozen dataclass invariants."""
+
+    def test_success_result(self):
+        tr = ToolResult(
+            call_id="abc", tool_name="web_search",
+            success=True, data="results",
+        )
+        assert tr.success
+        assert tr.contract_violation is None
+
+    def test_failure_with_violation(self):
+        tr = ToolResult(
+            call_id="abc", tool_name="nonexistent",
+            success=False, error="not found",
+            contract_violation=ContractViolation.TOOL_NOT_FOUND,
+        )
+        assert not tr.success
+        assert tr.contract_violation == ContractViolation.TOOL_NOT_FOUND
+
+    def test_frozen(self):
+        tr = ToolResult(call_id="abc", tool_name="test", success=True)
+        with pytest.raises(Exception):
+            tr.success = False  # type: ignore[misc]
+
+
+class TestToolAdapterParse:
+    """Verify ToolAdapter.parse_function_call translation."""
+
+    @pytest.fixture
+    def adapter(self):
+        from core.adapters.tool_adapter import ToolAdapter
+        return ToolAdapter()
+
+    def test_parse_valid(self, adapter):
+        raw = {"name": "web_search", "arguments": {"q": "hello"}}
+        tc = adapter.parse_function_call(raw)
+        assert tc.tool_name == "web_search"
+        assert tc.parameters["q"] == "hello"
+        assert isinstance(tc, ToolCall)
+
+    def test_parse_missing_name_raises(self, adapter):
+        with pytest.raises(ValueError, match="missing 'name'"):
+            adapter.parse_function_call({"arguments": {}})
+
+    def test_parse_empty_name_raises(self, adapter):
+        with pytest.raises(ValueError, match="missing 'name'"):
+            adapter.parse_function_call({"name": "", "arguments": {}})
+
+    def test_parse_json_string_arguments(self, adapter):
+        """LLMs sometimes return arguments as a JSON string."""
+        raw = {"name": "web_search", "arguments": '{"q":"hello"}'}
+        tc = adapter.parse_function_call(raw)
+        assert tc.parameters["q"] == "hello"
+
+    def test_parse_invalid_arguments_type(self, adapter):
+        with pytest.raises(ValueError, match="must be a dict"):
+            adapter.parse_function_call({"name": "test", "arguments": 42})
+
+    def test_parse_invalid_json_string_raises(self, adapter):
+        with pytest.raises(ValueError):
+            adapter.parse_function_call({
+                "name": "test", "arguments": "not valid json",
+            })
+
+    def test_parse_default_arguments(self, adapter):
+        raw = {"name": "web_search"}
+        tc = adapter.parse_function_call(raw)
+        assert dict(tc.parameters) == {}
+
+
+class TestToolAdapterValidate:
+    """Verify ToolAdapter._validate_against_blueprint contract checks."""
+
+    @pytest.fixture
+    def adapter(self):
+        from core.adapters.tool_adapter import ToolAdapter
+        bp = CompositionBlueprint.from_dict({"version": "1.0.0"})
+        return ToolAdapter(blueprint=bp)
+
+    def test_empty_tool_name_is_violation(self, adapter):
+        tc = ToolCall(tool_name="")
+        v = adapter._validate_against_blueprint(tc)
+        assert v == ContractViolation.TOOL_NOT_FOUND
+
+    def test_unregistered_tool_is_violation(self, adapter):
+        tc = ToolCall(tool_name="nonexistent_tool_xyz")
+        v = adapter._validate_against_blueprint(tc)
+        assert v == ContractViolation.TOOL_NOT_FOUND
+
+    def test_no_blueprint_is_ok(self):
+        from core.adapters.tool_adapter import ToolAdapter
+        adapter = ToolAdapter(blueprint=None)
+        tc = ToolCall(tool_name="anything")
+        v = adapter._validate_against_blueprint(tc)
+        # Without blueprint, only registry check applies — and fails
+        assert v == ContractViolation.TOOL_NOT_FOUND
+
+
+class TestToolAdapterExecute:
+    """Verify ToolAdapter.execute() full flow."""
+
+    @pytest.fixture
+    def adapter(self):
+        from core.adapters.tool_adapter import ToolAdapter
+        return ToolAdapter()
+
+    def test_tool_not_found_produces_violation_result(self, adapter):
+        tc = ToolCall(tool_name="nonexistent_tool")
+        result = adapter.execute(tc)
+        assert result.success is False
+        assert result.contract_violation == ContractViolation.TOOL_NOT_FOUND
+        assert "not_found" in result.error or "not found" in result.error
+
+    def test_contract_violation_before_registry_lookup(self, adapter):
+        """Empty tool name should be caught before attempting registry lookup."""
+        tc = ToolCall(tool_name="")
+        result = adapter.execute(tc)
+        assert result.contract_violation == ContractViolation.TOOL_NOT_FOUND
+
+
+class TestSeverityMappingToolViolations:
+    """Verify default SeverityMapping covers tool violations."""
+
+    def test_tool_not_found_is_critical(self):
+        m = SeverityMapping.default()
+        rule = next(r for r in m.rules
+                    if r.violation_type == ContractViolation.TOOL_NOT_FOUND)
+        assert rule.count_threshold == 1
+        assert rule.severity == "critical"
+
+    def test_tool_param_mismatch_is_degraded(self):
+        m = SeverityMapping.default()
+        rule = next(r for r in m.rules
+                    if r.violation_type == ContractViolation.TOOL_PARAM_MISMATCH)
+        assert rule.count_threshold == 1
+        assert rule.severity == "degraded"
+
+
+class TestPhase22aArchitectureInvariants:
+    """Constitutional integrity for Phase 22a."""
+
+    def test_tool_call_has_deterministic_id(self):
+        """ToolCall.call_id must be deterministic, not random."""
+        a = ToolCall(tool_name="test", parameters={"x": 1})
+        b = ToolCall(tool_name="test", parameters={"x": 1})
+        assert a.call_id == b.call_id
+
+    def test_tool_result_carries_contract_violation(self):
+        """ToolResult must have contract_violation field for EventSink."""
+        tr = ToolResult(call_id="abc", tool_name="test", success=True)
+        assert hasattr(tr, "contract_violation")
+        assert tr.contract_violation is None
+
+    def test_tool_adapter_uses_registry_not_direct_import(self):
+        """USB model: ToolAdapter gets tools via COMPONENT_REGISTRY, not import."""
+        import inspect
+        from core.adapters.tool_adapter import ToolAdapter as TA
+        src = inspect.getsource(TA.execute)
+        assert "COMPONENT_REGISTRY.get" in src
+        assert "from .tools" not in src
+
+
+# ── Phase 22b: Self-Repair Engine ───────────────────────────────────
+
+class TestRepairBudget:
+    """Verify RepairBudget limits and exhaustion logic."""
+
+    def test_default_budget(self):
+        budget = RepairBudget()
+        assert budget.max_total == 5
+        assert budget.max_per_type == 2
+        assert budget.total_used == 0
+        assert not budget.is_exhausted
+
+    def test_can_repair_under_budget(self):
+        budget = RepairBudget()
+        assert budget.can_repair("unknown_chunker_strategy")
+
+    def test_consume_reduces_budget(self):
+        budget = RepairBudget()
+        budget2 = budget.consume("test_type")
+        assert budget2.total_used == 1
+        assert budget.total_used == 0  # original unchanged (frozen pattern)
+
+    def test_max_per_type_enforced(self):
+        budget = RepairBudget(max_per_type=1)
+        budget = budget.consume("test_type")
+        assert not budget.can_repair("test_type")
+
+    def test_max_total_enforced(self):
+        budget = RepairBudget(max_total=2, max_per_type=5)
+        budget = budget.consume("type_a")
+        budget = budget.consume("type_b")
+        assert budget.is_exhausted
+        assert not budget.can_repair("type_c")
+
+    def test_budget_exhausted_flag(self):
+        budget = RepairBudget(max_total=0)
+        assert budget.is_exhausted
+
+
+class TestSelfRepairEngine:
+    """Verify repair decisions and event emission."""
+
+    @pytest.fixture
+    def blueprint(self):
+        return CompositionBlueprint.from_dict({
+            "version": "1.0.0",
+            "default_chunker": "identity",
+        })
+
+    @pytest.fixture
+    def sink(self):
+        from core.adapters.event_sink import ContractAwareEventSink
+        return ContractAwareEventSink()
+
+    @pytest.fixture
+    def evaluator(self):
+        return ContractHealthEvaluator()
+
+    def test_healthy_report_produces_no_actions(self, blueprint, sink):
+        engine = SelfRepairEngine(blueprint)
+        report = ContractHealthReport(
+            compliance_rate=1.0, severity="healthy",
+            dominant_violation_type=None, trend=None,
+            total_documents=1, total_events=1,
+            violation_counts={}, evaluated_at=time.time(),
+        )
+        actions = engine.decide(report, sink)
+        assert actions == []
+
+    def test_degraded_report_produces_actions(self, blueprint, sink, evaluator):
+        sink(CompositionEvent(
+            event_type="document_failed",
+            correlation_id="doc-1",
+            timestamp=time.time(),
+            context={
+                "contract_violation": ContractViolation.INVALID_CHUNK_PARAMS,
+            },
+        ))
+        report = evaluator.evaluate(sink)
+        engine = SelfRepairEngine(blueprint)
+        actions = engine.decide(report, sink)
+        assert len(actions) >= 1
+        assert actions[0].violation_type == ContractViolation.INVALID_CHUNK_PARAMS
+        assert actions[0].strategy == RepairStrategy.RETRY_WITH_DEFAULT
+
+    def test_unknown_chunker_strategy_triggers_replace(self, blueprint, sink, evaluator):
+        sink(CompositionEvent(
+            event_type="document_failed",
+            correlation_id="doc-1",
+            timestamp=time.time(),
+            context={
+                "contract_violation": ContractViolation.UNKNOWN_CHUNKER_STRATEGY,
+            },
+        ))
+        report = evaluator.evaluate(sink)
+        engine = SelfRepairEngine(blueprint)
+        actions = engine.decide(report, sink)
+        assert len(actions) == 1
+        assert actions[0].strategy == RepairStrategy.REPLACE_COMPONENT
+        assert actions[0].replacement == "identity"  # default_chunker
+
+    def test_tool_not_found_triggers_replace(self, blueprint, sink, evaluator):
+        sink(CompositionEvent(
+            event_type="tool_executed",
+            correlation_id="tool-1",
+            timestamp=time.time(),
+            context={
+                "contract_violation": ContractViolation.TOOL_NOT_FOUND,
+            },
+        ))
+        report = evaluator.evaluate(sink)
+        engine = SelfRepairEngine(blueprint)
+        actions = engine.decide(report, sink)
+        assert len(actions) == 1
+        assert actions[0].strategy == RepairStrategy.REPLACE_COMPONENT
+        assert actions[0].target_component == "tool"
+
+    def test_budget_limits_actions(self, blueprint, sink, evaluator):
+        """Budget of 1 total → only first violation gets a repair action."""
+        sink(CompositionEvent(
+            event_type="document_failed",
+            correlation_id="doc-1",
+            timestamp=time.time(),
+            context={
+                "contract_violation": ContractViolation.INVALID_CHUNK_PARAMS,
+            },
+        ))
+        sink(CompositionEvent(
+            event_type="document_failed",
+            correlation_id="doc-2",
+            timestamp=time.time(),
+            context={
+                "contract_violation": ContractViolation.OUTPUT_CONTRACT_VIOLATION,
+            },
+        ))
+        report = evaluator.evaluate(sink)
+        engine = SelfRepairEngine(
+            blueprint, budget=RepairBudget(max_total=1, max_per_type=1),
+        )
+        actions = engine.decide(report, sink)
+        assert len(actions) == 1
+
+    def test_execute_all_returns_results(self, blueprint, sink, evaluator):
+        sink(CompositionEvent(
+            event_type="document_failed",
+            correlation_id="doc-1",
+            timestamp=time.time(),
+            context={
+                "contract_violation": ContractViolation.INVALID_CHUNK_PARAMS,
+            },
+        ))
+        report = evaluator.evaluate(sink)
+        engine = SelfRepairEngine(blueprint)
+        actions = engine.decide(report, sink)
+        results = engine.execute_all(actions)
+        assert len(results) == 1
+        assert results[0]["applied"] is True
+        assert results[0]["violation"] == ContractViolation.INVALID_CHUNK_PARAMS
+
+    def test_budget_exhausted_emits_event(self, blueprint, sink, evaluator):
+        """When budget hits 0 during decide, emit repair_budget_exhausted."""
+        events = []
+        sink(CompositionEvent(
+            event_type="document_failed",
+            correlation_id="doc-1",
+            timestamp=time.time(),
+            context={
+                "contract_violation": ContractViolation.UNKNOWN_CHUNKER_STRATEGY,
+            },
+        ))
+        report = evaluator.evaluate(sink)
+        engine = SelfRepairEngine(
+            blueprint, event_sink=events.append,
+            budget=RepairBudget(max_total=1, max_per_type=1),
+        )
+        actions = engine.decide(report, sink)
+        assert len(actions) == 1
+        # After consuming the only budget slot, the exhaust event fires
+        exhausted = [e for e in events if e.event_type == "repair_budget_exhausted"]
+        assert len(exhausted) == 1
+
+    def test_repair_attempted_event_emitted(self, blueprint, sink, evaluator):
+        """Each repair attempt emits a repair_attempted event."""
+        events = []
+        sink(CompositionEvent(
+            event_type="document_failed",
+            correlation_id="doc-1",
+            timestamp=time.time(),
+            context={
+                "contract_violation": ContractViolation.INVALID_CHUNK_PARAMS,
+            },
+        ))
+        report = evaluator.evaluate(sink)
+        engine = SelfRepairEngine(blueprint, event_sink=events.append)
+        actions = engine.decide(report, sink)
+        engine.execute_all(actions)
+        attempted = [e for e in events if e.event_type == "repair_attempted"]
+        assert len(attempted) == 1
+        assert attempted[0].context["violation_type"] == ContractViolation.INVALID_CHUNK_PARAMS
+
+    def test_strategy_enum_values(self):
+        assert RepairStrategy.RETRY_WITH_DEFAULT == "retry_with_default"
+        assert RepairStrategy.REPLACE_COMPONENT == "replace_component"
+        assert RepairStrategy.ESCALATE_TO_HUMAN == "escalate_to_human"
+        assert RepairStrategy.GIVE_UP == "give_up"
+
+    def test_repair_action_is_frozen(self):
+        action = RepairAction(
+            violation_type="test", strategy=RepairStrategy.GIVE_UP,
+        )
+        with pytest.raises(Exception):
+            action.violation_type = "other"  # type: ignore[misc]
+
+
+# ── Phase 22c: Relationship Memory Store ────────────────────────────
+
+class TestRelationshipMemoryStore:
+    """Verify persistent health transition storage."""
+
+    @pytest.fixture
+    def store(self):
+        from core.adapters.persistence import RelationshipMemoryStore
+        s = RelationshipMemoryStore(":memory:")
+        yield s
+        s.clear()
+
+    def _make_report(self, compliance=1.0, severity="healthy",
+                     dominant=None, counts=None):
+        return ContractHealthReport(
+            compliance_rate=compliance,
+            severity=severity,
+            dominant_violation_type=dominant,
+            trend=None,
+            total_documents=1,
+            total_events=1,
+            violation_counts=counts or {},
+            evaluated_at=time.time(),
+        )
+
+    def test_empty_store_has_zero_transitions(self, store):
+        assert store.transition_count == 0
+
+    def test_record_first_transition(self, store):
+        current = self._make_report(compliance=1.0)
+        store.record_transition(None, current, "fp-abc")
+        assert store.transition_count == 1
+
+    def test_record_transition_tracks_delta(self, store):
+        prev = self._make_report(compliance=1.0)
+        curr = self._make_report(
+            compliance=0.5,
+            severity="degraded",
+            dominant="invalid_chunk_params",
+            counts={"invalid_chunk_params": 1},
+        )
+        store.record_transition(prev, curr, "fp-abc")
+        history = store.get_history("fp-abc")
+        assert len(history) == 1
+        assert history[0]["compliance_delta"] == -0.5
+        assert history[0]["severity_before"] == "healthy"
+        assert history[0]["severity_after"] == "degraded"
+
+    def test_get_latest(self, store):
+        r1 = self._make_report(compliance=1.0)
+        r2 = self._make_report(compliance=0.8, severity="degraded")
+        store.record_transition(None, r1, "fp-abc")
+        store.record_transition(r1, r2, "fp-abc")
+        latest = store.get_latest("fp-abc")
+        assert latest["severity_after"] == "degraded"
+        assert latest["compliance_delta"] == pytest.approx(-0.2)
+
+    def test_get_history_respects_limit(self, store):
+        for i in range(10):
+            r = self._make_report(compliance=1.0 - i * 0.1)
+            store.record_transition(None, r, "fp-abc")
+        history = store.get_history("fp-abc", limit=3)
+        assert len(history) == 3
+
+    def test_count_transitions(self, store):
+        r = self._make_report()
+        store.record_transition(None, r, "fp-abc")
+        store.record_transition(r, r, "fp-abc")
+        assert store.count_transitions("fp-abc") == 2
+
+    def test_deterioration_count(self, store):
+        prev = self._make_report(compliance=1.0)
+        worse = self._make_report(
+            compliance=0.5, severity="degraded",
+            counts={"invalid_chunk_params": 1},
+        )
+        store.record_transition(prev, worse, "fp-abc")
+        assert store.get_deterioration_count("fp-abc") == 1
+
+    def test_multiple_blueprints_isolated(self, store):
+        r = self._make_report()
+        store.record_transition(None, r, "fp-a")
+        store.record_transition(None, r, "fp-b")
+        assert store.count_transitions("fp-a") == 1
+        assert store.count_transitions("fp-b") == 1
+
+    def test_clear_resets_all(self, store):
+        r = self._make_report()
+        store.record_transition(None, r, "fp-abc")
+        store.clear()
+        assert store.transition_count == 0
+
+    def test_violation_snapshot_stored_as_json(self, store):
+        r = self._make_report(
+            compliance=0.5, severity="critical",
+            counts={
+                "unknown_chunker_strategy": 1,
+                "invalid_chunk_params": 2,
+            },
+        )
+        store.record_transition(None, r, "fp-abc")
+        history = store.get_history("fp-abc")
+        snapshot = json.loads(history[0]["violation_snapshot"])
+        assert snapshot["unknown_chunker_strategy"] == 1
+        assert snapshot["invalid_chunk_params"] == 2
+
+    def test_lifecycle_stored_in_transition(self, store):
+        r = self._make_report()
+        store.record_transition(
+            None, r, "fp-abc", lifecycle="draft",
+        )
+        history = store.get_history("fp-abc")
+        assert history[0]["lifecycle"] == "draft"

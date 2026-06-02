@@ -176,6 +176,38 @@ class PaceShapingWrapper:
                 items_since_sample = 0
 
 
+# ── pace_stream convenience ──────────────────────────────────────────
+
+async def pace_stream(
+    stream: AsyncIterator[StreamItem],
+    item_throughput: Optional[float] = None,
+    burst_size: int = 0,
+    adaptive: bool = False,
+    backpressure_signal: Optional[Callable[[], Awaitable[float]]] = None,
+) -> AsyncIterator[StreamItem]:
+    """Apply pace shaping to an AsyncIterator[StreamItem].
+
+    InternalStream only — do NOT use for UserFacing streams.
+    Does NOT modify StreamItem data — only alters timing between yields.
+
+    Thin convenience wrapper around PaceShapingWrapper. Lives in adapters/
+    because it constructs an adapter class (PaceShapingWrapper) and the
+    pipeline layer must not import from adapters (invariant #1).
+    """
+    config = PaceConfig(
+        item_throughput=item_throughput,
+        burst_size=burst_size,
+        adaptive=adaptive,
+    )
+    wrapper = PaceShapingWrapper(
+        source=stream,
+        config=config,
+        backpressure_signal=backpressure_signal,
+    )
+    async for item in wrapper:
+        yield item
+
+
 # ── AsyncDataStreamAdapter ────────────────────────────────────────────
 
 

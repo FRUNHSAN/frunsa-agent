@@ -236,6 +236,7 @@ class CompositionEvent:
     event_type: Literal[
         "rule_matched", "rule_skipped", "fallback_used",
         "chunker_instantiated", "document_failed", "assembly_complete",
+        "tool_executed", "repair_attempted", "repair_budget_exhausted",
     ]
     correlation_id: str
     timestamp: float
@@ -257,13 +258,18 @@ class ContractViolation(str, Enum):
     Enum — IDE autocomplete, mypy exhaustiveness checking, no silent typo failures.
 
     These values correspond to _classify_violation() return categories in
-    PipelineAssembler (core/adapters/composer.py).
+    PipelineAssembler (core/adapters/composer.py) and ToolAdapter.
     """
 
+    # Phase 19.5: chunker/assembly violations
     UNKNOWN_CHUNKER_STRATEGY = "unknown_chunker_strategy"
     INVALID_CHUNK_PARAMS = "invalid_chunk_params"
     ROUTING_CONTRACT_BREACH = "routing_contract_breach"
     OUTPUT_CONTRACT_VIOLATION = "output_contract_violation"
+
+    # Phase 22a: tool/function-calling violations
+    TOOL_NOT_FOUND = "tool_not_found"
+    TOOL_PARAM_MISMATCH = "tool_param_mismatch"
 
 
 # ── Severity Mapping (Phase 20) ─────────────────────────────────────
@@ -304,7 +310,7 @@ class SeverityMapping:
 
     @classmethod
     def default(cls) -> SeverityMapping:
-        """Factory producing sensible defaults for Phase 20."""
+        """Factory producing sensible defaults for Phase 20 + Phase 22a."""
         return cls(rules=(
             SeverityRule(
                 violation_type=ContractViolation.UNKNOWN_CHUNKER_STRATEGY,
@@ -317,7 +323,17 @@ class SeverityMapping:
                 severity="critical",
             ),
             SeverityRule(
+                violation_type=ContractViolation.TOOL_NOT_FOUND,
+                count_threshold=1,
+                severity="critical",
+            ),
+            SeverityRule(
                 violation_type=ContractViolation.INVALID_CHUNK_PARAMS,
+                count_threshold=1,
+                severity="degraded",
+            ),
+            SeverityRule(
+                violation_type=ContractViolation.TOOL_PARAM_MISMATCH,
                 count_threshold=1,
                 severity="degraded",
             ),
