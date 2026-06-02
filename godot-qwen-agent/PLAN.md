@@ -5820,3 +5820,89 @@ Round 4: brave_search("topological qubits")        ✅
 - [x] `python demo/demo_battle.py` — 24/24 断言通过
 - [x] `pytest tests/ -q` — 854/854 通过, 0 回归
 - [x] `python -m guardrails check --all` — 通过
+
+---
+
+## Phase 23: KernelService + ContractAware Engines — 旧城改造
+
+### 完成日期
+
+2026-05-29
+
+### 定位
+
+Phase 19-22 建造了契约自适应内核。Phase 14-18 建造了三引擎编排层（Planning / Orchestration / Critic）。但它们是两套平行的神经系统——编排层出错了直接崩溃，不会触发免疫系统。
+
+Phase 23 的使命：用一个标准插头（KernelService Protocol）把旧城区接入新城区。
+
+### 23a: KernelService Protocol — 标准插头
+
+```python
+class KernelService(Protocol):
+    event_sink: Callable              # → EventSink
+    def evaluate_health()             # → ContractHealthReport
+    def decide_repair(report)         # → List[RepairAction]
+    def execute_repairs(actions)      # → results
+    blueprint: CompositionBlueprint   # → 当前契约
+    blueprint_fingerprint: str        # → 审计指纹
+    audit_manifest: dict              # → 运行时身份
+```
+
+**关键设计**：Application Layer 永远不 import `core/adapters/`——只依赖这个 Protocol。这是同心圆架构承诺的物理实现。
+
+### 23b/23c/23d: 三个 ContractAware 包装器
+
+**统一的装饰器模式**：
+
+```
+ContractAwarePlanningEngine      ← 包装 PlanningEngine.plan()
+ContractAwareOrchestrationEngine  ← 包装 OrchestrationEngine.orchestrate()
+ContractAwareCriticEngine         ← 包装 CriticEngine.evaluate()
+
+三者共享完全相同的结构:
+  1. 成功 → emit assembly_complete event
+  2. 异常 → emit document_failed event (contract_violation=OUTPUT_CONTRACT_VIOLATION)
+         → evaluate_health()
+         → decide_repair()
+         → execute_repairs()
+         → re-raise
+```
+
+**零侵入**：底层引擎的代码一行不改。164 个编排层测试全部通过。
+
+### 架构全景
+
+```
+                     KernelService (标准插头)
+                    ┌─────────┼─────────┐
+    ContractAware   ContractAware   ContractAware
+    PlanningEngine  Orchestration   CriticEngine
+         │              │              │
+    ┌────┴────┐   ┌────┴────┐   ┌────┴────┐
+    │ Stub │ LLM│  │ Stub │ LLM│  │ Stub │ LLM│  ← 旧城区 (164 tests)
+    └─────────┘   └─────────┘   └─────────┘
+         │              │              │
+         └──────────────┼──────────────┘
+                        ↓
+              KernelService → EventSink
+                             → HealthEvaluator
+                             → SelfRepairEngine   ← 新城区 (854 tests)
+                             → MemoryStore
+```
+
+### 改动清单
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `core/contracts/kernel_service.py` | 新增 | KernelService Protocol |
+| `core/contracts/__init__.py` | 修改 | 导出 KernelService |
+| `engines/planning/contract_aware.py` | 新增 | ContractAwarePlanningEngine |
+| `engines/orchestration/contract_aware.py` | 新增 | ContractAwareOrchestrationEngine |
+| `engines/critic/contract_aware.py` | 新增 | ContractAwareCriticEngine |
+| `CLAUDE.md` | 修改 | 新增不变量 #32-#33 |
+
+### 验证
+
+- [x] `pytest tests/ -q` — 854/854 通过, 0 回归
+- [x] 三个包装器导入验证通过
+- [x] 164 个编排层 conformance 测试零改动通过
