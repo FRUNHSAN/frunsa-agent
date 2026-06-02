@@ -447,6 +447,28 @@ future_guidance:
     priority: medium
     phase_applicable: "Phase 22+"
 
+  kernel_service_plug:
+    summary: "KernelService Protocol is the single injection point for Application Layer -> Kernel"
+    detail: "Phase 23a defines KernelService as the standard plug between upper layers
+      and the contract-adaptive kernel. Application Layer never imports from
+      core/adapters/ directly."
+    priority: critical
+    phase_applicable: "Phase 23+"
+
+  contract_aware_decorator:
+    summary: "ContractAware* wrappers use decorator pattern, zero changes to wrapped engines"
+    detail: "Phase 23b/23c/23d wrap Planning, Orchestration, and Critic engines
+      with identical contract-aware decorators."
+    priority: high
+    phase_applicable: "Phase 23+"
+
+  three_engines_one_plug:
+    summary: "All three engines share identical KernelService injection pattern"
+    detail: "The ContractAware engines differ only in which engine they wrap
+      and the correlation_id prefix. Everything else is identical."
+    priority: medium
+    phase_applicable: "Phase 23+"
+
 anti_patterns:
   - "Putting resolve() or any matching algorithm on CompositionBlueprint (data model)"
   - "SourceRouter producing I/O, network calls, or state mutation (must be pure)"
@@ -498,41 +520,6 @@ anti_patterns:
   - "_find_replacement returning the same tool that just failed — must extract failing tool name from sink violations"
   - "Expecting post-repair severity to return to 'healthy' immediately — historical violations persist in sink; trend+compliance are the real signals"
   - "Simulated tools without VERSION: ClassVar[SemVer] — COMPONENT_REGISTRY.register() requires it for all component types"
-
-  # Phase 23: KernelService + ContractAware wrappers
-  kernel_service_plug:
-    summary: "KernelService Protocol is the single injection point for Application Layer → Kernel"
-    detail: "Phase 23a defines KernelService as the standard plug between upper layers
-      and the contract-adaptive kernel. It exposes: event_sink (Callable),
-      evaluate_health() → ContractHealthReport, decide_repair() → List[RepairAction],
-      execute_repairs() → List[dict], blueprint, blueprint_fingerprint, audit_manifest.
-      This is the physical realization of the 同心圆架构: Application Layer never
-      imports from core/adapters/ directly — only depends on this Protocol.
-      Same plug is used by all three ContractAware* engines."
-    priority: critical
-    phase_applicable: "Phase 23+"
-
-  contract_aware_decorator:
-    summary: "ContractAware* wrappers use decorator pattern — zero changes to wrapped engines"
-    detail: "Phase 23b/23c/23d wrap PlanningEngine, OrchestrationEngine, and CriticEngine
-      with identical contract-aware decorators. Pattern: on success → emit
-      assembly_complete event; on exception → emit document_failed event with
-      contract_violation=OUTPUT_CONTRACT_VIOLATION → evaluate_health() →
-      decide_repair() → execute_repairs() → re-raise. All three wrappers share
-      the same KernelService plug. 164 legacy conformance tests pass unchanged."
-    priority: high
-    phase_applicable: "Phase 23+"
-
-  three_engines_one_plug:
-    summary: "Planning + Orchestration + Critic all use identical KernelService injection"
-    detail: "The three ContractAware engines differ only in: (1) which engine they wrap,
-      (2) which method they decorate (plan/orchestrate/evaluate), (3) the context
-      type and correlation_id prefix. Everything else — event emission, health
-      evaluation, repair execution — is identical. This uniformity proves the
-      KernelService abstraction is at the right altitude."
-    priority: medium
-    phase_applicable: "Phase 23+"
-
   - "Application Layer importing from core/adapters/ directly instead of depending on KernelService Protocol"
   - "ContractAware wrapper modifying the wrapped engine's internal logic instead of decorating its public interface"
   - "Each ContractAware engine implementing its own health/report logic instead of sharing KernelService"
