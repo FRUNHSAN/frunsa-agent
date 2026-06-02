@@ -196,7 +196,9 @@ class SelfRepairEngine:
                 violation_type=violation_type,
                 strategy=strategy,
                 target_component=self._infer_component(violation_type),
-                replacement=self._find_replacement(violation_type, strategy),
+                replacement=self._find_replacement(
+                    violation_type, strategy, sink,
+                ),
                 reason=self._build_reason(violation_type, count, strategy),
             )
             actions.append(action)
@@ -249,14 +251,18 @@ class SelfRepairEngine:
         return "unknown"
 
     def _find_replacement(
-        self, violation_type: str, strategy: RepairStrategy
+        self, violation_type: str, strategy: RepairStrategy,
+        sink: ContractAwareEventSink | None = None,
     ) -> str | None:
         """Find a replacement component from the Registry.
 
         For REPLACE_COMPONENT strategy: queries COMPONENT_REGISTRY for
         alternative implementations of the same component type.
+        Excludes the currently-failing component so we don't replace
+        a tool with itself.
 
-        Phase 22b minimal: returns the default fallback.
+        Phase 22b minimal: returns the default fallback (chunker) or
+        the next registered alternative (tool).
         Phase 22d (MCP): will scan Registry for compatible alternatives.
         """
         if strategy != RepairStrategy.REPLACE_COMPONENT:
@@ -266,11 +272,23 @@ class SelfRepairEngine:
         if component_type == "chunker":
             return self._blueprint.default_chunker
         if component_type == "tool":
-            # Scan Registry for any registered tool
             from core.contracts import COMPONENT_REGISTRY
             strategies = COMPONENT_REGISTRY.list_strategies("tool")
-            if strategies:
-                return strategies[0]  # first available alternative
+            # Find which specific tool failed (from sink violations)
+            failing_tool: str | None = None
+            if sink is not None:
+                for e in sink.violations:
+                    tn = e.context.get("tool_name")
+                    if tn:
+                        failing_tool = tn
+                        break
+            # Pick a different tool than the failing one
+            for s in strategies:
+                if s != failing_tool:
+                    return s
+            # Fallback: first available
+            for s in strategies:
+                return s
         return None
 
     @staticmethod
