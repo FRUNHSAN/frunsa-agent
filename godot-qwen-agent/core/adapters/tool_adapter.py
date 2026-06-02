@@ -179,6 +179,104 @@ class ToolAdapter:
         ))
         return result
 
+    # ── Tool Schema Conversion (Phase 22 LLM wiring) ──────────────
+
+    @staticmethod
+    def to_llm_tool_format(
+        registry_tools: list[dict] | None = None,
+        provider: str = "anthropic",
+    ) -> list[dict]:
+        """Convert USB-registered tools to LLM-native tool format.
+
+        Scans COMPONENT_REGISTRY for all registered tools and converts
+        their parameters_schema into the format expected by each LLM provider.
+
+        Args:
+            registry_tools: Optional pre-filtered tool list. If None,
+                           auto-discovers all registered tools via Registry.
+            provider:       "anthropic" or "openai"
+
+        Returns:
+            List of tool definitions in the provider's native format.
+
+        Anthropic format:
+            {"name": "...", "description": "...",
+             "input_schema": {"type": "object", "required": [...], "properties": {...}}}
+
+        OpenAI format:
+            {"type": "function", "function": {
+                "name": "...", "description": "...",
+                "parameters": {"type": "object", "required": [...], "properties": {...}}}}
+        """
+        from core.contracts import COMPONENT_REGISTRY
+
+        if registry_tools is None:
+            tool_names = COMPONENT_REGISTRY.list_strategies("tool")
+            registry_tools = []
+            for name in tool_names:
+                try:
+                    cls = COMPONENT_REGISTRY.get("tool", name)
+                    registry_tools.append({
+                        "name": getattr(cls, "name", name),
+                        "description": getattr(cls, "description", ""),
+                        "parameters_schema": getattr(
+                            cls, "parameters_schema", {},
+                        ),
+                    })
+                except KeyError:
+                    continue
+
+        converted = []
+        for tool in registry_tools:
+            schema = tool.get("parameters_schema", {})
+            sanitized = ToolAdapter._sanitize_schema(schema)
+
+            if provider == "anthropic":
+                converted.append({
+                    "name": tool["name"],
+                    "description": tool.get("description", ""),
+                    "input_schema": sanitized,
+                })
+            elif provider == "openai":
+                converted.append({
+                    "type": "function",
+                    "function": {
+                        "name": tool["name"],
+                        "description": tool.get("description", ""),
+                        "parameters": sanitized,
+                    },
+                })
+        return converted
+
+    @staticmethod
+    def _sanitize_schema(schema: dict) -> dict:
+        """Strip advanced JSON Schema features that LLMs don't support.
+
+        Keeps: type, required, properties, description
+        Strips: default, enum, oneOf, anyOf, allOf, $ref, const,
+                pattern, minLength, maxLength, minimum, maximum,
+                additionalProperties (for now)
+
+        Phase 22 minimal: only required + properties + type + description.
+        """
+        clean: dict = {"type": schema.get("type", "object")}
+
+        if "description" in schema:
+            clean["description"] = schema["description"]
+
+        if "required" in schema:
+            clean["required"] = schema["required"]
+
+        if "properties" in schema:
+            clean["properties"] = {}
+            for prop_name, prop_schema in schema["properties"].items():
+                clean_prop = {"type": prop_schema.get("type", "string")}
+                if "description" in prop_schema:
+                    clean_prop["description"] = prop_schema["description"]
+                clean["properties"][prop_name] = clean_prop
+
+        return clean
+
     # ── Validation ──────────────────────────────────────────────────
 
     def _validate_against_blueprint(

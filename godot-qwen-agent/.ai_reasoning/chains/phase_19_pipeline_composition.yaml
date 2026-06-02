@@ -180,7 +180,9 @@ evidence:
     - "TestRepairBudget: 6 tests (default, under budget, consume, per_type, total, exhausted)"
     - "TestSelfRepairEngine: 10 tests (healthy=no actions, degraded→actions, unknown_strategy→replace, tool_not_found→replace, budget limits, execute_all, budget exhausted event, repair_attempted event, enum values, frozen action)"
     - "TestRelationshipMemoryStore: 11 tests (empty, first transition, delta tracking, get_latest, limit, count, deterioration, blueprint isolation, clear, JSON snapshot, lifecycle stored)"
-    - "Full suite: 854 passed, 0 regression, 0 guardrail errors"
+    - "demo_battle.py: 24 assertions (full closed-loop: Round1→Round2→TOOL_NOT_FOUND→HealthEval→SelfRepair→Round4→PostHealth→Memory)"
+    - "components/tools/simulated_search.py: 2 registered tools (web_search + brave_search), class-level fail injection"
+    - "Full suite: 854 unit + 24 battle assertions, 0 regression, 0 guardrail errors"
 
 # ── 6. Future Guidance ───────────────────────────────────────────────
 
@@ -420,6 +422,31 @@ future_guidance:
     priority: medium
     phase_applicable: "Phase 22b+"
 
+  battle_script_as_integration_test:
+    summary: "demo_battle.py is BOTH a demo AND an integration test — deterministic closed-loop verification"
+    detail: "The battle script uses simulated tools with class-level fail counters
+      to deterministically verify the full contract-adaptive loop without LLM
+      randomness. Key insight: LLM hallucinations (calling nonexistent tools)
+      trigger TOOL_NOT_FOUND → SelfRepairEngine REPLACE_COMPONENT → compliance
+      recovery — this is a MORE realistic test than rate-limit simulation because
+      LLM hallucination is a genuine, frequent failure mode. The script doubles
+      as an integration test: every step has assertions, and exit code 1 means
+      the self-repair loop is broken. This ensures the muscle layer never
+      atrophies during future kernel changes."
+    priority: high
+    phase_applicable: "Phase 22+"
+
+  tool_instance_recreation:
+    summary: "ToolAdapter creates new tool instances per call — use class-level state for shared counters"
+    detail: "ToolAdapter.execute() calls tool_cls() to create a fresh tool instance
+      for each invocation. This is correct for stateless tools but means
+      per-instance state (like fail counters) resets on every call. For
+      simulated/failure-injection tools, use class-level ClassVar counters
+      that survive instance recreation. This is the same pattern used for
+      VERSION declarations across all registered components."
+    priority: medium
+    phase_applicable: "Phase 22+"
+
 anti_patterns:
   - "Putting resolve() or any matching algorithm on CompositionBlueprint (data model)"
   - "SourceRouter producing I/O, network calls, or state mutation (must be pure)"
@@ -466,3 +493,8 @@ anti_patterns:
   - "Storing full health snapshots instead of transitions (deltas) — misses the 'evolution trajectory' semantic"
   - "MemoryStore queries bypassing the threading.Lock — same deadlock risk as early event_sink"
   - "Placing tool/repair/memory logic in contracts/ or pipeline/ instead of adapters/ — violates import boundary physics"
+  - "Using instance-level counters for simulated tools — ToolAdapter creates new instances, counters reset. Use ClassVar"
+  - "Battle script relying on LLM randomness for verification — use deterministic mock tools + explicit assertions"
+  - "_find_replacement returning the same tool that just failed — must extract failing tool name from sink violations"
+  - "Expecting post-repair severity to return to 'healthy' immediately — historical violations persist in sink; trend+compliance are the real signals"
+  - "Simulated tools without VERSION: ClassVar[SemVer] — COMPONENT_REGISTRY.register() requires it for all component types"

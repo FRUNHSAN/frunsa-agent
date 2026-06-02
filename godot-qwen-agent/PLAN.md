@@ -5751,3 +5751,72 @@ RelationshipMemoryStore 记录 transition
 - [x] `pytest tests/unit/test_pipeline_composer.py -q` — 181/181 通过
 - [x] `pytest tests/ -q` — 854/854 通过, 0 回归
 - [x] `python -m guardrails check --all` — 通过
+
+---
+
+## Phase 22 战备：Simulated Tools + Battle Script — 闭环验证
+
+### 完成日期
+
+2026-05-29
+
+### 定位
+
+Phase 22a/22b/22c 建造了肌肉系统。但肌肉需要在确定性场景中先验证咬合无误，再接入 LLM 混沌源。战备的两剂配方正是为此：
+
+- **氮泵**：SimulatedWebSearch + SimulatedBraveSearch，注册到 USB 总线
+- **肌酸**：demo_battle.py，24 断言闭环战斗脚本
+
+### 氮泵：Simulated Battle Tools
+
+```
+components/tools/simulated_search.py
+├── @register_component("tool", "web_search")  → SimulatedWebSearch
+│   └── ClassVar _global_fail_on_call = 3  → 第 3 次调用起返回失败
+└── @register_component("tool", "brave_search") → SimulatedBraveSearch
+    └── 不同的 parameters_schema（支持 country 参数）
+        └── 不同的返回格式（web.results vs results 数组）
+```
+
+**关键设计**：使用 ClassVar 计数器和失败阈值。因为 ToolAdapter.execute() 每次调用 `tool_cls()` 创建新实例——实例级状态会在每次调用时重置。ClassVar 是唯一能在实例重建后存活的共享状态。
+
+### 肌酸：Battle Script
+
+`demo/demo_battle.py` — 同时是 demo 和集成测试：
+
+```
+场景：量子计算研究（LLM 幻觉版）
+─────────────────────────────────────
+Round 1: web_search("quantum computing 2026")     ✅
+Round 2: web_search("quantum error correction")    ✅
+Round 3: google_search("topological qubits")       💥 TOOL_NOT_FOUND
+  → HealthEvaluator: severity=critical, compliance=0.67
+  → SelfRepairEngine: REPLACE_COMPONENT → brave_search
+Round 4: brave_search("topological qubits")        ✅
+  → Post-repair: compliance=0.80, trend=improving
+  → MemoryStore: 2 transitions recorded
+─────────────────────────────────────
+24 assertions, exit code 0 = loop verified
+```
+
+### 战斗中发现并修复的问题
+
+| 问题 | 根因 | 修复 |
+|------|------|------|
+| Tool 失败计数归零 | ToolAdapter 每次创建新实例，实例级 `_call_count` 重置 | 改用 ClassVar `_global_call_count` |
+| 替换工具找回自己 | `_find_replacement` 取 `strategies[0]`，恰好是失败的工具 | 从 sink violations 提取失败工具名，跳过同名工具 |
+| 修复后 severity 未回 healthy | sink 中历史违规事件不会自动清除 | 改为断言 trend=improving + compliance_rate 上升 |
+
+### 设计洞察
+
+1. **LLM 幻觉是比 rate_limit 更好的测试场景**。rate_limit 是技术性失败（不触发契约违规），LLM 幻觉（调用不存在的工具）触发 TOOL_NOT_FOUND——这是真正的契约违规，也是 SelfRepairEngine 设计要处理的场景。
+
+2. **确定性优于真实性**。用模拟工具 + 手控 ToolCall 验证肌肉回路，比直接接 LLM 更高效——LLM 的随机性会掩盖回路本身的 bug。
+
+3. **修复后 severity 不会立刻回到 healthy**。sink 是累加器——历史违规不会自动消失。真正的信号是 trend=improving 和 compliance_rate 上升。这是契约系统的"伤疤"机制：系统记得受过伤，但正在恢复。
+
+### 验证
+
+- [x] `python demo/demo_battle.py` — 24/24 断言通过
+- [x] `pytest tests/ -q` — 854/854 通过, 0 回归
+- [x] `python -m guardrails check --all` — 通过
