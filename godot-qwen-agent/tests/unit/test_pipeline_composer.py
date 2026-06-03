@@ -30,8 +30,12 @@ from core.contracts.composition import (
     SourceRule,
 )
 from core.contracts.tool import ToolCall, ToolProtocol, ToolResult
+from core.adapters.relational_evaluator import RelationalEvaluator
 from core.adapters.repair_engine import (
     RepairAction, RepairBudget, RepairStrategy, SelfRepairEngine,
+)
+from core.contracts.relational_field import (
+    EnergyLevel, RelationalField, Urgency,
 )
 from core.adapters.composer import (
     AssemblyError,
@@ -2126,3 +2130,115 @@ class TestIntentionalViolation:
         # The violation exists in the sink but doesn't reduce health
         assert ContractViolation.INTENTIONAL_VIOLATION not in dict(report.violation_counts) or \
             report.severity == "healthy"
+
+
+# ── PLAN2 Phase 27: RelationalField + RelationalEvaluator ──────────
+
+class TestRelationalField:
+    """Verify RelationalField — the Agent's skin and nerves."""
+
+    def test_default_field_is_neutral(self):
+        f = RelationalField.default()
+        assert f.energy_level == EnergyLevel.NEUTRAL
+        assert f.urgency == Urgency.NORMAL
+        assert f.trust_watermark == 0.5
+
+    def test_field_is_frozen(self):
+        f = RelationalField.default()
+        with pytest.raises(Exception):
+            f.energy_level = EnergyLevel.LOW  # type: ignore[misc]
+
+    def test_with_energy_returns_new_field(self):
+        f = RelationalField.default()
+        f2 = f.with_energy(EnergyLevel.LOW, "User tired.")
+        assert f.energy_level == EnergyLevel.NEUTRAL  # original unchanged
+        assert f2.energy_level == EnergyLevel.LOW
+        assert "User tired" in f2.recent_narrative
+
+    def test_trust_watermark_clamped(self):
+        f = RelationalField(trust_watermark=0.5)
+        f2 = f.with_trust(+0.6, "big trust boost")
+        assert f2.trust_watermark == 1.0  # clamped
+        f3 = f.with_trust(-0.6, "big trust drop")
+        assert f3.trust_watermark == 0.0  # clamped
+
+    def test_trust_watermark_validation(self):
+        with pytest.raises(ValueError):
+            RelationalField(trust_watermark=1.5)
+        with pytest.raises(ValueError):
+            RelationalField(trust_watermark=-0.1)
+
+    def test_is_low_energy(self):
+        f = RelationalField(energy_level=EnergyLevel.LOW)
+        assert f.is_low_energy
+
+    def test_trust_level_labels(self):
+        assert RelationalField(trust_watermark=0.9).trust_level == "deep"
+        assert RelationalField(trust_watermark=0.6).trust_level == "stable"
+        assert RelationalField(trust_watermark=0.3).trust_level == "fragile"
+        assert RelationalField(trust_watermark=0.1).trust_level == "broken"
+
+
+class TestRelationalEvaluator:
+    """Verify Level 1 heuristic sensing."""
+
+    def test_detects_low_energy_from_keywords(self):
+        f = RelationalEvaluator.evaluate("好累，随便弄弄就行", None)
+        assert f.energy_level == EnergyLevel.LOW
+        assert "fatigue" in f.recent_narrative.lower()
+
+    def test_detects_critical_urgency(self):
+        f = RelationalEvaluator.evaluate("快！紧急！救命！")
+        assert f.urgency == Urgency.CRITICAL
+        assert "urgency" in f.recent_narrative.lower()
+
+    def test_trust_increases_with_gratitude(self):
+        base = RelationalField.default()
+        f = RelationalEvaluator.evaluate("谢谢，太棒了！", base)
+        assert f.trust_watermark > base.trust_watermark
+
+    def test_trust_decreases_with_frustration(self):
+        base = RelationalField.default()
+        f = RelationalEvaluator.evaluate("不对，错了，太糟糕了", base)
+        assert f.trust_watermark < base.trust_watermark
+
+    def test_neutral_input_preserves_state(self):
+        base = RelationalField.default()
+        f = RelationalEvaluator.evaluate("帮我查一下量子计算", base)
+        assert f.energy_level == base.energy_level
+        assert f.urgency == base.urgency
+
+    def test_deterministic_same_input_same_output(self):
+        base = RelationalField.default()
+        f1 = RelationalEvaluator.evaluate("好累，不想弄了", base)
+        f2 = RelationalEvaluator.evaluate("好累，不想弄了", base)
+        assert f1.energy_level == f2.energy_level
+        assert f1.trust_watermark == f2.trust_watermark
+
+    def test_accumulates_existing_field(self):
+        """RelationalEvaluator reads current field and updates it."""
+        base = RelationalField(trust_watermark=0.8)
+        f = RelationalEvaluator.evaluate("谢谢！", base)
+        assert f.trust_watermark > 0.8  # accumulated from existing trust
+
+    # ── The critical integration: low energy → intentional violation ──
+
+    def test_low_energy_triggers_intentional_violation_path(self):
+        """PLAN2 Axiom 3 integration: when energy=LOW, Agent should
+        be able to choose INTENTIONAL_VIOLATION for strict contracts."""
+        field = RelationalEvaluator.evaluate("今天好累，简单总结一下就行")
+        assert field.energy_level == EnergyLevel.LOW
+
+        # Simulate: Agent detects low energy, decides to skip strict contract
+        result = ToolResult(
+            call_id="test", tool_name="summarize",
+            success=True, data="brief summary",
+            contract_violation=ContractViolation.INTENTIONAL_VIOLATION,
+            higher_value_reason=(
+                f"User energy={field.energy_level.value}; "
+                f"reduced cognitive load. {field.recent_narrative}"
+            ),
+        )
+        assert result.is_intentional_override
+        assert "LOW" in result.higher_value_reason.upper() or \
+               "low" in result.higher_value_reason.lower()
