@@ -4,6 +4,8 @@
 
 This project is a **contract-driven, three-platform agent system**. Every architectural decision is recorded in `.ai_reasoning/`. Before writing any code, you MUST consult the reasoning chain library. After completing complex work, you MUST archive new decisions.
 
+**Phase 25.5: PLAN2.md defines the evolved paradigm — Contract-Adaptive as Relational OS.** See [PLAN2.md](PLAN2.md) for the four core definitions, three axioms, and the transition from "immune system" to "moral intuition." PLAN1 (PLAN.md) records Phase 1-25 engineering history; PLAN2 defines Phase 26+ architecture.
+
 ## Project Identity: 契约关系体，不是指令执行器
 
 This is NOT an Agent framework. This is the first implementation of a **Contractual Relational Entity** — an intelligent system whose core primitive is not "executing instructions" but "maintaining and evolving relationships through verifiable contracts."
