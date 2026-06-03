@@ -39,7 +39,7 @@ bp = DynamicBlueprint({
     "explanation_style": "THEORETICAL",
 })
 engine = ContractEvolutionEngine(trust_threshold=0.10, rollback_window=3)
-llm = DeepSeekClient(model="deepseek-chat", temperature=0.7)
+llm = DeepSeekClient(model="deepseek-chat", temperature=0.7, max_tokens=512)
 auditor = ContractAuditor(llm, interval=10)
 
 trust = 0.30
@@ -59,21 +59,22 @@ def build_contract_directive(verbose: str) -> str:
     if "EXTREME" in verbose.upper() or "BRIEF" in verbose.upper():
         return (
             "[CONTRACT: EXTREME_BRIEF]\n"
-            "MUST: < 50 words. Short sentences. One key point only.\n"
-            "MUST NOT: Greetings. Explanations. Theory. Questions back.\n"
-            "MUST NOT: Emojis. Lists. Code blocks unless asked."
+            "MUST: One sentence. Under 50 words. Direct answer.\n"
+            "MUST NOT: Greetings. Explanations. Questions. Lists. Emojis. Code.\n"
+            "PENALTY: If you write more than 2 sentences, the user leaves."
         )
     if verbose.upper() == "LOW":
         return (
             "[CONTRACT: CONCISE]\n"
-            "MUST: < 100 words. Get to the point quickly.\n"
-            "MUST NOT: Long explanations. Excessive theory. Multiple examples."
+            "MUST: 2-3 sentences max. Under 100 words total.\n"
+            "MUST NOT: Paragraphs. Theory lectures. Multiple examples."
         )
     if verbose.upper() == "HIGH":
         return (
             "[CONTRACT: THOROUGH]\n"
-            "MUST: Explain deeply. Theory then examples.\n"
-            "MUST NOT: One-liners. Skipping context the user needs."
+            "MUST: Friendly and clear. Give context, then one good example.\n"
+            "MUST NOT: Lectures. Bullet-point breakdowns. More than 3 paragraphs.\n"
+            "CRITICAL: You are chatting, not writing a textbook."
         )
     return ""
 
@@ -158,7 +159,7 @@ while True:
     try:
         for chunk in llm.generate_stream(full_prompt):
             # Strip markdown noise for terminal
-            clean = chunk.replace("**", "").replace("__", "")
+            clean = chunk.replace("**", "").replace("__", "").replace("###", "").replace("---", "")
             print(clean, end="", flush=True)
             full_response += chunk
     except Exception as e:
