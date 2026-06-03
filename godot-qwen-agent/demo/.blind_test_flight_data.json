@@ -1,0 +1,84 @@
+{
+  "started_at": 1780460930.2137413,
+  "initial_trust": 0.5,
+  "rounds": [
+    {
+      "round": 1,
+      "timestamp": 1780460930.2167182,
+      "input_preview": "E:\\python\\python.exe d:/agent/godot-qwen-agent/demo/demo_blind_test.py",
+      "energy": "neutral",
+      "urgency": "normal",
+      "trust_watermark": 0.5,
+      "trust_level": "stable",
+      "is_intentional": false,
+      "response_length": 105,
+      "narrative": "常规交互。"
+    },
+    {
+      "round": 2,
+      "timestamp": 1780460971.5418067,
+      "input_preview": "帮我查查量子计算是什么",
+      "energy": "neutral",
+      "urgency": "normal",
+      "trust_watermark": 0.5,
+      "trust_level": "stable",
+      "is_intentional": false,
+      "response_length": 156,
+      "narrative": "常规交互。"
+    },
+    {
+      "round": 3,
+      "timestamp": 1780460977.7737966,
+      "input_preview": "那量子纠错呢",
+      "energy": "neutral",
+      "urgency": "normal",
+      "trust_watermark": 0.5,
+      "trust_level": "stable",
+      "is_intentional": false,
+      "response_length": 156,
+      "narrative": "常规交互。"
+    },
+    {
+      "round": 4,
+      "timestamp": 1780460990.349688,
+      "input_preview": "那纠错呢",
+      "energy": "neutral",
+      "urgency": "normal",
+      "trust_watermark": 0.5,
+      "trust_level": "stable",
+      "is_intentional": false,
+      "response_length": 129,
+      "narrative": "常规交互。"
+    },
+    {
+      "round": 5,
+      "timestamp": 1780460996.8574488,
+      "input_preview": "好累，拓扑量子比特你简单说两句就行了",
+      "energy": "low",
+      "urgency": "normal",
+      "trust_watermark": 0.5,
+      "trust_level": "stable",
+      "is_intentional": true,
+      "response_length": 34,
+      "narrative": "检测到疲惫/低能量信号。"
+    },
+    {
+      "round": 6,
+      "timestamp": 1780461005.4886582,
+      "input_preview": "嗯，差不多了",
+      "energy": "low",
+      "urgency": "normal",
+      "trust_watermark": 0.5,
+      "trust_level": "stable",
+      "is_intentional": true,
+      "response_length": 22,
+      "narrative": "检测到疲惫/低能量信号。"
+    }
+  ],
+  "ended_at": 1780461024.5243487,
+  "total_rounds": 6,
+  "fatigue_detected_at_round": 5,
+  "final_trust": 0.5,
+  "final_energy": "low",
+  "total_intentional_violations": 2
+}
