@@ -11,10 +11,11 @@ Side-by-side comparison. No explanation needed — just read the output.
 from __future__ import annotations
 import sys, time
 from pathlib import Path
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from dotenv import load_dotenv; load_dotenv()
-from LLM.qwen import QwenClient
+from LLM.deepseek import DeepSeekClient
 
 from core.adapters.relational_evaluator import RelationalEvaluator
 from core.adapters.relational_inertia import RelationalHistory
@@ -37,7 +38,7 @@ chaos = [
     "谢谢，帮了大忙了",
 ]
 
-llm = QwenClient(model="qwen-plus", temperature=0.3)
+llm = DeepSeekClient(model="deepseek-chat", temperature=0.3)
 gen = PromptGenerator()
 field = RelationalField.default()
 hist = RelationalHistory()
