@@ -62,6 +62,31 @@ print(f"  trust: {trust:.2f} | sessions: {profile.session_count}")
 print(f"  /quit to exit | /new to start fresh conversation")
 print(f"{'='*50}")
 
+# ── Boss 2: Explicit user command detection ──
+def _detect_explicit_command(text: str) -> tuple[str, str] | None:
+    """Detect explicit user instructions and return (target_key, new_value)."""
+    t = text.strip()
+
+    # Verbose commands
+    if any(w in t for w in ("话少点", "别啰嗦", "字少点", "简洁", "简短", "别整太多", "简单点说")):
+        return ("response_verbose_level", "MINIMAL")
+    if any(w in t for w in ("详细点", "展开", "多说点", "讲详细", "展开讲讲")):
+        return ("response_verbose_level", "HIGH")
+
+    # Tone commands
+    if any(w in t for w in ("带点感情", "来点人味", "别这么机器", "像朋友", "像人一样", "自然点")):
+        return ("tone_style", "WARM")
+    if any(w in t for w in ("严肃点", "别开玩笑", "正经", "专业点", "别闹")):
+        return ("tone_style", "PRAGMATIC")
+
+    # Initiative commands
+    if any(w in t for w in ("别问了", "不要问", "别反问", "别老问")):
+        return ("conversational_initiative", "RESPONSIVE_ONLY")
+    if any(w in t for w in ("多问问", "你问我", "反问", "引导我")):
+        return ("conversational_initiative", "PROACTIVE")
+
+    return None
+
 # ── Contract enforcement: data-driven from Blueprint ──
 def build_contract_directive(bp_fields: dict) -> str:
     """Generate system prompt constraints from Blueprint state.
@@ -86,12 +111,13 @@ def build_contract_directive(bp_fields: dict) -> str:
     }
     parts.append(f"Verbose: {v_map.get(v, v)}")
 
-    # ── Format shackles for LOW/MINIMAL ──
+    # ── Boss 4: Format shackles for LOW/MINIMAL ──
     if v in ("LOW", "MINIMAL", "VERY_LOW"):
         parts.append(
-            "FORMAT LOCK: Single plain paragraph. "
-            "BANNED: bullet points, numbered lists, markdown headers (###), "
-            "blockquotes (>), line breaks between sections. "
+            "FORMAT LOCK: Strictly under 3 sentences. No compound sentences. "
+            "No semicolons. Periods only. Punchy. "
+            "BANNED: bullet points, numbered lists, markdown headers, "
+            "blockquotes, line breaks. "
             "Even if user asks a complex question, give only the core verdict."
         )
 
@@ -115,6 +141,13 @@ def build_contract_directive(bp_fields: dict) -> str:
     # Anchoring
     if anchoring == "LOW":
         parts.append("MUST NOT: time-of-day, weather, or environment references.")
+
+    # ── Boss 3: Anti-sycophancy ──
+    parts.append(
+        "TONE: Never start with 'Your judgment is correct', 'You are right', "
+        "'你说得对'. Treat user as intellectual peer. Dive directly into "
+        "analysis, nuance, or counter-arguments. Disagreement is respect."
+    )
 
     return "\n".join(parts)
 
@@ -195,6 +228,24 @@ while True:
                 contract_events.append(event)
                 print(f"  [CONTRACT EVOLVED] {event}")
         pending.remove(prop)
+
+    # ── Boss 2: Explicit user commands bypass Trust gate ──
+    explicit = _detect_explicit_command(user)
+    if explicit:
+        cmd_prop = {
+            "target_blueprint_key": explicit[0],
+            "new_value": explicit[1],
+            "source": "explicit_user_command",
+            "trigger_condition": "user_said_so",
+            "human_reason": f"User explicitly requested: '{user[:40]}'.",
+        }
+        accepted, reason = engine.evaluate(cmd_prop, bp, trust)
+        if accepted:
+            ok, msg = bp.apply_proposal(cmd_prop["target_blueprint_key"], cmd_prop["new_value"])
+            if ok:
+                engine.record_evolution(trust)
+                profile.record_modification(cmd_prop["target_blueprint_key"], cmd_prop["new_value"])
+                print(f"  [USER COMMAND] {cmd_prop['target_blueprint_key']} -> {cmd_prop['new_value']}")
 
     # ── SignalInterpreter: signal → Proposals → EvolutionEngine ──
     if USE_SEMANTIC and sem is not None and dim:

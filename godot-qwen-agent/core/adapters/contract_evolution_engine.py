@@ -48,7 +48,12 @@ class ContractEvolutionEngine:
         if target in CONSTITUTION:
             return False, f"Gene lock: '{target}' is an immutable constitutional gene."
 
-        # Trust gate: relationship too damaged
+        # Explicit user commands bypass all gates — the user is sovereign
+        source = proposal.get("source", "")
+        if source == "explicit_user_command":
+            return True, "Explicit user command — bypassing all gates."
+
+        # Trust gate: relationship too damaged for implicit proposals
         if trust < self.trust_threshold:
             return False, (
                 f"Trust gate: trust={trust:.2f} below threshold "
