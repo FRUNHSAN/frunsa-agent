@@ -186,6 +186,54 @@ chains:
     tags: [composition, grammar_engine, pipeline, adapter, registry, blueprint, traceability, auditability]
     status: active
 
+  # ── Phase 22: Muscle Layer ──
+  - chain_id: phase_22_muscle_layer
+    file: chains/phase_22_muscle_layer.yaml
+    title: "Contract-Adaptive Muscle Layer: Tool + Repair + Memory + MCP + LLM Bridge"
+    layer: adapters
+    tags: [tool, repair, memory, mcp, llm, battle, self_repair, usb]
+    status: active
+
+  # ── Phase 23: KernelService ──
+  - chain_id: phase_23_kernel_service
+    file: chains/phase_23_kernel_service.yaml
+    title: "KernelService Protocol + ContractAware Engines: bridging legacy to kernel"
+    layer: architecture
+    tags: [kernel_service, decorator, engine, planning, orchestration, critic]
+    status: active
+
+  # ── Phase 24-25: HITL + Renegotiate + Anti-Corruption ──
+  - chain_id: phase_24_hitl_renegotiate
+    file: chains/phase_24_hitl_renegotiate.yaml
+    title: "HITL Gateway + Contract Renegotiator + Anti-Corruption Layers"
+    layer: architecture
+    tags: [hitl, human_in_the_loop, renegotiate, anti_corruption, protocol, hexagonal]
+    status: active
+
+  # ── PLAN2: Relational OS ──
+  - chain_id: plan2_relational_os
+    file: chains/plan2_relational_os.yaml
+    title: "PLAN2 Relational OS: Intentional Violation + Blind Test + RelationalField + EmbodiedReflex + RenegotiationWatcher"
+    layer: plan
+    tags: [plan2, intentional_violation, blind_test, relational_field, embodied_reflex, renegotiation_watcher, golden_params]
+    status: active
+
+  # ── PLAN3: Prompt Seed ──
+  - chain_id: plan3_prompt_seed
+    file: chains/plan3_prompt_seed.yaml
+    title: "PLAN3 Prompt Seed: Vibe Test + Inertia + Aggregator + PromptGenerator + Ports"
+    layer: plan
+    tags: [plan3, prompt_generator, vibe_test, inertia, aggregator, ports]
+    status: active
+
+  # ── PLAN4: Bayesian Engine ──
+  - chain_id: plan4_bayesian_engine
+    file: chains/plan4_bayesian_engine.yaml
+    title: "PLAN4 Bayesian Engine: Surprise Detector + EMA + Telemetry + Smart Decay + Stage Directions + A/B Test"
+    layer: plan
+    tags: [plan4, bayesian, surprise, telemetry, smart_decay, stage_directions, ab_test, llm_judge]
+    status: active
+
   # ── Real LLM Orchestration + Critic Engines ──
   - chain_id: phase_18_real_orch_critic
     file: chains/phase_18_real_orch_critic.yaml
@@ -293,3 +341,38 @@ tag_index:
   factory_di: [phase_18_real_orch_critic]
   contract_locking: [phase_18_real_orch_critic]
   metadata_slot: [phase_18_real_orch_critic]
+  tool: [phase_22_muscle_layer]
+  repair: [phase_22_muscle_layer]
+  memory: [phase_22_muscle_layer]
+  mcp: [phase_22_muscle_layer]
+  battle: [phase_22_muscle_layer]
+  self_repair: [phase_22_muscle_layer]
+  kernel_service: [phase_23_kernel_service]
+  decorator: [phase_23_kernel_service]
+  hitl: [phase_24_hitl_renegotiate]
+  human_in_the_loop: [phase_24_hitl_renegotiate]
+  renegotiate: [phase_24_hitl_renegotiate]
+  anti_corruption: [phase_24_hitl_renegotiate]
+  protocol: [phase_03_adapter_pattern, phase_24_hitl_renegotiate]
+  hexagonal: [phase_24_hitl_renegotiate]
+  plan2: [plan2_relational_os]
+  intentional_violation: [plan2_relational_os]
+  blind_test: [plan2_relational_os]
+  relational_field: [plan2_relational_os]
+  embodied_reflex: [plan2_relational_os]
+  renegotiation_watcher: [plan2_relational_os]
+  golden_params: [plan2_relational_os]
+  plan3: [plan3_prompt_seed]
+  prompt_generator: [plan3_prompt_seed]
+  vibe_test: [plan3_prompt_seed]
+  inertia: [plan3_prompt_seed]
+  aggregator: [plan3_prompt_seed]
+  ports: [plan3_prompt_seed]
+  plan4: [plan4_bayesian_engine]
+  bayesian: [plan4_bayesian_engine]
+  surprise: [plan4_bayesian_engine]
+  telemetry: [plan4_bayesian_engine]
+  smart_decay: [plan4_bayesian_engine]
+  stage_directions: [plan4_bayesian_engine]
+  ab_test: [plan4_bayesian_engine]
+  llm_judge: [plan4_bayesian_engine]

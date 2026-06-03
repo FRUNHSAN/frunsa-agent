@@ -1,0 +1,60 @@
+# Reasoning Chain: PLAN2 — Relational OS
+chain_id: plan2_relational_os
+title: "Relational OS: Intentional Violation + Blind Test + Golden Params + RelationalField + EmbodiedReflex + RenegotiationWatcher"
+created_at: "2026-06-03T00:00:00Z"
+status: active
+tags: [plan2, intentional_violation, blind_test, relational_field, embodied_reflex, renegotiation_watcher, golden_params]
+related_chains: [phase_24_hitl_renegotiate, phase_23_kernel_service]
+
+context: |
+  PLAN1 treated all violations as bugs. PLAN2 distinguishes passive violations
+  (repair) from active violations (trust). Four Phases: moral intuition (26),
+  skin and nerves (27), tech recession (28), trust crystallization (29).
+
+alternatives:
+  - option: "Treat all violations as bugs to fix (PLAN1)"
+    pros: "Simple, well-tested"
+    cons: "Cannot distinguish 'I can't' from 'I choose not to'"
+  - option: "Intentional violations as separate code path outside contracts"
+    pros: "Doesn't touch existing violation system"
+    cons: "Duplicates infrastructure; intentional violations lose audit trail"
+
+decision: |
+  INTENTIONAL_VIOLATION is NOT a failure — it's a trust-building choice.
+  RelationalField captures real-time relationship temperature.
+  EmbodiedReflex translates ToolResult into natural intuition (Scheme B).
+  RenegotiationWatcher crystallizes accumulated trust into contract proposals.
+
+rationale: |
+  First blind test subject reported "听得进去" — proving relational adaptation
+  is perceptible. Golden parameters calibrated: fatigue 78% compression,
+  trust stable at 0.5, Renegotiation threshold lowered to 0.55.
+
+future_guidance:
+  intentional_violation:
+    summary: "INTENTIONAL_VIOLATION is PLAN2's first commit — Agent chooses to violate for higher value"
+    priority: critical
+  blind_test:
+    summary: "First blind test: subject reported 'listens and understands'"
+    priority: critical
+  golden_params:
+    summary: "Golden parameters from blind test: 78% compression, trust=0.5 stable, renegotiation threshold 0.55"
+    priority: critical
+  relational_field:
+    summary: "RelationalField + RelationalEvaluator: Agent's skin and nerves (Phase 27)"
+    priority: high
+  embodied_reflex:
+    summary: "EmbodiedReflex: Axiom 1 (Tech Recesses, Relation Emerges) via Scheme B (Phase 28)"
+    priority: high
+  renegotiation_watcher:
+    summary: "RenegotiationWatcher crystallizes trust into contract evolution (Phase 29)"
+    priority: critical
+
+anti_patterns:
+  - "Adding INTENTIONAL_VIOLATION to SeverityMapping — it is a trust event, not a failure"
+  - "Treating intentional violations as failures in compliance_rate"
+  - "Confusing 'I cannot do X' (passive) with 'I choose not to do X because Y' (intentional)"
+  - "Snapping energy from HIGH to LOW in one round — false fatigue detection causes oscillation"
+  - "Exposing raw tool names or error messages — EmbodiedReflex should translate into intuition"
+  - "RenegotiationWatcher proposing when trust is below threshold — damages relationships"
+  - "Building Relational Inertia before validating seeds are effective — Vibe Test must come first"

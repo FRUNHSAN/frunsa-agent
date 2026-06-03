@@ -1,0 +1,45 @@
+# Reasoning Chain: Phase 23 — KernelService + ContractAware Engines
+chain_id: phase_23_kernel_service
+title: "KernelService Protocol + ContractAware Engines"
+created_at: "2026-06-03T00:00:00Z"
+status: active
+tags: [kernel_service, decorator, engine, planning, orchestration, critic]
+related_chains: [phase_19_pipeline_composition, phase_22_muscle_layer]
+
+context: |
+  Phase 14-18 built the three-engine orchestration layer. Phase 19-22 built
+  the contract-adaptive kernel. But they were two parallel systems — the
+  orchestration engines had no access to the immune system.
+
+alternatives:
+  - option: "Let engines import adapters/ directly"
+    pros: "Simpler, no Protocol layer needed"
+    cons: "Couples engines to kernel internals; untestable"
+  - option: "Rebuild engines inside adapters/"
+    pros: "Single-layer, no bridge needed"
+    cons: "Loses 164 existing conformance tests; rewrite cost too high"
+
+decision: |
+  KernelService Protocol as the standard injection plug. Three ContractAware*
+  wrappers (Planning, Orchestration, Critic) with zero-invasive decorator pattern.
+  All share the same KernelService plug.
+
+rationale: |
+  Decorator pattern preserves 164 legacy conformance tests unchanged.
+  Application Layer never imports from core/adapters/ — only depends on Protocol.
+
+future_guidance:
+  kernel_service_plug:
+    summary: "KernelService Protocol is the single injection point for Application Layer -> Kernel"
+    priority: critical
+  contract_aware_decorator:
+    summary: "ContractAware* wrappers use decorator pattern, zero changes to wrapped engines"
+    priority: high
+  three_engines_one_plug:
+    summary: "All three engines share identical KernelService injection"
+    priority: medium
+
+anti_patterns:
+  - "Application Layer importing from core/adapters/ directly instead of depending on KernelService Protocol"
+  - "ContractAware wrapper modifying wrapped engine's internal logic instead of decorating public interface"
+  - "Each ContractAware engine implementing its own health logic instead of sharing KernelService"

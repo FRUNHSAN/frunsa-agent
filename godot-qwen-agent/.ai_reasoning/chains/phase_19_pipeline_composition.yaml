@@ -361,7 +361,12 @@ future_guidance:
     priority: medium
     phase_applicable: "Phase 21+"
 
-  tool_contract_adapter:
+  # ── Note: Phase 22+ guidance moved to separate chain files ──
+  # See: phase_22_muscle_layer.yaml, phase_23_kernel_service.yaml,
+  #      phase_24_hitl_renegotiate.yaml, plan2_relational_os.yaml,
+  #      plan3_prompt_seed.yaml, plan4_bayesian_engine.yaml
+
+anti_patterns:
     summary: "ToolAdapter translates LLM function_call → ToolCall → ToolResult with blueprint validation"
     detail: "Phase 22a introduces ToolProtocol, ToolCall, and ToolResult as first-class
       contract types. ToolAdapter (adapters/tool_adapter.py) is a component adapter

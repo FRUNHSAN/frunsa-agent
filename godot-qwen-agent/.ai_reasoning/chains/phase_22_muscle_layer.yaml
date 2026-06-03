@@ -1,0 +1,59 @@
+# Reasoning Chain: Phase 22 — Contract-Adaptive Muscle Layer
+chain_id: phase_22_muscle_layer
+title: "Tool + Repair + Memory + MCP + LLM Bridge"
+created_at: "2026-06-03T00:00:00Z"
+status: active
+tags: [tool, repair, memory, mcp, llm, battle, self_repair, usb]
+related_chains: [phase_19_pipeline_composition, phase_21_lifecycle]
+
+context: |
+  Phase 19-21 built the nervous system (perceive, evaluate, weight).
+  Phase 22 builds the muscle system (act, repair, remember).
+
+alternatives:
+  - option: "Put tools/repair in pipeline/"
+    pros: "Pipeline already executes steps"
+    cons: "Pipeline cannot import domain types — tools need contract types"
+  - option: "Put tools/repair in contracts/"
+    pros: "Contracts define what tools are"
+    cons: "Contracts layer cannot have business logic — tools execute"
+
+decision: |
+  Three capabilities deployed in adapters/ (the only full-permission hub):
+  - ToolAdapter: LLM function_call -> ToolCall -> ToolResult, USB model
+  - SelfRepairEngine: ContractHealthReport -> RepairAction with RepairBudget
+  - RelationshipMemoryStore: SQLite transition persistence
+  - MCP Adapter: external tool ecosystem via stdio protocol
+  - LLM Bridge: LLMResponse + Qwen/Claude/DeepSeek function calling
+
+rationale: |
+  Muscle must attach to adapters/ — only layer with cross-platform import
+  permissions (contracts + pipeline + steps). Battle scripts (demo_battle.py,
+  demo_llm_battle.py) verified the full closed-loop.
+
+future_guidance:
+  tool_contract_adapter:
+    summary: "ToolAdapter translates LLM function_call -> ToolCall -> ToolResult with blueprint validation"
+    priority: high
+  self_repair_engine:
+    summary: "SelfRepairEngine consumes ContractHealthReport -> produces RepairAction decisions"
+    priority: high
+  relationship_memory:
+    summary: "RelationshipMemoryStore persists health transitions as deltas, not snapshots"
+    priority: high
+  muscle_attachment_point:
+    summary: "All Phase 22 muscles attach to adapters/ — the only full-permission hub"
+    priority: critical
+  repair_budget_as_contract_signal:
+    summary: "Budget exhaustion is NOT a failure — it admits inability"
+    priority: medium
+  mcp_adapter:
+    summary: "MCP Adapter bridges external tool ecosystem into USB Registry via dynamic subclasses"
+    priority: high
+
+anti_patterns:
+  - "ToolAdapter importing a concrete tool class directly instead of using COMPONENT_REGISTRY.get"
+  - "Tool execution failures being classified as contract violations"
+  - "SelfRepairEngine retrying infinitely without a RepairBudget"
+  - "MCP tools sharing a single class — class-level config will collide. Use dynamic subclasses"
+  - "Placing tool/repair/memory logic in contracts/ or pipeline/ instead of adapters/"

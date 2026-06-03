@@ -1,0 +1,53 @@
+# Reasoning Chain: Phase 24-25 — HITL Gateway + Contract Renegotiator + Anti-Corruption
+chain_id: phase_24_hitl_renegotiate
+title: "HITL Gateway + Contract Renegotiator + Anti-Corruption Layers"
+created_at: "2026-06-03T00:00:00Z"
+status: active
+tags: [hitl, human_in_the_loop, renegotiate, anti_corruption, protocol, hexagonal]
+related_chains: [phase_23_kernel_service, phase_22_muscle_layer]
+
+context: |
+  Phase 22b's ESCALATE_TO_HUMAN was a dead enum value. Phase 24 made it a real
+  bidirectional channel. Phase 25 added non-blocking renegotiation proposals.
+  Anti-corruption layers (EventSink, InteractionRepository, ToolFormatAdapter)
+  decoupled the kernel from infrastructure.
+
+alternatives:
+  - option: "Whitewash proposals as HumanTickets with type field"
+    pros: "Less code, reuses existing table"
+    cons: "Semantic contamination; humans can't distinguish emergency from suggestion"
+  - option: "Separate gateway for proposals vs interventions"
+    pros: "Clean separation"
+    cons: "Duplicates EventSink infrastructure; violates DRY unnecessarily"
+
+decision: |
+  HITLGateway with two clean paths: request_intervention (blocking) and
+  submit_proposal (non-blocking). Three anti-corruption Protocols.
+  Separate SQLite tables for human_tickets vs proposals — no semantic contamination.
+
+rationale: |
+  Blocking emergencies and non-blocking suggestions must use separate data paths.
+  Boolean blindness results otherwise. Same EventSink infrastructure, clean semantics.
+
+future_guidance:
+  hitl_gateway:
+    summary: "HITLGateway bridges contract-adaptive kernel with human decision-makers"
+    priority: high
+  human_ticket_pattern:
+    summary: "HumanTicket is a frozen snapshot, not a mutable workflow state"
+    priority: medium
+  contract_renegotiator:
+    summary: "ContractRenegotiator turns chronic violations into renegotiation proposals"
+    priority: high
+  semantic_separation:
+    summary: "Blocking emergencies and non-blocking proposals must use separate data paths"
+    priority: critical
+  anti_corruption_layer:
+    summary: "Three Protocols decouple kernel from infrastructure"
+    priority: critical
+
+anti_patterns:
+  - "Whitewashing proposals as HumanTickets with a 'type' field — semantic contamination"
+  - "Blocking execution while waiting for proposal approval"
+  - "Business logic importing concrete infrastructure classes instead of Protocols"
+  - "Adding a new LLM provider by modifying tool_adapter.py if/elif chain"

@@ -1,0 +1,51 @@
+# Reasoning Chain: PLAN3 — Prompt as Relational Seed
+chain_id: plan3_prompt_seed
+title: "PLAN3: Vibe Test + Relational Inertia + StateAggregator + PromptGenerator + Ports"
+created_at: "2026-06-03T00:00:00Z"
+status: active
+tags: [plan3, prompt_generator, vibe_test, inertia, aggregator, ports]
+related_chains: [plan2_relational_os, plan4_bayesian_engine]
+
+context: |
+  PLAN2 proved relational adaptation is perceptible. PLAN3 makes Prompt a
+  relational seed — not a static System Message. PromptGenerator.grow(ctx)
+  transforms RelationalContext into ~50-word seeds. LLM doesn't receive
+  commands; it feels the relational temperature.
+
+alternatives:
+  - option: "Static System Prompt (traditional)"
+    pros: "Simple, predictable"
+    cons: "Cannot adapt to relational state; one size fits all"
+  - option: "Prompt template with variable substitution"
+    pros: "More flexible than static"
+    cons: "Still explicit instructions; LLM 'acts' empathy rather than feeling it"
+
+decision: |
+  Vibe Test must precede Relational Inertia. Seeds validated via LLM-as-Judge:
+  fatigued seed -> 24 chars, energetic seed -> 841 chars (35x difference).
+  RelationalStateAggregator unifies three data sources. Six Protocols
+  (StateAggregator, SeedGenerator, InertiaTracker + 3 anti-corruption).
+
+rationale: |
+  Vibe Test confirmed seeds genuinely change LLM behavior. Inertia added
+  EMA smoothing, energy confirm windows, and tone damping to prevent
+  context oscillation. Protocols enable PLAN4 tensor-based replacements.
+
+future_guidance:
+  vibe_test:
+    summary: "Vibe Test uses LLM-as-Judge to validate relational seeds work"
+    priority: critical
+  relational_state_aggregator:
+    summary: "RelationalStateAggregator unifies field + report + memory into RelationalContext"
+    priority: high
+  prompt_generator:
+    summary: "PromptGenerator grows ~50-word relational seeds from RelationalContext"
+    priority: critical
+  relational_inertia:
+    summary: "RelationalInertia prevents context oscillation with EMA, confirm windows, tone damping"
+    priority: high
+
+anti_patterns:
+  - "Building Relational Inertia before validating PromptGenerator seeds — Vibe Test gate must pass first"
+  - "Using assert on seed string equality — validate via LLM-as-Judge on downstream behavior"
+  - "Snapping energy from HIGH to LOW without confirm window"

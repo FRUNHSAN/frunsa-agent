@@ -1,0 +1,62 @@
+# Reasoning Chain: PLAN4 — Bayesian Relational Engine
+chain_id: plan4_bayesian_engine
+title: "PLAN4: Surprise Detector + Bayesian EMA + Telemetry + Smart Decay + Stage Directions + A/B Test"
+created_at: "2026-06-03T00:00:00Z"
+status: active
+tags: [plan4, bayesian, surprise, telemetry, smart_decay, stage_directions, ab_test, llm_judge]
+related_chains: [plan3_prompt_seed, plan2_relational_os]
+
+context: |
+  PLAN3 proved seeds work. PLAN4 makes the engine Bayesian — tracking not just
+  state but uncertainty. Behavioral signals catch what keyword detectors miss.
+  Smart Decay prevents PTSD. Stage Directions translate variance into LLM
+  micro-expressions (Show-Don't-Tell).
+
+alternatives:
+  - option: "Pure keyword detection (no behavioral signals)"
+    pros: "Simple, no false positives from length fluctuations"
+    cons: "Misses behavioral mutations; confirmation bias at low variance"
+  - option: "Full neural tensor engine (PyTorch)"
+    pros: "Maximum expressiveness"
+    cons: "Over-engineered for 5 dimensions, 1 user; no training data"
+
+decision: |
+  Bayesian EMA with mean+variance per dimension. Surprise Detector injects
+  behavioral anomaly signals (length_ratio, exclamation_density) to prevent
+  confirmation bias. Smart Decay (gamma=0.85) breathes variance down when calm.
+  Stage Directions: 4-band performance guidance from variance.
+
+rationale: |
+  T11 replay proved Surprise Detector works: variance rebounded 0.148->0.166
+  instead of shrinking to 0.133. Trust variance was dead (stuck at 0.01) until
+  surprise injection fix. Smart Decay shortened recovery 10->6 rounds. Chaos
+  test: 15 rounds, 0 sustained deadlocks. LLM Judge: 8.3/10 empathy, 94%
+  variance accuracy. A/B blind test: B (Stage Directions) outperforms A (bare).
+
+future_guidance:
+  surprise_detector:
+    summary: "Surprise Detector injects behavioral anomaly signals into variance to prevent confirmation bias"
+    priority: critical
+  behavioral_signals:
+    summary: "Behavioral signals are the input layer for Proxy Loss — physics before semantics"
+    priority: high
+  smart_decay:
+    summary: "Smart Decay: exponential variance reduction (gamma=0.85) when calm, prevents PTSD"
+    priority: high
+  stage_directions:
+    summary: "Stage Directions translate variance into LLM micro-expressions (Show-Don't-Tell)"
+    priority: critical
+  llm_judge:
+    summary: "LLM Judge: 8.3/10 empathy, 94% variance accuracy, golden range avg 0.175"
+    priority: high
+  ab_test:
+    summary: "A/B blind test: B (Stage Directions) outperforms A (bare) — never grovels, never over-enthuses"
+    priority: critical
+
+anti_patterns:
+  - "Relying solely on keyword detection — behavioral signals catch what keywords miss"
+  - "Allowing variance to shrink without behavioral surprise checks — confirmation bias blindness"
+  - "Trust variance dead while Energy variance alive — creates asymmetric awareness"
+  - "Using emotion labels in Stage Directions — use behavioral boundaries, not emotion words"
+  - "Letting variance stay elevated without decay — creates stuck PTSD"
+  - "Using pipe input for Chinese stress testing — garbled encoding, test in real terminal"
