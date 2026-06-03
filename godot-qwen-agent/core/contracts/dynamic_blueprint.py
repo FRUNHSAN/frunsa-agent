@@ -72,11 +72,25 @@ class DynamicBlueprint:
 
         Returns (accepted, reason). Guards:
           - Constitution: immutable genes rejected
+          - Schema: value must be valid per BLUEPRINT_SCHEMA (if schema available)
           - Cooldown: same field can't change twice within cooldown_rounds
           - Min autonomy: execution_autonomy can't drop below min_autonomy
         """
         if target_key in CONSTITUTION:
             return False, f"Gene lock: '{target_key}' is immutable."
+
+        # ── Schema validation ──
+        try:
+            from .blueprint_schema import BLUEPRINT_SCHEMA
+            field_schema = BLUEPRINT_SCHEMA.get(target_key)
+            if field_schema and field_schema["type"] == "enum":
+                if new_value not in field_schema["values"]:
+                    return False, (
+                        f"Schema violation: '{new_value}' not in "
+                        f"{field_schema['values']} for '{target_key}'."
+                    )
+        except ImportError:
+            pass  # Schema not available, skip validation
 
         # ── Cooldown guard ──
         if not ignore_cooldown and target_key in self._last_modified:

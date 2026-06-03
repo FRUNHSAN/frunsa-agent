@@ -86,6 +86,15 @@ def build_contract_directive(bp_fields: dict) -> str:
     }
     parts.append(f"Verbose: {v_map.get(v, v)}")
 
+    # ── Format shackles for LOW/MINIMAL ──
+    if v in ("LOW", "MINIMAL", "VERY_LOW"):
+        parts.append(
+            "FORMAT LOCK: Single plain paragraph. "
+            "BANNED: bullet points, numbered lists, markdown headers (###), "
+            "blockquotes (>), line breaks between sections. "
+            "Even if user asks a complex question, give only the core verdict."
+        )
+
     # Initiative
     init_map = {
         "PROACTIVE": "Lead the conversation. Ask follow-up questions freely.",
@@ -189,7 +198,7 @@ while True:
 
     # ── SignalInterpreter: signal → Proposals → EvolutionEngine ──
     if USE_SEMANTIC and sem is not None and dim:
-        sig_proposals = signal_interpret(dim, score, trust, bp.snapshot)
+        sig_proposals = signal_interpret(dim, score, trust, bp.snapshot, user)
         for sp in sig_proposals:
             accepted, reason = engine.evaluate(sp, bp, trust)
             if accepted:

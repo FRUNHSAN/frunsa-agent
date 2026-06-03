@@ -12,12 +12,24 @@ from __future__ import annotations
 
 from core.contracts.blueprint_schema import SIGNAL_TARGETS
 
+# ── Complexity detection: heuristic keywords ──
+COMPLEXITY_MARKERS = [
+    "怎么", "如何", "为什么", "你觉得", "怎么看", "分析",
+    "比较", "区别", "优缺点", "建议", "方案", "思路",
+    "怎么准备", "怎么平衡", "怎么说服", "演示", "答辩",
+    "展示", "面试", "转正", "怎么办", "能不能胜任",
+]
 
+
+def _is_complex_question(
+    bp: dict[str, str], dim: str | None, score: float,
+) -> bool:
 def interpret(
     dim: str | None,
     score: float,
     trust: float,
     current_bp: dict[str, str],
+    user_text: str = "",
 ) -> list[dict]:
     """Translate a trust signal into 0-N contract proposals.
 
@@ -25,6 +37,21 @@ def interpret(
       {target_blueprint_key, new_value, trigger_condition, human_reason}
     """
     proposals: list[dict] = []
+
+    # ── Complexity: user asks a big question → temporary verbosity lift ──
+    verbose = current_bp.get("response_verbose_level", "HIGH")
+    if verbose in ("LOW", "MINIMAL", "VERY_LOW"):
+        if dim not in ("fatigue", "frustration") or score < 0.55:
+            if any(m in user_text for m in COMPLEXITY_MARKERS):
+                proposals.append({
+                    "target_blueprint_key": "response_verbose_level",
+                    "new_value": "MEDIUM",
+                    "trigger_condition": "complex_question",
+                    "human_reason": (
+                        "User asked a complex question. Lifting to MEDIUM "
+                        "to give adequate help."
+                    ),
+                })
 
     if not dim or score < 0.4:
         return proposals
@@ -75,6 +102,20 @@ def interpret(
                 "new_value": "RESPONSIVE_ONLY",
                 "trigger_condition": f"frustration_{score:.2f}",
                 "human_reason": f"User frustrated. Stop asking. Just respond.",
+            })
+
+    # ── Complexity: user asks a big question → temporary verbosity lift ──
+    if _is_complex_question(current_bp, dim, score):
+        verbose = current_bp.get("response_verbose_level", "HIGH")
+        if verbose in ("LOW", "MINIMAL", "VERY_LOW"):
+            proposals.append({
+                "target_blueprint_key": "response_verbose_level",
+                "new_value": "MEDIUM",
+                "trigger_condition": "complex_question",
+                "human_reason": (
+                    "User asked a complex/analytical question. "
+                    "Temporarily lifting verbosity to MEDIUM to provide adequate help."
+                ),
             })
 
     # ── Trust crisis: emergency minimal mode ──
