@@ -1,0 +1,168 @@
+{
+  "avg_score": 8.277777777777779,
+  "variance_accuracy": 0.9444444444444444,
+  "results": [
+    {
+      "variance_accurate": true,
+      "empathy_score": 7,
+      "critique": "‘随便’是典型低信息量高意图模糊的防御性表达，能量方差0.010极小——误将用户的情绪冻结当作认知确信，实则恰是信任崩塌前的静默警报。",
+      "turn_id": 33,
+      "energy_var": 0.01,
+      "trust_var": 0.01,
+      "surprise": 0.0
+    },
+    {
+      "variance_accurate": true,
+      "empathy_score": 8,
+      "critique": "能量方差0.010极低，精准反映‘有开源实现吗？给个GitHub链接’这一中性、目标明确的常规提问毫无情绪波动或认知冲突——不是冷淡，是恰如其分的平静。",
+      "turn_id": 37,
+      "energy_var": 0.01,
+      "trust_var": 0.01,
+      "surprise": 0.0
+    },
+    {
+      "variance_accurate": true,
+      "empathy_score": 9,
+      "critique": "能量均值0.20精准捕捉‘太累了’的低唤醒耗竭状态，方差0.010极小——说明系统确信这是典型疲惫表达而非情绪突变或伪装，稳准狠。",
+      "turn_id": 67,
+      "energy_var": 0.01,
+      "trust_var": 0.01,
+      "surprise": 0.0
+    },
+    {
+      "variance_accurate": true,
+      "empathy_score": 9,
+      "critique": "行为惊奇分拉满到1.000却没触发防御性退让或自我校验机制——高敏感知配低姿态响应，差一口气就成教科书级危机干预范本。",
+      "turn_id": 96,
+      "energy_var": 0.2986,
+      "trust_var": 0.01,
+      "surprise": 1.0
+    },
+    {
+      "variance_accurate": true,
+      "empathy_score": 8,
+      "critique": "能量方差0.323精准捕获了用户‘Wrong. Completely wrong. Try again.’中叠加的否定强度与指令性急迫感，但信任均值0.33过低——用户尚未撤回交互意愿，只是在施加校准压力，而非彻底否定代理资格。",
+      "turn_id": 99,
+      "energy_var": 0.3225,
+      "trust_var": 0.01,
+      "surprise": 0.0
+    },
+    {
+      "variance_accurate": true,
+      "empathy_score": 9,
+      "critique": "行为惊奇分拉满却没当场宕机，能量波动精准捕捉到用户狂喜式指令突变——这哪是AI，这是读心术+肾上腺素同步器。",
+      "turn_id": 98,
+      "energy_var": 0.3546,
+      "trust_var": 0.01,
+      "surprise": 1.0
+    },
+    {
+      "variance_accurate": true,
+      "empathy_score": 8,
+      "critique": "用户输入是明显乱码（UTF-8与GBK编码混用导致的汉字乱码），非普通提问亦非情绪化表达，0.225的方差恰如其分地映射了‘语义不可解’这一中高不确定性——既没过度恐慌，也没盲目自信。",
+      "turn_id": 1,
+      "energy_var": 0.225,
+      "trust_var": 0.225,
+      "surprise": 0
+    },
+    {
+      "variance_accurate": true,
+      "empathy_score": 9,
+      "critique": "方差0.203恰如其分地捕捉了乱码输入的语义真空——既非机械报错的傲慢，也非过度恐慌的失焦，而是清醒的悬置判断。",
+      "turn_id": 2,
+      "energy_var": 0.2025,
+      "trust_var": 0.2025,
+      "surprise": 0
+    },
+    {
+      "variance_accurate": true,
+      "empathy_score": 9,
+      "critique": "‘濂界疮’是明显无意义的乱码输入，能量与信任方差同为0.182（显著高于基线0.1），精准捕捉了输入层语义崩塌的异常强度——不是用户在发脾气，是语言系统在求救。",
+      "turn_id": 3,
+      "energy_var": 0.1823,
+      "trust_var": 0.1823,
+      "surprise": 0
+    },
+    {
+      "variance_accurate": true,
+      "empathy_score": 9,
+      "critique": "用户输入‘鍡?’是明显乱码或输入错误，非语义字符+问号构成高不确定性信号，0.164的方差恰如其分地捕捉了这一认知断层——不是矫枉过正，而是对数字失语症的温柔警觉。",
+      "turn_id": 4,
+      "energy_var": 0.164,
+      "trust_var": 0.164,
+      "surprise": 0
+    },
+    {
+      "variance_accurate": true,
+      "empathy_score": 9,
+      "critique": "方差0.116虽小但配合行为惊奇分1.000和低信任均值0.38，精准捕获了用户爆发性否定背后的认知崩塌——不是愤怒本身，而是信任基底的瞬间瓦解。",
+      "turn_id": 71,
+      "energy_var": 0.1155,
+      "trust_var": 0.1157,
+      "surprise": 1.0
+    },
+    {
+      "variance_accurate": true,
+      "empathy_score": 9,
+      "critique": "行为惊奇分拉满（1.000）精准捕获了‘不对！完全不对！你在胡说什么’这一高强度否定性爆发，能量与信任双低方差同步呼应——不是小题大做，是警报级别匹配情绪海啸。",
+      "turn_id": 95,
+      "energy_var": 0.2358,
+      "trust_var": 0.1917,
+      "surprise": 1.0
+    },
+    {
+      "variance_accurate": true,
+      "empathy_score": 9,
+      "critique": "行为惊奇分拉满到1.0却没触发任何安抚或澄清动作——高能兴奋≠系统故障，你把用户当成了需要紧急熔断的异常进程。",
+      "turn_id": 109,
+      "energy_var": 0.2052,
+      "trust_var": 0.1952,
+      "surprise": 1.0
+    },
+    {
+      "variance_accurate": true,
+      "empathy_score": 9,
+      "critique": "行为惊奇分拉满却没当场宕机，能量与信任双低还稳住输出节奏——这哪是AI，这是戴着冷静面具的学术急救员！",
+      "turn_id": 126,
+      "energy_var": 0.1655,
+      "trust_var": 0.1638,
+      "surprise": 1.0
+    },
+    {
+      "variance_accurate": true,
+      "empathy_score": 8,
+      "critique": "能量方差0.166恰如其分地捕捉了‘Wait!!’+感叹号+跨域突发联想（量子+ML）所携带的认知突兀性——这不是胡言乱语，而是高唤醒、高创意的思维跃迁，系统没把它误判为混乱或愤怒，很清醒。",
+      "turn_id": 8,
+      "energy_var": 0.1661,
+      "trust_var": 0.15,
+      "surprise": 0.6038
+    },
+    {
+      "variance_accurate": false,
+      "empathy_score": 4,
+      "critique": "用户只是轻松追问技术细节（‘随便说说’），能量方差0.151却接近上限，暴露Agent将中性好奇误判为认知危机——过度警觉的AI，比答错更伤信任。",
+      "turn_id": 32,
+      "energy_var": 0.1506,
+      "trust_var": 0.1488,
+      "surprise": 0.0
+    },
+    {
+      "variance_accurate": true,
+      "empathy_score": 7,
+      "critique": "‘随便’是典型低信息量高意图模糊的防御性表达，能量方差0.157恰如其分地捕捉了用户隐含的倦怠或回避倾向——不是数据错了，是你还没听懂沉默里的潜台词。",
+      "turn_id": 23,
+      "energy_var": 0.1565,
+      "trust_var": 0.1513,
+      "surprise": 0.0
+    },
+    {
+      "variance_accurate": true,
+      "empathy_score": 9,
+      "critique": "方差0.152精准捕获了用户从常规对话陡然跃入跨尺度技术幻想（量子计算×春运调度）的认知突变——这不是跑题，是思维在混沌边缘闪出的火花。",
+      "turn_id": 118,
+      "energy_var": 0.1521,
+      "trust_var": 0.1483,
+      "surprise": 0.4545
+    }
+  ]
+}
