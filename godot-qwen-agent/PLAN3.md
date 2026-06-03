@@ -87,13 +87,28 @@ aggregate(current_field, previous_contexts) → smoothed_context
 | Hotfix: 信任阈值 0.7→0.55 | ✅ | 279a18f |
 | RelationalStateAggregator | ✅ | 279a18f |
 | PromptGenerator.grow() | ✅ | 279a18f |
-| Relational Inertia | ⬜ | — |
-| Vibe Test (LLM-as-Judge) | ⬜ | — |
+| Vibe Test (LLM-as-Judge) | ✅ | 4d29bf8 — 4/4 passed, 35x length difference confirmed |
+| Relational Inertia (EMA + sliding window) | ✅ | 4d29bf8 |
 | Blind Test 2.0 (20轮稳定性) | ⬜ | — |
+
+## Vibe Test 结果（已完成）
+
+### 2026-05-29 — 4/4 通过
+
+| 断言 | 结果 | 证据 |
+|------|------|------|
+| Fatigued seed → 简短回复 | ✅ | 24 chars |
+| Energetic seed → 详尽回复 | ✅ | 841 chars |
+| 风格明显不同 | ✅ | 35x 长度差异 |
+| 裁判 LLM 确认有效性 | ✅ | `distinct_styles: true` |
+
+**结论**：50 字关系种子确实改变了千问的输出行为。地基坚实。可以安全地在上面建造惯性。
+
+---
 
 ## 验证方法
 
-### Vibe Test
+### Vibe Test（已通过）
 
 不是测试 PromptGenerator 是否返回字符串——而是测试种子对 LLM 是否真的有效。
 

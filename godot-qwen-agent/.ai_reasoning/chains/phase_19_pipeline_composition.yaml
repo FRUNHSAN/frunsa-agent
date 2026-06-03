@@ -585,6 +585,64 @@ future_guidance:
     priority: critical
     phase_applicable: "Phase 29+ (PLAN2 complete)"
 
+  relational_state_aggregator:
+    summary: "RelationalStateAggregator unifies three data sources into one RelationalContext"
+    detail: "PLAN3 introduces RelationalStateAggregator that reads RelationalField,
+      ContractHealthReport, and InteractionRepository to produce a single
+      RelationalContext (energy, urgency, trust, rhythm, resonance, suggested_tone).
+      This is the input to PromptGenerator.grow() — the seed that grows into
+      dynamic System Instructions. Also integrates RelationalHistory for
+      EMA smoothing and inertia."
+    priority: high
+    phase_applicable: "PLAN3+"
+
+  prompt_generator:
+    summary: "PromptGenerator grows ~50-word relational seeds from RelationalContext"
+    detail: "PLAN3's PromptGenerator.grow(ctx) transforms RelationalContext into
+      a natural-language 'seed' (~50 words). The seed describes relational state
+      implicitly — LLM feels the temperature without being commanded. Vibe Test
+      (LLM-as-Judge) confirmed seeds are effective: fatigued seed produced 24-char
+      response, energetic seed produced 841-char response (35x difference).
+      Judge confirmed distinct styles. This proves the 50-word seed genuinely
+      changes LLM behavior in the intended direction."
+    priority: critical
+    phase_applicable: "PLAN3+"
+
+  relational_inertia:
+    summary: "RelationalInertia prevents context oscillation with EMA, confirm windows, and tone damping"
+    detail: "PLAN3/4 introduces RelationalHistory with sliding window deque and
+      InertiaConfig. EMA trust smoothing (alpha=0.3, calibrated from blind test).
+      Energy requires 2 consecutive readings before transition (prevents false
+      fatigue snap). Urgency instant-on but gradual decay (3 rounds). Tone
+      damping prevents brief<->detailed flipping. Integrated into Aggregator
+      via aggregate(history=...). This is the PLAN4 precursor — EMA is the
+      simplest form of momentum that a tensor engine would generalize."
+    priority: high
+    phase_applicable: "PLAN3/4+"
+
+  vibe_test:
+    summary: "Vibe Test uses LLM-as-Judge to validate relational seeds actually work"
+    detail: "Before building inertia on top of PromptGenerator, the Vibe Test
+      validated that seeds genuinely change LLM behavior. Two extreme contexts
+      (fatigued vs energetic), same neutral query, judge LLM evaluates output.
+      Result: 4/4 passed — fatigued=24chars, energetic=841chars, distinct styles
+      confirmed. This is NOT a unit test; it uses real LLM API calls and serves
+      as the gate before any time-dimension work (inertia, momentum)."
+    priority: critical
+    phase_applicable: "PLAN3+ (gate before inertia)"
+
+  plan4_tensor:
+    summary: "PLAN4 treats Human-Agent Interaction as Online Representation Learning"
+    detail: "PLAN4.md defines the Relational Tensor vision: a [Window_Size, 5]
+      matrix with Latent Dimensions (Cognitive Load, Emotional Valence, Epistemic
+      Trust, Relational Intimacy, Goal Alignment). Forward Pass: TemporalAttention
+      -> Collapse -> Decode -> Seed. Backward Pass: Implicit Proxy Loss from user
+      behavior (no labels needed). Momentum & Friction: trust inertia, emotional
+      momentum, urgency snap. Current state: EMA + sliding window (PLAN3)
+      implemented; full tensor engine deferred to PLAN4+."
+    priority: medium
+    phase_applicable: "PLAN4+ (vision)"
+
 anti_patterns:
   - "Putting resolve() or any matching algorithm on CompositionBlueprint (data model)"
   - "SourceRouter producing I/O, network calls, or state mutation (must be pure)"
@@ -657,3 +715,6 @@ anti_patterns:
   - "Exposing raw tool names or error messages to the user — EmbodiedReflex should translate everything into intuition"
   - "Modifying LLM function calling to use custom semantic tags (Scheme A) — keep native function calling (Scheme B), transform at presentation layer"
   - "RenegotiationWatcher proposing when trust is below threshold — low-trust proposals damage relationships"
+  - "Building Relational Inertia before validating PromptGenerator seeds are effective — Vibe Test must come first"
+  - "Using assert on seed string equality — seeds are probabilistic; validate via LLM-as-Judge on downstream behavior"
+  - "Snapping energy from HIGH to LOW in one round without confirm window — false fatigue detection causes oscillation"
