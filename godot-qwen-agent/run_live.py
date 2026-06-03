@@ -248,10 +248,13 @@ while True:
 
     # ── Profile ──
     profile.record_trust_delta(trust_delta)
-    amendment = profile.propose_amendment("response_verbose_level", bp.fields.get("response_verbose_level", "?"))
-    if amendment and amendment["target_blueprint_key"] not in _amendments_shown:
-        _amendments_shown.add(amendment["target_blueprint_key"])
-        print(f"  [AMENDMENT] {amendment['human_reason'][:120]}")
+    # Only propose amendment if value differs from schema default
+    current_verbose = bp.fields.get("response_verbose_level", "HIGH")
+    if current_verbose != BLUEPRINT_SCHEMA["response_verbose_level"]["default"]:
+        amendment = profile.propose_amendment("response_verbose_level", current_verbose)
+        if amendment and amendment["target_blueprint_key"] not in _amendments_shown:
+            _amendments_shown.add(amendment["target_blueprint_key"])
+            print(f"  [AMENDMENT] {amendment['human_reason'][:120]}")
     profile.save()
 
     # ── Status ──
