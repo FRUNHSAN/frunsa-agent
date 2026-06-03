@@ -56,8 +56,9 @@ auditor = ContractAuditor(llm, interval=10)
 trust = 0.30
 round_count = 0
 pending: list[dict] = []
-history: list[str] = []          # last 20 user + agent turns
-contract_events: list[str] = []  # contract-relevant milestones only
+history: list[str] = []
+contract_events: list[str] = []
+_amendments_shown: set[str] = set()  # prevent amendment spam
 
 print(f"  blueprint: {bp.snapshot}")
 print(f"  trust: {trust:.2f} | sessions: {profile.session_count}")
@@ -77,15 +78,19 @@ def build_contract_directive(verbose: str) -> str:
     if verbose.upper() == "LOW":
         return (
             "[CONTRACT: CONCISE]\n"
-            "MUST: 2-3 sentences max. Under 100 words total. End with a question if natural.\n"
-            "MUST NOT: Paragraphs. Theory lectures. Multiple examples."
+            "MUST: 2-3 sentences max. Under 100 words.\n"
+            "MUST NOT: Questions unless user clearly invites discussion.\n"
+            "MUST NOT: '哈哈' openings. '听起来像是' metaphors. AI-style framing.\n"
+            "MUST NOT: Time-of-day references. Weather metaphors. Emoji overuse."
         )
     if verbose.upper() == "HIGH":
         return (
             "[CONTRACT: THOROUGH]\n"
-            "MUST: Friendly and clear. Brief context + one example. End with a natural question.\n"
-            "MUST NOT: Lectures. Bullet-point breakdowns. More than 3 paragraphs.\n"
-            "CRITICAL: This is a conversation. Ask what the user thinks. Show curiosity."
+            "MUST: Warm, brief, human. Like texting a friend.\n"
+            "MUST NOT: Lectures. Bullet-points. More than 2 short paragraphs.\n"
+            "MUST NOT: Questions unless genuinely curious. NEVER force a question.\n"
+            "MUST NOT: '哈哈' openings. '听起来像是' '像是从X变成了Y' AI formulas.\n"
+            "CRITICAL: If user says bye/拜拜/累了/先这样 — just say goodbye. No questions."
         )
     return ""
 
@@ -200,6 +205,16 @@ while True:
     if len(history) > 40:
         history = history[-40:]
 
+    # ── Emergency downgrade: trust critically low ──
+    if trust < 0.05 and bp.fields.get("response_verbose_level") != "LOW":
+        ok, _ = bp.apply_proposal("response_verbose_level", "LOW", ignore_cooldown=True)
+        if ok:
+            print(f"  [EMERGENCY] Trust {trust:.2f} — forcing verbose: HIGH -> LOW")
+    if trust < 0.03 and bp.fields.get("proactive_suggestions") != "DISABLED":
+        ok, _ = bp.apply_proposal("proactive_suggestions", "DISABLED", ignore_cooldown=True)
+        if ok:
+            print(f"  [EMERGENCY] Trust {trust:.2f} — forcing suggestions: DISABLED")
+
     # ── Post-check ──
     rolled, reason = engine.post_check(bp, trust)
     if rolled:
@@ -216,7 +231,8 @@ while True:
     # ── Profile ──
     profile.record_trust_delta(trust_delta)
     amendment = profile.propose_amendment("response_verbose_level", verbose)
-    if amendment:
+    if amendment and amendment["target_blueprint_key"] not in _amendments_shown:
+        _amendments_shown.add(amendment["target_blueprint_key"])
         print(f"  [AMENDMENT] {amendment['human_reason'][:120]}")
     profile.save()
 
