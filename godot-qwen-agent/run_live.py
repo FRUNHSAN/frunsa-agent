@@ -8,7 +8,7 @@ Every round:
 """
 
 from __future__ import annotations
-import sys, json, threading, io
+import sys, json, threading, io, re
 from datetime import datetime
 from pathlib import Path
 
@@ -273,17 +273,44 @@ while True:
     print()
     full_prompt = f"{system}\n\nUser: {user}"
     full_response = ""
+
+    # ── Layer 3: Enforcement config from Blueprint ──
+    verbose = bp.fields.get("response_verbose_level", "HIGH")
+    max_sentences = {"HIGH": 999, "MEDIUM": 999, "LOW": 3, "MINIMAL": 2}.get(verbose, 999)
+
     try:
+        sent_count = 0
         for chunk in llm.generate_stream(full_prompt):
-            # Strip markdown noise for terminal
-            clean = chunk.replace("**", "").replace("__", "").replace("###", "").replace("---", "")
-            print(clean, end="", flush=True)
             full_response += chunk
+
+            # ── Format sanitization ──
+            # Strip leading markdown list markers and headers
+            clean = chunk.replace("**", "").replace("__", "").replace("###", "").replace("---", "")
+            # In LOW/MINIMAL mode, kill bullet points and numbered lists
+            if verbose in ("LOW", "MINIMAL"):
+                clean = re.sub(r'^\s*[-*]\s+', '', clean)
+                clean = re.sub(r'^\s*\d+\.\s+', '', clean)
+                clean = re.sub(r'\n\s*[-*]\s+', ' ', clean)
+                clean = re.sub(r'\n\s*\d+\.\s+', ' ', clean)
+
+            print(clean, end="", flush=True)
+
+            # ── Token abort: count sentence terminators ──
+            sent_count += chunk.count("。") + chunk.count("！") + chunk.count("？")
+            if sent_count >= max_sentences:
+                # Physically abort — LLM's "free will" ends here
+                break
+
     except Exception as e:
         print(f"(LLM error: {e})")
         full_response = f"(LLM error: {e})"
         trust = max(0.0, trust - 0.01)
     print()
+
+    # ── Sycophancy penalty: punish formulaic validation ──
+    if full_response.strip().startswith(("你说得对", "你的判断正确", "你的判断很", "非常准确")):
+        trust = max(0.0, trust - 0.03)
+        print(f"  [SYCOPHANCY] Detected formulaic opening. trust={trust:.2f}")
 
     # ── Save history ──
     history.append(f"User: {user}")
