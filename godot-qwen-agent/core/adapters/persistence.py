@@ -31,6 +31,7 @@ from dataclasses import asdict
 from typing import Any, Dict, List, Optional
 
 from core.contracts.composition import ContractHealthReport
+from core.contracts.interaction_repository import InteractionRepository
 
 
 # ── Transition Record ─────────────────────────────────────────────────
@@ -86,8 +87,12 @@ class TransitionRecord:
 
 # ── Relationship Memory Store ─────────────────────────────────────────
 
-class RelationshipMemoryStore:
-    """Persistent store for contract health transitions.
+class RelationshipMemoryStore(InteractionRepository):
+    """SQLite-backed persistent store for contract health + human interaction.
+
+    Implements InteractionRepository Protocol — business code depends on
+    the Protocol, not this concrete class. Swap to Postgres by writing
+    a new class that satisfies the same Protocol.
 
     Usage:
         store = RelationshipMemoryStore(":memory:")  # or path for persistence
