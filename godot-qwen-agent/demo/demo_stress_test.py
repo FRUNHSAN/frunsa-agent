@@ -55,6 +55,9 @@ while True:
     # Extract behavioral signals (PLAN4 Surprise Detector)
     signals = RelationalEvaluator.extract_behavioral_signals(user, recent_lengths)
 
+    # Smart Decay: calm rounds naturally reduce uncertainty
+    hist.decay_variances(signals["surprise_score"])
+
     # Bayesian update with surprise injection
     energy_val = 0.2 if field.is_low_energy else (0.8 if field.energy_level.value == "high" else 0.5)
     hist.update_with_surprise("energy_strength", energy_val, signals["surprise_score"])

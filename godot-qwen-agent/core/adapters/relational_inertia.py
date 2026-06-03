@@ -41,6 +41,10 @@ class InertiaConfig:
     # How quickly urgency decays after a critical signal (rounds)
     urgency_decay_rounds: int = 3
 
+    # Smart Decay: exponential variance reduction when no surprise (PLAN4)
+    # gamma=0.85 means each calm round shrinks variance by 15%
+    variance_decay_gamma: float = 0.85
+
 
 @dataclass
 class RelationalHistory:
@@ -170,6 +174,23 @@ class RelationalHistory:
         return energy, urgency, trust, tone
 
     # ── Bayesian Uncertainty Tracking (PLAN4) ────────────────
+
+    def decay_variances(self, surprise_score: float = 0.0) -> None:
+        """Apply exponential decay to all dimension variances when calm.
+
+        If no surprise detected (score < 0.3), each round naturally
+        reduces uncertainty. This prevents 'stuck PTSD' where variance
+        stays elevated long after the threat has passed.
+
+        Called before bayesian_update/update_with_surprise.
+        """
+        if surprise_score >= 0.3:
+            return  # Threat present — don't decay
+
+        gamma = self.config.variance_decay_gamma
+        for dim in self._variances:
+            self._variances[dim] *= gamma
+            self._variances[dim] = max(0.01, self._variances[dim])
 
     def bayesian_update(self, dim: str, observed: float) -> tuple[float, float]:
         """Bayesian EMA: update mean AND variance for a dimension.
