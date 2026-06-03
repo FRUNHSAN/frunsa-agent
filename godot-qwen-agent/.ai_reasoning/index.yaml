@@ -234,6 +234,14 @@ chains:
     tags: [plan4, bayesian, surprise, telemetry, smart_decay, stage_directions, ab_test, llm_judge]
     status: active
 
+  # ── PLAN5: Contract Lifecycle ──
+  - chain_id: plan5_contract_lifecycle
+    file: chains/plan5_contract_lifecycle.yaml
+    title: "PLAN5 Contract Lifecycle: DynamicBlueprint + EvolutionEngine + System2 Auditor"
+    layer: plan
+    tags: [plan5, contract_lifecycle, dynamic_blueprint, system2, constitution, rollback]
+    status: active
+
   # ── Real LLM Orchestration + Critic Engines ──
   - chain_id: phase_18_real_orch_critic
     file: chains/phase_18_real_orch_critic.yaml
@@ -376,3 +384,9 @@ tag_index:
   stage_directions: [plan4_bayesian_engine]
   ab_test: [plan4_bayesian_engine]
   llm_judge: [plan4_bayesian_engine]
+  plan5: [plan5_contract_lifecycle]
+  contract_lifecycle: [plan5_contract_lifecycle]
+  dynamic_blueprint: [plan5_contract_lifecycle]
+  system2: [plan5_contract_lifecycle]
+  constitution: [plan5_contract_lifecycle]
+  rollback: [plan5_contract_lifecycle]

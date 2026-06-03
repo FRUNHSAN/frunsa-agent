@@ -1,0 +1,47 @@
+# Reasoning Chain: PLAN5 — Contract Lifecycle
+chain_id: plan5_contract_lifecycle
+title: "PLAN5: DynamicBlueprint + ContractEvolutionEngine + ContractAuditor — living contracts"
+created_at: "2026-06-03T00:00:00Z"
+status: active
+tags: [plan5, contract_lifecycle, dynamic_blueprint, system2, constitution, rollback]
+related_chains: [plan4_bayesian_engine, plan2_relational_os]
+
+context: |
+  PLAN1-4 built sensors (EMA, Trust, Surprise, Stage Directions) and actuators
+  (ToolAdapter, SelfRepairEngine, HITLGateway). But the contract itself — the
+  Blueprint — was dead. It was a YAML file loaded at startup and never modified.
+  RenegotiationProposals were generated but fossilized — never applied.
+
+decision: |
+  Three new components activate the contract lifecycle:
+  - DynamicBlueprint: apply/revert/rollback with constitution guard (immutable genes)
+  - ContractEvolutionEngine: trust gate + post-evolution rollback monitor
+  - ContractAuditor (System 2): async LLM signature extractor using DeepSeek
+
+rationale: |
+  30-round demo verified: R10 System 2 detected midnight exhaustion -> R11 contract
+  evolved response_verbose_level: HIGH->LOW -> R11+ Agent switched from verbose
+  theory to one-line code. Trust rebuilt 0.29->0.44. Safety demo verified:
+  constitution guard rejected 2/2 malicious proposals; bad evolution auto-rollback
+  within 3 rounds; trust recovered after rollback.
+
+future_guidance:
+  dynamic_blueprint:
+    summary: "DynamicBlueprint is a living contract — apply, revert, rollback with immutable gene set"
+    priority: critical
+  contract_evolution_engine:
+    summary: "Trust gate + rollback monitor: accept good proposals, reject bad ones, auto-undo harmful ones"
+    priority: critical
+  system2_auditor:
+    summary: "System 2 (async DeepSeek) extracts high-dimensional contract signatures that keyword rules miss"
+    priority: critical
+  constitution_guard:
+    summary: "Four immutable genes (core_identity, safety_rules, honesty_policy, privacy_boundary) — no evolution can touch them"
+    priority: critical
+
+anti_patterns:
+  - "Modifying constitutional genes — core_identity, safety_rules, honesty_policy, privacy_boundary are immutable"
+  - "Applying contract evolution when trust < 0.10 — rebuild trust before proposing changes"
+  - "Skipping post-evolution monitoring — bad evolutions must be caught and rolled back"
+  - "Using async audit without sync fallback for demo verification — timing issues mask real results"
+  - "Forgetting to check proposal.has_proposal before extracting fields — null proposals cause crashes"
