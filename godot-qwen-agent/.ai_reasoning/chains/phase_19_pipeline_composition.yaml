@@ -533,6 +533,18 @@ future_guidance:
     priority: critical
     phase_applicable: "Phase 25+"
 
+  mcp_adapter:
+    summary: "MCP Adapter bridges external tool ecosystem into USB Registry via dynamic subclasses"
+    detail: "Phase 22d implements MCPToolDiscovery (async stdio), MCPToolWrapper
+      (ToolProtocol-compatible, dynamic subclasses prevent config collision between
+      tools from the same server), and register_mcp_server() for one-shot discovery.
+      MCP tools are indistinguishable from built-in tools to ToolAdapter and
+      SelfRepairEngine — REPLACE_COMPONENT can now find real alternatives.
+      Each MCP tool gets its own dynamic subclass of MCPToolWrapper to avoid
+      class-level config overwrites."
+    priority: high
+    phase_applicable: "Phase 22d+"
+
 anti_patterns:
   - "Putting resolve() or any matching algorithm on CompositionBlueprint (data model)"
   - "SourceRouter producing I/O, network calls, or state mutation (must be pure)"
@@ -597,3 +609,5 @@ anti_patterns:
   - "Business logic importing concrete infrastructure classes (ContractAwareEventSink, sqlite3) instead of depending on Protocols"
   - "Adding a new LLM provider by modifying tool_adapter.py if/elif chain — register a ToolFormatAdapter instead"
   - "Putting read/query methods on EventSink Protocol — EventSink should be write-only (emit); reads belong to InteractionRepository"
+  - "Sharing a single MCPToolWrapper class for multiple MCP tools — class-level config will collide. Use dynamic subclasses"
+  - "Blocking the event loop during MCP tool discovery — use async context managers for stdio lifecycle"

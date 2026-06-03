@@ -6087,3 +6087,50 @@ Registry 消除 `if provider == "anthropic" elif provider == "openai"` 分支。
 - [x] `isinstance(store, InteractionRepository)` — 显式满足
 - [x] `isinstance(sink, EventSink)` — 显式满足
 - [x] `isinstance(AnthropicToolFormat(), ToolFormatAdapter)` — 显式满足
+
+---
+
+## Phase 22d: MCP Adapter — USB 总线接入真实工具生态
+
+### 完成日期
+
+2026-05-29
+
+### 定位
+
+Phase 22a 的 USB 总线上只有 2 个手写模拟工具。MCP Adapter 让总线可以接入 Model Context Protocol 生态——任何 MCP Server 的工具自动注册到 COMPONENT_REGISTRY。
+
+### 核心设计
+
+```
+MCP Server (外部进程)
+    ↓ stdio
+MCPToolDiscovery.list_tools()
+    ↓ 获取工具定义 (name, description, inputSchema)
+register_mcp_server()
+    ↓ 为每个工具创建动态子类
+MCPToolWrapper (ToolProtocol)
+    ↓ COMPONENT_REGISTRY.register("tool", name, subcls)
+USB 总线 ← MCP 工具现在与内置工具无差别
+```
+
+### 关键技术点
+
+**动态子类防碰撞**：多个 MCP 工具不能共享同一个 `MCPToolWrapper` 类——class-level 配置会互相覆盖。`register_mcp_tool()` 为每个 MCP 工具创建 `type(f"MCP_{name}", (MCPToolWrapper,), {...})` 动态子类。
+
+**MCPToolWrapper**：
+- 实现 ToolProtocol（`name`, `description`, `parameters_schema`, `execute()`）
+- `execute()` 内部通过 `asyncio.run()` 创建一次性的 MCP session
+- 返回 `ToolResult(success=True, data={"content": [...], "source": "mcp:tool_name"})`
+
+### 新增
+
+| 文件 | 说明 |
+|------|------|
+| `core/adapters/mcp_adapter.py` | MCPToolWrapper, MCPToolDiscovery, register_mcp_tool, register_mcp_server |
+
+### 验证
+
+- [x] 多工具注册无配置碰撞（mcp_search_a ≠ mcp_search_b）
+- [x] `COMPONENT_REGISTRY.list_strategies("tool")` 包含 MCP 工具
+- [x] `pytest tests/ -q` — 854/854 通过, 0 回归
