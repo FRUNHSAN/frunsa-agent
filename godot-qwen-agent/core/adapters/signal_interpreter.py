@@ -101,20 +101,6 @@ def interpret(
                 "human_reason": f"User frustrated. Stop asking. Just respond.",
             })
 
-    # ── Complexity: user asks a big question → temporary verbosity lift ──
-    if _is_complex_question(current_bp, dim, score):
-        verbose = current_bp.get("response_verbose_level", "HIGH")
-        if verbose in ("LOW", "MINIMAL", "VERY_LOW"):
-            proposals.append({
-                "target_blueprint_key": "response_verbose_level",
-                "new_value": "MEDIUM",
-                "trigger_condition": "complex_question",
-                "human_reason": (
-                    "User asked a complex/analytical question. "
-                    "Temporarily lifting verbosity to MEDIUM to provide adequate help."
-                ),
-            })
-
     # ── Trust crisis: emergency minimal mode ──
     if trust < 0.05:
         if current_bp.get("response_verbose_level") != "MINIMAL":
