@@ -17,6 +17,7 @@ from typing import List
 from core.contracts.composition import ContractHealthReport, ContractViolation
 from core.contracts.event_sink import EventSink
 from core.contracts.interaction_repository import InteractionRepository
+from core.adapters.relational_inertia import RelationalHistory
 from core.contracts.relational_field import RelationalField
 
 
@@ -68,6 +69,7 @@ class RelationalStateAggregator:
         sink: EventSink,
         memory: InteractionRepository,
         blueprint_fingerprint: str,
+        history: RelationalHistory | None = None,
     ) -> RelationalContext:
         """Aggregate all relational data into a single context."""
 
@@ -124,6 +126,21 @@ class RelationalStateAggregator:
             tone = "brief"  # user liked concise before
         if severity == "critical":
             tone = "urgent"
+
+        # ── Relational Inertia (PLAN3/4) ──
+        if history is not None:
+            energy, urgency, trust, tone = history.smooth(
+                energy, urgency, trust, tone,
+            )
+            history.record(energy, urgency, trust, tone)
+            # Re-derive rhythm from smoothed values
+            rhythm = "normal"
+            if energy == "low":
+                rhythm = "fatigued"
+            elif urgency == "critical":
+                rhythm = "urgent"
+            elif urgency == "leisure":
+                rhythm = "leisurely"
 
         return RelationalContext(
             energy=energy,
