@@ -21,9 +21,10 @@ import threading
 from typing import Any, Dict, List
 
 from core.contracts.composition import AssemblyDiagnostic, CompositionEvent
+from core.contracts.event_sink import EventSink
 
 
-class ContractAwareEventSink:
+class ContractAwareEventSink(EventSink):
     """Structured in-memory sink for CompositionEvents.
 
     Callable — drop it in wherever event_sink is expected.

@@ -39,7 +39,7 @@ from core.contracts.composition import (
     ContractHealthReport,
     ContractViolation,
 )
-from core.adapters.event_sink import ContractAwareEventSink
+from core.contracts.event_sink import EventSink
 
 
 # ── Repair Action ─────────────────────────────────────────────────────
@@ -160,7 +160,7 @@ class SelfRepairEngine:
     def decide(
         self,
         report: ContractHealthReport,
-        sink: ContractAwareEventSink,
+        sink: EventSink,
     ) -> List[RepairAction]:
         """Decide repair actions based on health report.
 
@@ -252,7 +252,7 @@ class SelfRepairEngine:
 
     def _find_replacement(
         self, violation_type: str, strategy: RepairStrategy,
-        sink: ContractAwareEventSink | None = None,
+        sink: EventSink | None = None,
     ) -> str | None:
         """Find a replacement component from the Registry.
 

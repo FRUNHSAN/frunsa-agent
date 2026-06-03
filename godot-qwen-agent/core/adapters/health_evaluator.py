@@ -33,7 +33,7 @@ from core.contracts.composition import (
     ContractLifecycle,
     SeverityMapping,
 )
-from core.adapters.event_sink import ContractAwareEventSink
+from core.contracts.event_sink import EventSink
 
 
 class ContractHealthEvaluator:
@@ -68,7 +68,7 @@ class ContractHealthEvaluator:
 
     def evaluate(
         self,
-        sink: ContractAwareEventSink,
+        sink: EventSink,
         previous: ContractHealthReport | None = None,
     ) -> ContractHealthReport:
         """Produce a health report from the sink's current state.
@@ -123,7 +123,7 @@ class ContractHealthEvaluator:
 
     @classmethod
     def _compute_weighted_violations(
-        cls, sink: ContractAwareEventSink,
+        cls, sink: EventSink,
     ) -> tuple[Dict[str, float], Dict[str, int]]:
         """Compute lifecycle-weighted violation counts and distribution.
 
@@ -185,7 +185,7 @@ class ContractHealthEvaluator:
 
     @staticmethod
     def _estimate_docs_with_violations(
-        sink: ContractAwareEventSink,
+        sink: EventSink,
     ) -> int:
         """Count unique documents that have at least one violation event.
 

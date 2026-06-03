@@ -19,7 +19,7 @@ import json
 import time
 from dataclasses import asdict
 
-from core.adapters.event_sink import ContractAwareEventSink
+from core.contracts.event_sink import EventSink
 from core.contracts.interaction_repository import InteractionRepository
 from core.contracts.composition import (
     CompositionEvent,
@@ -43,7 +43,7 @@ class HITLGateway:
 
     def __init__(
         self,
-        event_sink: ContractAwareEventSink,
+        event_sink: EventSink,  # Protocol, not concrete class
         memory: InteractionRepository,  # Protocol, not concrete class
     ) -> None:
         self._sink = event_sink
