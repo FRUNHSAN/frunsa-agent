@@ -57,6 +57,7 @@ while True:
 
     # Smart Decay: calm rounds naturally reduce uncertainty
     hist.decay_variances(signals["surprise_score"])
+    hist.apply_baseline_drift(signals["surprise_score"])
 
     # Bayesian update with surprise injection
     energy_val = 0.2 if field.is_low_energy else (0.8 if field.energy_level.value == "high" else 0.5)

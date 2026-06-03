@@ -69,8 +69,16 @@ class RelationalHistory:
     _variances: dict[str, float] = field(default_factory=lambda: {
         "trust": 0.25, "energy_strength": 0.25,
     })
-    _alpha: float = 0.2   # Mean smoothing coefficient
+    _alpha: float = 0.2   # Mean smoothing coefficient (base)
     _beta: float = 0.1    # Variance smoothing coefficient
+
+    # P1 Psychology: asymmetric trust dynamics
+    _alpha_negative: float = 0.30  # Trust erodes fast (negativity bias)
+    _alpha_positive: float = 0.08  # Trust builds slow (requires repeated evidence)
+    _peace_streak: int = 0         # Consecutive rounds without surprise
+    _peace_threshold: int = 5      # Rounds before baseline drift activates
+    _drift_rate: float = 0.01      # Trust per round during peace
+    _drift_target: float = 0.3     # Trust naturally drifts toward this baseline
 
     def record(
         self, energy: str, urgency: str, trust: float, tone: str,
@@ -221,12 +229,24 @@ class RelationalHistory:
     def _update_internal(
         self, dim: str, observed: float, surprise_score: float,
     ) -> tuple[float, float]:
-        """Core Bayesian EMA update with optional surprise augmentation."""
+        """Core Bayesian EMA update with optional surprise augmentation.
+
+        P1 Psychology: asymmetric EMA for trust dimension.
+        Negative signals (observed < current) erode trust fast (alpha=0.30).
+        Positive signals (observed > current) build trust slow (alpha=0.08).
+        Matches human negativity bias — one insult costs 4 compliments.
+        """
         old_mean = self._means[dim]
         old_var = self._variances[dim]
 
-        # Mean: standard EMA (mean is NOT affected by surprise)
-        new_mean = (self._alpha * observed) + ((1 - self._alpha) * old_mean)
+        # P1: asymmetric alpha for trust
+        if dim == "trust":
+            alpha = self._alpha_negative if observed < old_mean else self._alpha_positive
+        else:
+            alpha = self._alpha
+
+        # Mean: EMA with psychology-aware alpha
+        new_mean = (alpha * observed) + ((1 - alpha) * old_mean)
 
         # Variance: EMA of squared prediction error
         error_sq = (observed - old_mean) ** 2
@@ -240,6 +260,37 @@ class RelationalHistory:
         self._means[dim] = new_mean
         self._variances[dim] = new_var
         return new_mean, new_var
+
+    # ── P1 Psychology: Baseline Drift + Trust Repair ──────────
+
+    def apply_baseline_drift(self, surprise_score: float) -> None:
+        """P1-4: Trust naturally heals during prolonged peace.
+
+        If no surprise for peace_threshold consecutive rounds,
+        trust drifts toward drift_target (0.3) at drift_rate (0.01/round).
+        Time heals wounds — a month without insults rebuilds basic trust.
+        """
+        if surprise_score >= 0.3:
+            self._peace_streak = 0
+            return
+
+        self._peace_streak += 1
+        if self._peace_streak >= self._peace_threshold:
+            current = self._means["trust"]
+            if current < self._drift_target:
+                self._means["trust"] = min(
+                    self._drift_target,
+                    current + self._drift_rate,
+                )
+
+    def trust_repair(self, amount: float = 0.02) -> None:
+        """P1-5: Intentional Violation builds trust through demonstrated integrity.
+
+        When Agent chooses to violate for a higher value, it shows
+        principled boundary-setting — not blind obedience.
+        Trust increases slightly, even though a violation occurred.
+        """
+        self._means["trust"] = min(1.0, self._means["trust"] + amount)
 
     def is_uncertain(self, threshold: float = 0.5) -> bool:
         """Check if any core dimension has high variance.
