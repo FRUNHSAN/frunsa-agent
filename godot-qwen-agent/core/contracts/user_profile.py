@@ -45,7 +45,7 @@ class UserProfile:
     amendment_threshold: int = 3
     outlier_field_count: int = 3
     outlier_trust_delta: float = 0.25
-    storage_path: str = ".user_profiles/"
+    storage_path: str = "user_profiles/"
     _field_sessions: dict[str, set[int]] = field(default_factory=dict)
     _current_session: int = 0
     _session_outlier: set[int] = field(default_factory=set)
@@ -56,7 +56,7 @@ class UserProfile:
 
     def save(self) -> str:
         """Persist profile to JSON. Returns file path."""
-        self.storage_path_obj.mkdir(parents=True, exist_ok=True)
+        self.storage_path_obj.parent.mkdir(parents=True, exist_ok=True)
         data = {
             "user_id": self.user_id,
             "amendment_threshold": self.amendment_threshold,
