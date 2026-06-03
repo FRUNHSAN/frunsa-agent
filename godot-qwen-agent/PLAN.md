@@ -5906,3 +5906,57 @@ ContractAwareCriticEngine         ← 包装 CriticEngine.evaluate()
 - [x] `pytest tests/ -q` — 854/854 通过, 0 回归
 - [x] 三个包装器导入验证通过
 - [x] 164 个编排层 conformance 测试零改动通过
+
+---
+
+## Phase 24: HITL Gateway — 人在回路
+
+### 完成日期
+
+2026-05-29
+
+### 定位
+
+Phase 22b 的 `ESCALATE_TO_HUMAN` 是一个永远不会触发的枚举值——系统喊了救命，但没人在听。Phase 24 打通了"求助→接收→处理"的双向通道。
+
+不是从零造工作流引擎——是给现有零件加一个新的事件消费者。
+
+### 核心设计
+
+```
+repair_budget_exhausted event
+    ↓
+HITLGateway.poll()  ← 寄生在 EventSink 上，只读不写
+    ↓
+HumanTicket (frozen dataclass, 冻结的故障快照)
+    ↓ create_ticket → persistence (human_tickets 表)
+    ↓ human_intervention_required event → EventSink
+    ↓
+[人类通过 CLI/API/UI 审查]
+    ↓
+hitl.submit_decision(ticket_id, "approve")
+    ↓ ticket_resolved event → EventSink
+```
+
+### 关键设计决策
+
+**零新依赖**：没有 Redis、没有 Pub/Sub、没有消息队列。HITLGateway 直接从 ContractAwareEventSink 读事件——sink 已经有所有事件，不需要重新捕获。
+
+**HumanTicket 是冻结快照，不是可变状态机**：`@dataclass(frozen=True)`，跟所有其他契约类型一致。ticket 是"这个时刻发生了故障"的记录——不是"这个工作流正在流转"的活对象。
+
+**Ticket ID 是确定性的**：从 event.correlation_id + timestamp 派生。同一个 budget exhaustion 事件不会创建重复 ticket。
+
+### 新增
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `core/contracts/composition.py` | 修改 | HumanTicket dataclass, +2 event_type |
+| `core/adapters/persistence.py` | 修改 | human_tickets 表, create/resolve/get_pending |
+| `core/adapters/hitl_gateway.py` | 新增 | HITLGateway (~80行) |
+| `demo/demo_hitl.py` | 新增 | 10/10 断言 CLI 模拟 |
+
+### 验证
+
+- [x] `python demo/demo_hitl.py` — 10/10 通过
+- [x] `pytest tests/ -q` — 854/854 通过, 0 回归
+- [x] `ESCALATE_TO_HUMAN` 不再是死胡同
