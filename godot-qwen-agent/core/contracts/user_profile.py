@@ -8,7 +8,10 @@ amendments when a pattern crosses the repetition threshold.
 
 from __future__ import annotations
 
+import json
+import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 
@@ -39,14 +42,54 @@ class UserProfile:
     """
 
     user_id: str
-    amendment_threshold: int = 3  # sessions to trigger amendment
-    outlier_field_count: int = 3  # session modifying >= this many fields = suspect
-    outlier_trust_delta: float = 0.25  # trust change >= this in one session = suspect
+    amendment_threshold: int = 3
+    outlier_field_count: int = 3
+    outlier_trust_delta: float = 0.25
+    storage_path: str = ".user_profiles/"
     _field_sessions: dict[str, set[int]] = field(default_factory=dict)
     _current_session: int = 0
     _session_outlier: set[int] = field(default_factory=set)
     _session_mod_count: dict[int, int] = field(default_factory=dict)
     _session_trust_delta: dict[int, float] = field(default_factory=dict)
+
+    # ── Persistence ───────────────────────────────────────────
+
+    def save(self) -> str:
+        """Persist profile to JSON. Returns file path."""
+        self.storage_path_obj.mkdir(parents=True, exist_ok=True)
+        data = {
+            "user_id": self.user_id,
+            "amendment_threshold": self.amendment_threshold,
+            "outlier_field_count": self.outlier_field_count,
+            "outlier_trust_delta": self.outlier_trust_delta,
+            "current_session": self._current_session,
+            "field_sessions": {k: sorted(v) for k, v in self._field_sessions.items()},
+            "session_outlier": sorted(self._session_outlier),
+            "session_mod_count": self._session_mod_count,
+            "session_trust_delta": self._session_trust_delta,
+        }
+        self.storage_path_obj.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        return str(self.storage_path_obj)
+
+    @classmethod
+    def load(cls, user_id: str, storage_path: str = ".user_profiles/") -> "UserProfile":
+        """Load profile from JSON, or return fresh one if not found."""
+        profile = cls(user_id=user_id, storage_path=storage_path)
+        if profile.storage_path_obj.exists():
+            data = json.loads(profile.storage_path_obj.read_text(encoding="utf-8"))
+            profile.amendment_threshold = data.get("amendment_threshold", 3)
+            profile.outlier_field_count = data.get("outlier_field_count", 3)
+            profile.outlier_trust_delta = data.get("outlier_trust_delta", 0.25)
+            profile._current_session = data.get("current_session", 0)
+            profile._field_sessions = {k: set(v) for k, v in data.get("field_sessions", {}).items()}
+            profile._session_outlier = set(data.get("session_outlier", []))
+            profile._session_mod_count = data.get("session_mod_count", {})
+            profile._session_trust_delta = data.get("session_trust_delta", {})
+        return profile
+
+    @property
+    def storage_path_obj(self) -> Path:
+        return Path(self.storage_path) / f"{self.user_id}.json"
 
     def start_session(self) -> int:
         """Begin a new session. Returns session ID."""

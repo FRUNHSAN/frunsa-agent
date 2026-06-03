@@ -56,9 +56,21 @@ class ContractAuditor:
         self._llm = llm_client
         self._interval = interval
         self._call_count = 0
+        # ── Circuit breaker ──
+        self._consecutive_failures: int = 0
+        self._circuit_open: bool = False
+        self._circuit_reset_rounds: int = 0
+        self._breaker_threshold: int = 3  # failures to open circuit
+        self._breaker_pause: int = 10      # rounds to pause when open
 
     def should_audit(self, round_count: int) -> bool:
-        """Check if this round triggers an audit."""
+        """Check if this round triggers an audit. Respects circuit breaker."""
+        if self._circuit_open:
+            self._circuit_reset_rounds -= 1
+            if self._circuit_reset_rounds <= 0:
+                self._circuit_open = False
+                self._consecutive_failures = 0
+            return False
         return round_count > 0 and round_count % self._interval == 0
 
     def audit_async(
@@ -103,14 +115,20 @@ class ContractAuditor:
 
         try:
             raw = self._llm.generate(full_prompt)
-            # Extract JSON
             if "```json" in raw:
                 raw = raw.split("```json")[1].split("```")[0]
             elif "```" in raw:
                 raw = raw.split("```")[1].split("```")[0]
             result = json.loads(raw.strip())
         except Exception:
+            self._consecutive_failures += 1
+            if self._consecutive_failures >= self._breaker_threshold:
+                self._circuit_open = True
+                self._circuit_reset_rounds = self._breaker_pause
             return None
+
+        # Success — reset failure counter
+        self._consecutive_failures = 0
 
         if result.get("has_proposal") and "proposal" in result:
             return result["proposal"]
