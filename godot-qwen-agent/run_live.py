@@ -274,9 +274,11 @@ while True:
     full_prompt = f"{system}\n\nUser: {user}"
     full_response = ""
 
-    # ── Layer 3: Enforcement config from Blueprint ──
-    verbose = bp.fields.get("response_verbose_level", "HIGH")
+    # ── Layer 3: Enforcement reads contract, not hardcoded maps ──
+    verbose = bp.enforce("response_verbose_level") or "HIGH"
     max_sentences = {"HIGH": 999, "MEDIUM": 999, "LOW": 3, "MINIMAL": 2}.get(verbose, 999)
+    tone = bp.enforce("tone_style") or "WARM"
+    initiative = bp.enforce("conversational_initiative") or "BALANCED"
 
     try:
         sent_count = 0
@@ -345,7 +347,7 @@ while True:
     profile.save()
 
     # ── Status ──
-    verbose = bp.fields.get("response_verbose_level", "HIGH")
+    verbose = bp.enforce("response_verbose_level") or "HIGH"
     status_parts = [f"trust={trust:.2f}", f"verbose={verbose}", f"round={round_count}"]
     if bp.applied_count > 0:
         status_parts.append(f"evolutions={bp.applied_count}")

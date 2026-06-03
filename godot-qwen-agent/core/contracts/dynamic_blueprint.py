@@ -187,6 +187,15 @@ class DynamicBlueprint:
 
         return changes
 
+    # ── Enforcement interface ──
+    def enforce(self, key: str) -> Any | None:
+        """Hard read of a contract field. For code-level enforcement.
+
+        Unlike Prompt rendering (soft read), this is a physical constraint.
+        Any component can query: 'what does the contract require of me?'
+        """
+        return self.fields.get(key)
+
     @property
     def applied_count(self) -> int:
         return self._applied_count
