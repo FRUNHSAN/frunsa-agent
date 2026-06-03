@@ -12,3 +12,4 @@ godot_project/
 gh_extract/
 gh.zip
 .claude/
+.blind_test_flight_data.json
