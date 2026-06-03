@@ -66,15 +66,15 @@ def build_contract_directive(verbose: str) -> str:
     if verbose.upper() == "LOW":
         return (
             "[CONTRACT: CONCISE]\n"
-            "MUST: 2-3 sentences max. Under 100 words total.\n"
+            "MUST: 2-3 sentences max. Under 100 words total. End with a question if natural.\n"
             "MUST NOT: Paragraphs. Theory lectures. Multiple examples."
         )
     if verbose.upper() == "HIGH":
         return (
             "[CONTRACT: THOROUGH]\n"
-            "MUST: Friendly and clear. Give context, then one good example.\n"
+            "MUST: Friendly and clear. Brief context + one example. End with a natural question.\n"
             "MUST NOT: Lectures. Bullet-point breakdowns. More than 3 paragraphs.\n"
-            "CRITICAL: You are chatting, not writing a textbook."
+            "CRITICAL: This is a conversation. Ask what the user thinks. Show curiosity."
         )
     return ""
 
@@ -117,16 +117,21 @@ while True:
         print(f"  [new conversation] Session {profile.session_count}.")
 
     # ── Evaluate ──
-    is_tired = any(w in user for w in ("累", "困", "睡了", "好晚", "不说了", "话少", "别啰嗦", "简洁"))
-    is_happy = any(w in user for w in ("谢谢", "懂了", "可以", "好多了", "不错"))
-    is_angry = any(w in user for w in ("错", "不对", "不行", "废话", "别说了"))
+    trust_before = trust
+    is_tired = any(w in user for w in ("累", "困", "睡了", "好晚", "不说了"))
+    is_brevity = any(w in user for w in ("话少", "别啰嗦", "简洁", "精简"))
+    is_happy = any(w in user for w in ("谢谢", "懂了", "好多了", "不错", "对的", "是的", "哈哈"))
+    is_angry = any(w in user for w in ("错了", "不对", "不行", "废话", "别说了", "别问了"))
 
     if is_tired:
-        trust = max(0.0, trust - 0.02)
-    elif is_happy:
-        trust = min(1.0, trust + 0.03)
-    elif is_angry:
-        trust = max(0.0, trust - 0.04)
+        trust = max(0.0, trust - 0.01)
+    elif is_brevity:
+        pass  # Asking for brevity is not negative — it's honest feedback
+    if is_happy:
+        trust = min(0.85, trust + 0.02)
+    if is_angry:
+        trust = max(0.0, trust - 0.03)
+    trust_delta = trust - trust_before
 
     # ── Apply proposals ──
     for prop in list(pending):
@@ -188,7 +193,7 @@ while True:
         )
 
     # ── Profile ──
-    profile.record_trust_delta(0.0)
+    profile.record_trust_delta(trust_delta)
     amendment = profile.propose_amendment("response_verbose_level", verbose)
     if amendment:
         print(f"  [AMENDMENT] {amendment['human_reason'][:120]}")
