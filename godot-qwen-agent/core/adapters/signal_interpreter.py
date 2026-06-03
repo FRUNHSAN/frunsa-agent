@@ -21,9 +21,6 @@ COMPLEXITY_MARKERS = [
 ]
 
 
-def _is_complex_question(
-    bp: dict[str, str], dim: str | None, score: float,
-) -> bool:
 def interpret(
     dim: str | None,
     score: float,
