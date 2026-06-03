@@ -25,6 +25,17 @@ from core.contracts.user_profile import UserProfile
 from core.adapters.contract_evolution_engine import ContractEvolutionEngine
 from core.adapters.contract_auditor import ContractAuditor
 
+# ── PLAN6: Semantic Trust Engine (with keyword fallback) ──
+try:
+    from core.adapters.semantic_trust import SemanticTrustEngine
+    sem = SemanticTrustEngine()
+    print(f"  [PLAN6] Semantic trust loaded. dims={sem.dimensions}")
+    USE_SEMANTIC = True
+except (ImportError, OSError) as e:
+    print(f"  [PLAN6] Semantic engine unavailable ({e}). Falling back to keywords.")
+    USE_SEMANTIC = False
+    sem = None
+
 uid = sys.argv[1] if len(sys.argv) > 1 else "default"
 base = str(Path(__file__).resolve().parent / "user_profiles")
 print(f"\n{'='*50}")
@@ -116,21 +127,31 @@ while True:
         profile.start_session()
         print(f"  [new conversation] Session {profile.session_count}.")
 
-    # ── Evaluate ──
+    # ── PLAN6 Evaluate: semantic trust or keyword fallback ──
     trust_before = trust
-    is_tired = any(w in user for w in ("累", "困", "睡了", "好晚", "不说了"))
-    is_brevity = any(w in user for w in ("话少", "别啰嗦", "简洁", "精简"))
-    is_happy = any(w in user for w in ("谢谢", "懂了", "好多了", "不错", "对的", "是的", "哈哈"))
-    is_angry = any(w in user for w in ("错了", "不对", "不行", "废话", "别说了", "别问了"))
-
-    if is_tired:
-        trust = max(0.0, trust - 0.01)
-    elif is_brevity:
-        pass  # Asking for brevity is not negative — it's honest feedback
-    if is_happy:
-        trust = min(0.85, trust + 0.02)
-    if is_angry:
-        trust = max(0.0, trust - 0.03)
+    if USE_SEMANTIC and sem is not None:
+        sig = sem.detect(user)
+        dim, score = sig["dimension"], sig["score"]
+        if dim == "fatigue":
+            trust = max(0.0, trust - 0.01 * (1 + score))
+        elif dim == "gratitude":
+            trust = min(0.85, trust + 0.02 * (1 + score))
+        elif dim == "frustration":
+            trust = max(0.0, trust - 0.03 * (1 + score))
+        # curiosity: neutral on trust, but logs engagement
+        if dim:
+            print(f"  [sense] {dim}={score:.3f}")
+    else:
+        # Keyword fallback
+        is_tired = any(w in user for w in ("累", "困", "睡了", "好晚", "不说了"))
+        is_happy = any(w in user for w in ("谢谢", "懂了", "好多了", "不错", "对的", "是的", "哈哈"))
+        is_angry = any(w in user for w in ("错了", "不对", "不行", "废话", "别说了", "别问了"))
+        if is_tired:
+            trust = max(0.0, trust - 0.01)
+        if is_happy:
+            trust = min(0.85, trust + 0.02)
+        if is_angry:
+            trust = max(0.0, trust - 0.03)
     trust_delta = trust - trust_before
 
     # ── Apply proposals ──
