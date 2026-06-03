@@ -1,0 +1,50 @@
+# Reasoning Chain: PLAN6 — Semantic Trust
+chain_id: plan6_semantic_trust
+title: "PLAN6 Semantic Trust: Embedding-based signal detection replacing keyword matching"
+created_at: "2026-06-04T00:00:00Z"
+status: active
+tags: [plan6, semantic_trust, embedding, sentence_transformers, cosine_similarity, trust_signal]
+related_chains: [plan4_bayesian_engine, plan5_contract_lifecycle]
+
+context: |
+  PLAN4's RelationalEvaluator and run_live.py used keyword matching for trust
+  signal detection. "好烦啊", "没劲", "不想说话" all express fatigue but none
+  matched the keyword list. This is psychological "emotional neglect" — the
+  system replies cheerfully while the user is signaling distress.
+
+decision: |
+  Replace keyword matching with embedding-based semantic similarity.
+  Use paraphrase-multilingual-MiniLM-L12-v2 (118MB, CPU-only, ~30ms/inference).
+  Hand-crafted Chinese anchor sentences define each trust dimension's semantic
+  center. Cosine similarity between user input and anchor centers determines
+  the trust signal. Two-tier architecture: embedding recall (fast) + LLM
+  confirmation (async, planned in 6.2).
+
+rationale: |
+  10-sentence Chinese test: 8/10 correct (80%).
+  Fatigue detection: "好烦啊" → 0.722, "没劲" → 0.832, "不想说了" → 0.876.
+  Previously all three returned False (keyword miss).
+  Two false positives ("这个bug好烦" → frustration, "还行吧" → gratitude)
+  will be fixed by 6.2 LLM secondary confirmation layer.
+  Model choice: multilingual (not English-only) for Chinese support.
+  Anchors hand-written (not dataset-derived) to encode the system's values.
+
+future_guidance:
+  semantic_trust_engine:
+    summary: "SemanticTrustEngine: cosine similarity between user input and pre-computed anchor centers"
+    priority: critical
+  two_tier_architecture:
+    summary: "Embedding recall (fast, local) → LLM confirmation (slow, async). Two-tier prevents false positives."
+    priority: critical
+  anchors:
+    summary: "Anchors are hand-written in user's language. They encode the system's emotional values. Change anchors to change what the system 'hears'."
+    priority: high
+  thresholds:
+    summary: "Default thresholds: fatigue=0.40, gratitude=0.45, frustration=0.45, curiosity=0.40. Will be per-user in 6.4."
+    priority: medium
+
+anti_patterns:
+  - "Using dataset-derived anchors — anchors encode system values, not statistical distributions"
+  - "Encoding anchors every round — pre-compute ONCE at startup"
+  - "Trusting embedding score alone for frustration/fatigue in tech context — always verify with LLM (6.2)"
+  - "Using English-only model for Chinese users — use multilingual model"

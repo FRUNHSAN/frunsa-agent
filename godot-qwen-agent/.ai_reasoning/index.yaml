@@ -242,6 +242,13 @@ chains:
     tags: [plan5, contract_lifecycle, dynamic_blueprint, system2, constitution, rollback]
     status: active
 
+  - chain_id: plan6_semantic_trust
+    file: chains/plan6_semantic_trust.yaml
+    title: "PLAN6 Semantic Trust: Embedding-based signal detection replacing keyword matching"
+    layer: plan
+    tags: [plan6, semantic_trust, embedding, sentence_transformers, cosine_similarity]
+    status: active
+
   # ── Real LLM Orchestration + Critic Engines ──
   - chain_id: phase_18_real_orch_critic
     file: chains/phase_18_real_orch_critic.yaml
@@ -390,3 +397,8 @@ tag_index:
   system2: [plan5_contract_lifecycle]
   constitution: [plan5_contract_lifecycle]
   rollback: [plan5_contract_lifecycle]
+  plan6: [plan6_semantic_trust]
+  semantic_trust: [plan6_semantic_trust]
+  embedding: [plan6_semantic_trust]
+  sentence_transformers: [plan6_semantic_trust]
+  cosine_similarity: [plan6_semantic_trust]

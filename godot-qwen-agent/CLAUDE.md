@@ -4,7 +4,15 @@
 
 This project is a **contract-driven, three-platform agent system**. Every architectural decision is recorded in `.ai_reasoning/`. Before writing any code, you MUST consult the reasoning chain library. After completing complex work, you MUST archive new decisions.
 
-**Phase 25.5: PLAN2.md defines the evolved paradigm — Contract-Adaptive as Relational OS.** See [PLAN2.md](PLAN2.md) for the four core definitions, three axioms, and the transition from "immune system" to "moral intuition." PLAN1 (PLAN.md) records Phase 1-25 engineering history; PLAN2 defines Phase 26+ architecture.
+**Current: PLAN6 — Semantic Empathy.** See [PLAN6.md](PLAN6.md) for the embedding-based trust engine and two-tier architecture.
+
+**PLAN hierarchy:**
+- [PLAN.md](PLAN.md) — Phase 1-25: contract kernel, pipeline, anti-corruption
+- [PLAN2.md](PLAN2.md) — Phase 26+: relational OS paradigm
+- [PLAN3.md](PLAN3.md) — Dynamic prompting + Vibe Test
+- [PLAN4.md](PLAN4.md) — Bayesian EMA + Stage Directions + Smart Decay
+- [PLAN5.md](PLAN5.md) — Living contract: DynamicBlueprint + 3 Loops + Homeostasis
+- [PLAN6.md](PLAN6.md) — Semantic trust: Embedding replaces keyword matching
 
 ## Project Identity: 契约关系体，不是指令执行器
 
