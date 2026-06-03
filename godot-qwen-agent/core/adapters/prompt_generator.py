@@ -40,12 +40,20 @@ class PromptGenerator:
         is 'confused' and should play it safe.
         """
 
+        # ── PLAN4: Stage Directions (micro-expressions from variance) ──
+        stage = ""
+        if history is not None:
+            evar = history.get_variance("energy_strength")
+            tvar = history.get_variance("trust")
+            stage = PromptGenerator._stage_directions(evar, tvar)
+
         # ── PLAN4: High-variance conservative fallback ──
         if history is not None and history.is_uncertain(threshold=0.5):
             return (
                 "关系状态不确定。采用保守、中立、极简的回复策略。"
                 "不主动提问，不提出新提案，仅回应当前问题。"
                 "语气平稳、克制。默认回复长度控制在80字以内。"
+                + stage
             )
 
         # ── Base seed (relationship DNA) ──
@@ -98,4 +106,47 @@ class PromptGenerator:
         }
         seed += " " + tone_hints.get(ctx.suggested_tone, tone_hints["neutral"])
 
+        # ── Stage directions (micro-expressions from variance) ──
+        if stage:
+            seed += " " + stage
+
         return seed
+
+    # ── Stage Directions (PLAN4: variance -> performance guidance) ─
+
+    @staticmethod
+    def _stage_directions(energy_var: float, trust_var: float) -> str:
+        """Translate Bayesian variances into LLM performance guidance.
+
+        These are 'micro-expressions' — subtle stage directions that
+        tell the LLM how to modulate its tone based on relational state.
+        """
+        avg_var = (energy_var + trust_var) / 2.0
+
+        if avg_var < 0.05:
+            # Confident: user is predictable, relationship is stable
+            return (
+                "【表演指导】直接、自信地给出答案。无需多余寒暄或确认。"
+                "你对当前状态有很高的把握。"
+            )
+        elif avg_var < 0.15:
+            # Cautious openness: slight uncertainty, but manageable
+            return (
+                "【表演指导】保持专业和温和。在给出答案后，"
+                "可以轻微加一句确认性话语（如'这样解释是否清楚？'），"
+                "以试探用户反馈。不要过度热情，也不要过度道歉。"
+            )
+        elif avg_var < 0.25:
+            # Alert but functional: moderate uncertainty
+            return (
+                "【表演指导】语气需要谨慎。先承认问题的复杂性，"
+                "然后给出初步建议。保持开放态度，邀请用户纠正你的理解。"
+                "不要表现得过于确定。"
+            )
+        else:
+            # Highly uncertain: recent volatility, play it safe
+            return (
+                "【表演指导】语气必须极其谨慎。先表达对当前混乱状态的"
+                "理解（如'我注意到刚才的对话有些跳跃'），然后给出"
+                "最基础的回应。强烈建议邀请用户指明方向。"
+            )
