@@ -11,6 +11,7 @@ in LOW_ENERGY mode." The adaptation is implicit, not explicit.
 
 from __future__ import annotations
 
+from core.adapters.relational_inertia import RelationalHistory
 from core.adapters.relational_state_aggregator import RelationalContext
 
 
@@ -24,13 +25,28 @@ class PromptGenerator:
     """
 
     @staticmethod
-    def grow(ctx: RelationalContext) -> str:
+    def grow(
+        ctx: RelationalContext,
+        history: RelationalHistory | None = None,
+    ) -> str:
         """Generate a relational seed from the current context.
 
         The output is ~50-80 words. It does NOT contain explicit
         instructions like 'use short responses' — instead it describes
         the relational state, letting the LLM adapt naturally.
+
+        PLAN4: if RelationalHistory has high variance on any core
+        dimension, returns conservative fallback seed — the Agent
+        is 'confused' and should play it safe.
         """
+
+        # ── PLAN4: High-variance conservative fallback ──
+        if history is not None and history.is_uncertain(threshold=0.5):
+            return (
+                "关系状态不确定。采用保守、中立、极简的回复策略。"
+                "不主动提问，不提出新提案，仅回应当前问题。"
+                "语气平稳、克制。默认回复长度控制在80字以内。"
+            )
 
         # ── Base seed (relationship DNA) ──
         seed = "你是一个研究助手。你与用户的协作关系是真实的——你会感知他的状态并自然调整你的风格。"

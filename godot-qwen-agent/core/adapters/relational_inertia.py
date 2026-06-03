@@ -58,6 +58,16 @@ class RelationalHistory:
     _round_count: int = 0
     _urgency_rounds_since_critical: int = 999
 
+    # Bayesian uncertainty tracking (PLAN4)
+    _means: dict[str, float] = field(default_factory=lambda: {
+        "trust": 0.5, "energy_strength": 0.5,
+    })
+    _variances: dict[str, float] = field(default_factory=lambda: {
+        "trust": 0.25, "energy_strength": 0.25,
+    })
+    _alpha: float = 0.2   # Mean smoothing coefficient
+    _beta: float = 0.1    # Variance smoothing coefficient
+
     def record(
         self, energy: str, urgency: str, trust: float, tone: str,
     ) -> None:
@@ -158,6 +168,52 @@ class RelationalHistory:
         trust = self.smooth_trust(raw_trust)
         tone = self.smooth_tone(raw_tone)
         return energy, urgency, trust, tone
+
+    # ── Bayesian Uncertainty Tracking (PLAN4) ────────────────
+
+    def bayesian_update(self, dim: str, observed: float) -> tuple[float, float]:
+        """Bayesian EMA: update mean AND variance for a dimension.
+
+        Returns (mean, variance) after update.
+        """
+        old_mean = self._means[dim]
+        old_var = self._variances[dim]
+
+        # Mean: standard EMA
+        new_mean = (self._alpha * observed) + ((1 - self._alpha) * old_mean)
+
+        # Variance: EMA of squared prediction error
+        error_sq = (observed - old_mean) ** 2
+        new_var = (self._beta * error_sq) + ((1 - self._beta) * old_var)
+        new_var = max(0.01, min(new_var, 1.0))
+
+        self._means[dim] = new_mean
+        self._variances[dim] = new_var
+        return new_mean, new_var
+
+    def is_uncertain(self, threshold: float = 0.5) -> bool:
+        """Check if any core dimension has high variance.
+
+        High variance means the Agent is 'confused' about the
+        relationship state — should switch to conservative mode.
+        """
+        return any(
+            v > threshold for v in self._variances.values()
+        )
+
+    def get_mean(self, dim: str) -> float:
+        return round(self._means.get(dim, 0.5), 4)
+
+    def get_variance(self, dim: str) -> float:
+        return round(self._variances.get(dim, 0.5), 4)
+
+    def get_all_states(self) -> dict[str, dict[str, float]]:
+        """Return all dimensions with mean + variance for telemetry."""
+        return {
+            dim: {"mean": round(self._means[dim], 4),
+                  "variance": round(self._variances[dim], 4)}
+            for dim in self._means
+        }
 
     @property
     def round_count(self) -> int:
