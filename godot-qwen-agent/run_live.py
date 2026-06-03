@@ -58,7 +58,9 @@ round_count = 0
 pending: list[dict] = []
 history: list[str] = []
 contract_events: list[str] = []
-_amendments_shown: set[str] = set()  # prevent amendment spam
+_amendments_shown: set[str] = set()
+_verbose_locked: bool = False        # Bug 2: once LOW, stay LOW
+_trust_crisis_rounds: int = 0        # Bug 3: consecutive crisis counter
 
 print(f"  blueprint: {bp.snapshot}")
 print(f"  trust: {trust:.2f} | sessions: {profile.session_count}")
@@ -121,6 +123,8 @@ while True:
         round_count = 0
         history.clear()
         contract_events.clear()
+        _verbose_locked = False
+        _trust_crisis_rounds = 0
         profile.start_session()
         print(f"  [new conversation] Session {profile.session_count} started. Fresh context.")
         continue
@@ -178,9 +182,24 @@ while True:
     context = build_context(history, contract_events)
     now = datetime.now().strftime("%H:%M")
 
+    # ── Bug 1 fix: Signal → Constraint bridge ──
+    signal_constraint = ""
+    if USE_SEMANTIC and sem is not None and dim:
+        if dim == "fatigue" and score > 0.6:
+            signal_constraint = (
+                f"\n[CRITICAL CONSTRAINT] User fatigue={score:.2f}. "
+                "MUST: Very short. MUST NOT: ANY questions. End warmly, no follow-up."
+            )
+        elif dim == "frustration" and score > 0.6:
+            signal_constraint = (
+                f"\n[CRITICAL CONSTRAINT] User frustration={score:.2f}. "
+                "MUST: Acknowledge briefly. MUST NOT: Questions. Defensiveness. Explanations."
+            )
+
     system = (
         f"{contract}\n"
         f"Current time: {now}\n"
+        f"{signal_constraint}\n"
         f"{context}"
     ).strip()
 
@@ -205,10 +224,30 @@ while True:
     if len(history) > 40:
         history = history[-40:]
 
+    # ── Bug 2: Verbose lock — LOW is sticky ──
+    current_verbose = bp.fields.get("response_verbose_level", "HIGH")
+    if "LOW" in str(current_verbose).upper() or "BRIEF" in str(current_verbose).upper():
+        _verbose_locked = True
+    if _verbose_locked and current_verbose == "HIGH":
+        # System tried to bounce back — override
+        bp.fields["response_verbose_level"] = "LOW"
+        print(f"  [LOCK] Verbose locked at LOW. Use /new to reset.")
+
+    # ── Bug 3: Trust crisis recovery ──
+    if trust < 0.05:
+        _trust_crisis_rounds += 1
+    else:
+        _trust_crisis_rounds = 0
+    if _trust_crisis_rounds >= 3:
+        trust = max(trust, 0.08)  # Small repair — break the freeze
+        _trust_crisis_rounds = 0
+        print(f"  [RECOVERY] Trust crisis detected. Small repair applied. trust={trust:.2f}")
+
     # ── Emergency downgrade: trust critically low ──
     if trust < 0.05 and bp.fields.get("response_verbose_level") != "LOW":
         ok, _ = bp.apply_proposal("response_verbose_level", "LOW", ignore_cooldown=True)
         if ok:
+            _verbose_locked = True
             print(f"  [EMERGENCY] Trust {trust:.2f} — forcing verbose: HIGH -> LOW")
     if trust < 0.03 and bp.fields.get("proactive_suggestions") != "DISABLED":
         ok, _ = bp.apply_proposal("proactive_suggestions", "DISABLED", ignore_cooldown=True)
