@@ -643,6 +643,30 @@ future_guidance:
     priority: medium
     phase_applicable: "PLAN4+ (vision)"
 
+  surprise_detector:
+    summary: "Surprise Detector injects behavioral anomaly signals into Bayesian variance to prevent confirmation bias"
+    detail: "PLAN4 Surprise Detector extracts physics-level behavioral signals
+      (length_ratio, exclamation_density, surprise_score) independent of keyword
+      semantics. When a user types 200 excited characters without using the word
+      'excited', the surprise score (0.494 at 5.5x length ratio) forcibly expands
+      Bayesian variance via augmented_error_sq = prediction_error + surprise_score^2.
+      Verified: T11 replay showed variance rebounding 0.148->0.166 instead of
+      shrinking to 0.133. This prevents the low-variance confirmation bias trap
+      where the system becomes increasingly blind to behavioral mutations."
+    priority: critical
+    phase_applicable: "PLAN4+"
+
+  behavioral_signals:
+    summary: "Behavioral signals are the input layer for PLAN4 Proxy Loss — physics before semantics"
+    detail: "extract_behavioral_signals() captures length_ratio (current/recent avg),
+      exclamation_density (per 10 chars), and composite surprise_score. These are
+      recorded in InteractionTelemetry JSONL alongside mean+variance. Accumulated
+      data becomes the training set for PLAN4 Predictive Coding: when surprise
+      is high AND variance was low, prediction error is most informative. Future
+      signals: response latency, message burst frequency, punctuation disappearance."
+    priority: high
+    phase_applicable: "PLAN4+"
+
 anti_patterns:
   - "Putting resolve() or any matching algorithm on CompositionBlueprint (data model)"
   - "SourceRouter producing I/O, network calls, or state mutation (must be pure)"
@@ -718,3 +742,6 @@ anti_patterns:
   - "Building Relational Inertia before validating PromptGenerator seeds are effective — Vibe Test must come first"
   - "Using assert on seed string equality — seeds are probabilistic; validate via LLM-as-Judge on downstream behavior"
   - "Snapping energy from HIGH to LOW in one round without confirm window — false fatigue detection causes oscillation"
+  - "Relying solely on keyword detection for energy transitions — behavioral signals (length_ratio, exclamation density) catch what keywords miss"
+  - "Allowing variance to continuously shrink without behavioral surprise checks — low variance creates confirmation bias blindness"
+  - "Using pipe input for Chinese stress testing — garbled encoding masks real detector behavior. Always test in real terminal"

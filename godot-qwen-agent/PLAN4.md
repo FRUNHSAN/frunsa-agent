@@ -78,7 +78,10 @@ Agent 输出 → 用户下一轮行为 → Proxy Loss
 | Sliding window history | ✅ | `relational_inertia.py` |
 | Temporal Attention | ⬜ | PLAN4 未来 |
 | Proxy Loss (implicit feedback) | ⬜ | PLAN4 未来 |
-| Bayesian uncertainty | ⬜ | PLAN4+ 未来 |
+| Bayesian uncertainty (mean+variance) | ✅ | 034e9ce |
+| InteractionTelemetry (JSONL) | ✅ | 034e9ce |
+| PLAN3/4 Ports (6 Protocols) | ✅ | 0fe9e6a |
+| Surprise Detector (behavioral signals) | ✅ | d1123e8 — T11 replay: var 0.148→0.166 |
 | Full tensor engine | ⬜ | PLAN4+ 未来 |
 
 ## PLAN4 的完成判据

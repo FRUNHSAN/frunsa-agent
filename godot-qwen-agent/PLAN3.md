@@ -89,6 +89,9 @@ aggregate(current_field, previous_contexts) → smoothed_context
 | PromptGenerator.grow() | ✅ | 279a18f |
 | Vibe Test (LLM-as-Judge) | ✅ | 4d29bf8 — 4/4 passed, 35x length difference confirmed |
 | Relational Inertia (EMA + sliding window) | ✅ | 4d29bf8 |
+| Bayesian Uncertainty (mean+variance) | ✅ | 034e9ce |
+| Surprise Detector (behavioral signals) | ✅ | d1123e8 — T11 replay: variance 0.148→0.166 |
+| PLAN3/4 Ports (6 Protocols) | ✅ | 0fe9e6a |
 | Blind Test 2.0 (20轮稳定性) | ⬜ | — |
 
 ## Vibe Test 结果（已完成）
