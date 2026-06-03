@@ -133,9 +133,10 @@ def main():
     turn = 0
 
     rounds = generate_script()
-    # Repeat 3x for ~120 rounds
-    all_rounds = rounds + rounds + rounds
+    # Repeat for 500 rounds (500/42 ≈ 12x)
+    all_rounds = rounds * 12
     random.shuffle(all_rounds)
+    all_rounds = all_rounds[:500]
 
     print("=" * 55)
     print(f"[DATA GEN] Auto-generating {len(all_rounds)} rounds")
@@ -157,10 +158,10 @@ def main():
         hist.decay_variances(signals["surprise_score"])
         energy_val = 0.2 if field.is_low_energy else (0.8 if field.energy_level.value == "high" else 0.5)
         hist.update_with_surprise("energy_strength", energy_val, signals["surprise_score"])
-        hist.update_with_surprise("trust", field.trust_watermark, signals["surprise_score"])
+        hist.update_with_surprise("trust", max(0.0, min(1.0, field.trust_watermark)), signals["surprise_score"])
 
         # Progress indicator
-        if turn % 20 == 0:
+        if turn % 100 == 0:
             print(f"  [{turn}/{len(all_rounds)}] energy(mean={hist.get_mean('energy_strength'):.2f}, "
                   f"var={hist.get_variance('energy_strength'):.3f})  "
                   f"trust(mean={hist.get_mean('trust'):.2f}, var={hist.get_variance('trust'):.3f})")

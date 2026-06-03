@@ -13,3 +13,6 @@ gh_extract/
 gh.zip
 .claude/
 .blind_test_flight_data.json
+*_telemetry.jsonl
+data/stress_test_telemetry.jsonl
+!data/judge_results.json

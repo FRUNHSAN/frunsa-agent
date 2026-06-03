@@ -2162,11 +2162,10 @@ class TestRelationalField:
         f3 = f.with_trust(-0.6, "big trust drop")
         assert f3.trust_watermark == 0.0  # clamped
 
-    def test_trust_watermark_validation(self):
-        with pytest.raises(ValueError):
-            RelationalField(trust_watermark=1.5)
-        with pytest.raises(ValueError):
-            RelationalField(trust_watermark=-0.1)
+    def test_trust_watermark_clamped(self):
+        # Out-of-range values are silently clamped, not rejected
+        assert RelationalField(trust_watermark=1.5).trust_watermark == 1.0
+        assert RelationalField(trust_watermark=-0.1).trust_watermark == 0.0
 
     def test_is_low_energy(self):
         f = RelationalField(energy_level=EnergyLevel.LOW)

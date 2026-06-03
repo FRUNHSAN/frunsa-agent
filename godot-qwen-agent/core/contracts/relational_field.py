@@ -67,10 +67,9 @@ class RelationalField:
     updated_at: float = field(default_factory=__import__("time").time)
 
     def __post_init__(self) -> None:
-        if not 0.0 <= self.trust_watermark <= 1.0:
-            raise ValueError(
-                f"trust_watermark must be in [0.0, 1.0], got {self.trust_watermark}"
-            )
+        clamped = max(0.0, min(1.0, self.trust_watermark))
+        if clamped != self.trust_watermark:
+            object.__setattr__(self, "trust_watermark", clamped)
 
     @classmethod
     def default(cls) -> RelationalField:
