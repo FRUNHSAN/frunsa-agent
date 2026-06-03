@@ -79,11 +79,12 @@ class ContractEvolutionEngine:
 
         if self._rounds_since_evolution >= self.rollback_window:
             if trust_now < self._trust_at_evolution - self.rollback_trust_drop:
+                trust_before = self._trust_at_evolution
                 blueprint.rollback()
                 self._trust_at_evolution = None
                 return True, (
                     f"Auto-rollback: trust dropped from "
-                    f"{self._trust_at_evolution:.2f} to {trust_now:.2f} "
+                    f"{trust_before:.2f} to {trust_now:.2f} "
                     f"after evolution. Contract reverted."
                 )
             # Window passed, trust is fine — clear monitoring
