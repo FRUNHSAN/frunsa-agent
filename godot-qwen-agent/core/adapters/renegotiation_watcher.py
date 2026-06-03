@@ -43,7 +43,7 @@ class RenegotiationWatcher:
     def __init__(
         self,
         threshold: int = 3,
-        trust_threshold: float = 0.7,
+        trust_threshold: float = 0.55,  # calibrated from blind test (was 0.7)
         trust_cost: float = 0.1,
     ) -> None:
         self._threshold = threshold
