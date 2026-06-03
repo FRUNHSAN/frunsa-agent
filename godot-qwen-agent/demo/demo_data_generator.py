@@ -156,7 +156,7 @@ def main():
         signals = RelationalEvaluator.extract_behavioral_signals(user_input, recent_lengths)
         energy_val = 0.2 if field.is_low_energy else (0.8 if field.energy_level.value == "high" else 0.5)
         hist.update_with_surprise("energy_strength", energy_val, signals["surprise_score"])
-        hist.bayesian_update("trust", field.trust_watermark)
+        hist.update_with_surprise("trust", field.trust_watermark, signals["surprise_score"])
 
         # Progress indicator
         if turn % 20 == 0:
