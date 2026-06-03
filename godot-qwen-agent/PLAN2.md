@@ -149,3 +149,44 @@ PLAN2 (Phase 26+):
   公理一: 技术隐退
   公理三: 记忆为了在场
 ```
+
+---
+
+## 七、PLAN2 第一块基石：Intentional Violation（已完成）
+
+### 完成日期
+
+2026-05-29
+
+### Commit
+
+`33884b4 feat(plan2): Intentional Violation`
+
+### 变更
+
+| 文件 | 变更 |
+|------|------|
+| `core/contracts/composition.py` | `ContractViolation.INTENTIONAL_VIOLATION` + `trust_accumulated` event + SeverityMapping 排除 |
+| `core/contracts/tool.py` | `ToolResult.higher_value_reason` + `is_intentional_override` property |
+| `core/adapters/repair_engine.py` | `decide()` 跳过 INTENTIONAL + `record_trust_accumulation()` |
+| `tests/unit/test_pipeline_composer.py` | 5 个 PLAN2 测试 |
+
+### 核心行为
+
+```
+被动违约 (PLAN1):                    有意违约 (PLAN2):
+  TOOL_NOT_FOUND                       INTENTIONAL_VIOLATION
+  -> SeverityMapping 判定              -> SeverityMapping 排除
+  -> compliance_rate 下降              -> compliance_rate 不变
+  -> SelfRepairEngine 触发修复         -> SelfRepairEngine 跳过
+  -> 记录为 failure                    -> 记录为 trust_accumulated (+5)
+```
+
+### 验证
+
+- [x] `is_intentional_override` 正确区分主动/被动违约
+- [x] `SeverityMapping.default()` 不含 INTENTIONAL_VIOLATION 规则
+- [x] `SelfRepairEngine.decide()` 跳过 intentional violations
+- [x] `record_trust_accumulation()` 发出 `trust_accumulated` 事件
+- [x] 仅 intentional violations 的 sink 仍为 healthy
+- [x] `pytest tests/ -q` — 859/859 通过

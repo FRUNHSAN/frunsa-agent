@@ -545,6 +545,20 @@ future_guidance:
     priority: high
     phase_applicable: "Phase 22d+"
 
+  intentional_violation:
+    summary: "INTENTIONAL_VIOLATION is PLAN2's first commit — Agent chooses to violate for higher value"
+    detail: "PLAN2 redefines contract-adaptive from 'immune system' to 'relational OS'.
+      The INTENTIONAL_VIOLATION ContractViolation category marks the transition:
+      PLAN1 treated all violations as bugs to fix; PLAN2 distinguishes passive
+      violations (repair) from active violations (trust). Key behaviors: (1) excluded
+      from SeverityMapping — does NOT reduce compliance; (2) SelfRepairEngine.decide()
+      skips INTENTIONAL_VIOLATION entirely; (3) record_trust_accumulation() emits
+      trust_accumulated event with impact_score; (4) ToolResult.is_intentional_override
+      and higher_value_reason carry the moral intuition. This is the engineering
+      realization of Axiom 2: 'Contract > Instruction, Co-creation > Obedience.'"
+    priority: critical
+    phase_applicable: "Phase 26+ (PLAN2)"
+
 anti_patterns:
   - "Putting resolve() or any matching algorithm on CompositionBlueprint (data model)"
   - "SourceRouter producing I/O, network calls, or state mutation (must be pure)"
@@ -611,3 +625,6 @@ anti_patterns:
   - "Putting read/query methods on EventSink Protocol — EventSink should be write-only (emit); reads belong to InteractionRepository"
   - "Sharing a single MCPToolWrapper class for multiple MCP tools — class-level config will collide. Use dynamic subclasses"
   - "Blocking the event loop during MCP tool discovery — use async context managers for stdio lifecycle"
+  - "Adding INTENTIONAL_VIOLATION to SeverityMapping — intentional violations are trust events, not failures"
+  - "Treating intentional violations as failures in compliance_rate — they should be excluded from severity calculation"
+  - "Confusing 'I cannot do X' (passive violation) with 'I choose not to do X because Y' (intentional violation) — different event paths"
