@@ -146,6 +146,46 @@ class RelationalEvaluator:
                 delta -= 0.03
         return max(-0.10, min(0.10, delta))  # clamp
 
+    # ── Behavioral Signals (PLAN4 Surprise Detector) ────────────
+
+    @staticmethod
+    def extract_behavioral_signals(
+        user_input: str, recent_lengths: list[int] | None = None,
+    ) -> dict[str, float]:
+        """Extract physics-level behavioral signals independent of semantics.
+
+        These signals catch what keyword detectors miss: a user who types
+        200 excited characters without using the word 'excited'.
+
+        Returns:
+            dict with length_ratio, exclamation_density, surprise_score
+        """
+        if not recent_lengths:
+            recent_lengths = [20]  # default baseline
+
+        avg_len = sum(recent_lengths) / len(recent_lengths)
+        input_len = len(user_input)
+
+        # Length ratio: how many times longer/shorter than recent average
+        length_ratio = input_len / max(avg_len, 1.0)
+
+        # Exclamation density per 10 characters
+        exclamations = user_input.count("！") + user_input.count("!")
+        exclamation_density = exclamations / max(input_len / 10.0, 1.0)
+
+        # Surprise score: composite of behavioral anomalies
+        # length_ratio > 3x means significant deviation
+        # exclamation_density > 0.5 means very excited
+        surprise = max(0.0, (length_ratio - 3.0) / 5.0)
+        surprise += min(exclamation_density, 1.0)
+        surprise = round(min(surprise, 1.0), 4)
+
+        return {
+            "length_ratio": round(length_ratio, 2),
+            "exclamation_density": round(exclamation_density, 2),
+            "surprise_score": surprise,
+        }
+
     @classmethod
     def _build_narrative(
         cls, text: str, energy: EnergyLevel, urgency: Urgency,

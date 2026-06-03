@@ -176,15 +176,44 @@ class RelationalHistory:
 
         Returns (mean, variance) after update.
         """
+        return self._update_internal(dim, observed, surprise_score=0.0)
+
+    def update_with_surprise(
+        self, dim: str, observed: float, surprise_score: float = 0.0,
+    ) -> tuple[float, float]:
+        """Bayesian EMA with behavioral surprise injection (PLAN4).
+
+        When surprise_score > 0, the augmented error forcibly expands
+        variance — preventing the 'confirmation bias' trap where low
+        variance makes the system blind to behavioral mutations.
+
+        Args:
+            dim: dimension name ("energy_strength", "trust")
+            observed: current observed value
+            surprise_score: 0.0 (no surprise) to 1.0 (extreme anomaly)
+
+        Returns:
+            (mean, variance) after update
+        """
+        return self._update_internal(dim, observed, surprise_score)
+
+    def _update_internal(
+        self, dim: str, observed: float, surprise_score: float,
+    ) -> tuple[float, float]:
+        """Core Bayesian EMA update with optional surprise augmentation."""
         old_mean = self._means[dim]
         old_var = self._variances[dim]
 
-        # Mean: standard EMA
+        # Mean: standard EMA (mean is NOT affected by surprise)
         new_mean = (self._alpha * observed) + ((1 - self._alpha) * old_mean)
 
         # Variance: EMA of squared prediction error
         error_sq = (observed - old_mean) ** 2
-        new_var = (self._beta * error_sq) + ((1 - self._beta) * old_var)
+
+        # PLAN4: inject behavioral surprise into error
+        augmented_error_sq = error_sq + (surprise_score ** 2)
+
+        new_var = (self._beta * augmented_error_sq) + ((1 - self._beta) * old_var)
         new_var = max(0.01, min(new_var, 1.0))
 
         self._means[dim] = new_mean

@@ -27,6 +27,7 @@ memory = RelationshipMemoryStore(":memory:")
 agg = RelationalStateAggregator()
 hist = RelationalHistory()
 telem = InteractionTelemetry("data/stress_test_telemetry.jsonl")
+recent_lengths: list[int] = []
 turn = 0
 
 print("=" * 50)
@@ -44,12 +45,19 @@ while True:
     if user.lower() in ("/quit","/exit","quit","exit"): break
 
     turn += 1
+    recent_lengths.append(len(user))
+    if len(recent_lengths) > 10:
+        recent_lengths.pop(0)
+
     field = RelationalEvaluator.evaluate(user, field)
     ctx = agg.aggregate(field, None, sink, memory, bp.fingerprint, history=hist)
 
-    # Bayesian update from field readings
+    # Extract behavioral signals (PLAN4 Surprise Detector)
+    signals = RelationalEvaluator.extract_behavioral_signals(user, recent_lengths)
+
+    # Bayesian update with surprise injection
     energy_val = 0.2 if field.is_low_energy else (0.8 if field.energy_level.value == "high" else 0.5)
-    hist.bayesian_update("energy_strength", energy_val)
+    hist.update_with_surprise("energy_strength", energy_val, signals["surprise_score"])
     hist.bayesian_update("trust", field.trust_watermark)
 
     # Response adaptation based on energy state
@@ -80,6 +88,8 @@ while True:
         is_uncertain=hist.is_uncertain(),
         response_len=len(resp),
         user_input_preview=user.encode("utf-8", errors="replace").decode("utf-8")[:60],
+        behavioral_signals=signals,
+        surprise_score=signals["surprise_score"],
     )
 
 # Summary
