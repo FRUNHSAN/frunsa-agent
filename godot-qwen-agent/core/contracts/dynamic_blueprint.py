@@ -57,26 +57,64 @@ class DynamicBlueprint:
     _last_modified: dict[str, float] = field(default_factory=dict)
     _round_counter: int = 0
 
+    # ── Safety valves ──
+    cooldown_rounds: int = 5       # Same field can't change twice within this
+    min_autonomy: str = "ASK_FIRST"  # execution_autonomy can't drop below this
+
     def __post_init__(self) -> None:
         if not self._baseline:
             self._baseline = deepcopy(self.fields)
 
-    def apply_proposal(self, target_key: str, new_value: Any) -> bool:
-        """Apply a contract modification. Returns True if accepted."""
+    def apply_proposal(
+        self, target_key: str, new_value: Any, ignore_cooldown: bool = False,
+    ) -> tuple[bool, str]:
+        """Apply a contract modification.
+
+        Returns (accepted, reason). Guards:
+          - Constitution: immutable genes rejected
+          - Cooldown: same field can't change twice within cooldown_rounds
+          - Min autonomy: execution_autonomy can't drop below min_autonomy
+        """
         if target_key in CONSTITUTION:
-            return False
-        if target_key not in self.fields:
+            return False, f"Gene lock: '{target_key}' is immutable."
+
+        # ── Cooldown guard ──
+        if not ignore_cooldown and target_key in self._last_modified:
+            rounds_since = self._round_counter - self._last_modified[target_key]
+            if rounds_since < self.cooldown_rounds:
+                return False, (
+                    f"Cooldown active: '{target_key}' changed "
+                    f"{rounds_since} rounds ago (needs {self.cooldown_rounds})."
+                )
+
+        # ── Min autonomy floor ──
+        if target_key == "execution_autonomy":
+            from .dynamic_blueprint import AUTONOMY_SCALE
+            current_num = AUTONOMY_SCALE.get(self.fields.get(target_key, self.min_autonomy), 99)
+            new_num = AUTONOMY_SCALE.get(new_value, 99)
+            min_num = AUTONOMY_SCALE.get(self.min_autonomy, 1)
+            if new_num < min_num:
+                return False, (
+                    f"Min autonomy floor: can't drop below "
+                    f"'{self.min_autonomy}'. Rejecting '{new_value}'."
+                )
+            if new_num == current_num:
+                return False, "No-op: same value."
+
+        elif target_key not in self.fields:
             self.fields[target_key] = new_value
             self._last_modified[target_key] = self._round_counter
-            return True
-        if self.fields[target_key] == new_value:
-            return False
+            return True, "Created new field."
 
+        elif self.fields[target_key] == new_value:
+            return False, "No-op: same value."
+
+        # ── Accept ──
         self._history.append(deepcopy(self.fields))
         self.fields[target_key] = new_value
         self._last_modified[target_key] = self._round_counter
         self._applied_count += 1
-        return True
+        return True, "Accepted."
 
     def rollback(self) -> bool:
         """Undo the last applied proposal."""

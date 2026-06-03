@@ -40,8 +40,13 @@ class UserProfile:
 
     user_id: str
     amendment_threshold: int = 3  # sessions to trigger amendment
+    outlier_field_count: int = 3  # session modifying >= this many fields = suspect
+    outlier_trust_delta: float = 0.25  # trust change >= this in one session = suspect
     _field_sessions: dict[str, set[int]] = field(default_factory=dict)
     _current_session: int = 0
+    _session_outlier: set[int] = field(default_factory=set)
+    _session_mod_count: dict[int, int] = field(default_factory=dict)
+    _session_trust_delta: dict[int, float] = field(default_factory=dict)
 
     def start_session(self) -> int:
         """Begin a new session. Returns session ID."""
@@ -56,6 +61,35 @@ class UserProfile:
         if key not in self._field_sessions:
             self._field_sessions[key] = set()
         self._field_sessions[key].add(sid)
+        self._session_mod_count[sid] = self._session_mod_count.get(sid, 0) + 1
+
+    def record_trust_delta(self, delta: float, session_id: int | None = None) -> None:
+        """Record trust change for a session. Used for outlier detection."""
+        sid = session_id or self._current_session
+        self._session_trust_delta[sid] = max(
+            abs(delta), self._session_trust_delta.get(sid, 0.0)
+        )
+
+    def mark_outlier(self, session_id: int | None = None) -> None:
+        """Manually mark a session as outlier. It won't count toward amendments."""
+        sid = session_id or self._current_session
+        self._session_outlier.add(sid)
+
+    def auto_detect_outliers(self) -> list[int]:
+        """Scan all sessions and mark outliers. Returns list of outlier session IDs."""
+        new_outliers: list[int] = []
+        for sid in range(1, self._current_session + 1):
+            if sid in self._session_outlier:
+                continue
+            mods = self._session_mod_count.get(sid, 0)
+            delta = self._session_trust_delta.get(sid, 0.0)
+            if mods >= self.outlier_field_count:
+                self._session_outlier.add(sid)
+                new_outliers.append(sid)
+            elif delta >= self.outlier_trust_delta:
+                self._session_outlier.add(sid)
+                new_outliers.append(sid)
+        return new_outliers
 
     def sessions_modified(self, key: str) -> int:
         """How many distinct sessions has this field been modified in?"""
@@ -64,23 +98,33 @@ class UserProfile:
     def propose_amendment(self, key: str, value: str) -> dict | None:
         """If field modified >= threshold sessions, propose a constitutional upgrade.
 
+        Excludes outlier sessions from the count. An amendment requires
+        consistent behavior across normal sessions — not a single extreme event.
+
         Returns a proposal dict, or None if threshold not met.
         """
         if key not in EVOLVABLE_FIELDS:
             return None
-        count = self.sessions_modified(key)
+        raw_sessions = self._field_sessions.get(key, set())
+        clean_sessions = raw_sessions - self._session_outlier
+        count = len(clean_sessions)
         if count < self.amendment_threshold:
             return None
+
+        excluded = len(raw_sessions) - count
+        reason = (
+            f"Permanent user trait detected: '{key}' was modified to "
+            f"'{value}' in {count}/{len(raw_sessions)} normal sessions"
+        )
+        if excluded:
+            reason += f" ({excluded} outlier sessions excluded)."
+        reason += " This is no longer a temporary adaptation — it's who this user is."
 
         return {
             "target_blueprint_key": key,
             "new_baseline": value,
             "trigger_condition": f"cross_session_pattern:{key}",
-            "human_reason": (
-                f"Permanent user trait detected: '{key}' was modified to "
-                f"'{value}' in {count} different sessions. "
-                f"This is no longer a temporary adaptation — it's who this user is."
-            ),
+            "human_reason": reason,
         }
 
     @property
