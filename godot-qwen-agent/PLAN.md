@@ -5960,3 +5960,69 @@ hitl.submit_decision(ticket_id, "approve")
 - [x] `python demo/demo_hitl.py` — 10/10 通过
 - [x] `pytest tests/ -q` — 854/854 通过, 0 回归
 - [x] `ESCALATE_TO_HUMAN` 不再是死胡同
+
+---
+
+## Phase 25: Contract Renegotiator — 从被动适应到主动提议
+
+### 完成日期
+
+2026-05-29
+
+### 定位
+
+Phase 24 让系统能"求助"。Phase 25 让系统能"提建议"——当 MemoryStore 检测到某个契约持续恶化，Agent 主动生成改进方案，通过非阻塞通道提交人类审批。
+
+关键架构决策：**不把 Proposal 伪装成 HumanTicket。**
+
+| 维度 | HumanTicket (Phase 24) | RenegotiationProposal (Phase 25) |
+|------|----------------------|----------------------------------|
+| 性质 | 阻塞型求助 | 非阻塞型建议 |
+| 触发 | RepairBudget 耗尽 | MemoryStore 检测慢性恶化 |
+| 存储 | human_tickets 表 | proposals 表（独立） |
+| 事件 | human_intervention_required | renegotiation_proposed |
+| 审批 | submit_decision() | resolve_proposal() |
+
+**同一个 HITLGateway，两条语义隔离的路径。**
+
+### 核心设计
+
+```
+RelationshipMemoryStore.get_chronic_violators(threshold=3)
+    ↓ 发现持续恶化的 blueprint
+ContractRenegotiator
+    ↓ 生成 RenegotiationProposal(suggested_action="...")
+HITLGateway.submit_proposal(proposal)
+    ↓ proposals 表（非 human_tickets 表）
+    ↓ renegotiation_proposed event（非 human_intervention_required）
+[人类审批]
+    ↓ hitl.resolve_proposal(id, approved=True)
+    ↓ ticket_resolved event
+```
+
+### Memory Inspector
+
+```sql
+SELECT blueprint_fingerprint,
+       COUNT(*) as deterioration_count,
+       MAX(dominant_violation) as top_violation
+FROM health_transitions
+WHERE timestamp >= ? AND compliance_delta < 0
+GROUP BY blueprint_fingerprint
+HAVING COUNT(*) >= ?
+```
+
+### 新增
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `core/contracts/composition.py` | 修改 | RenegotiationProposal dataclass, +renegotiation_proposed event |
+| `core/adapters/persistence.py` | 修改 | proposals 表, create/resolve/get_pending_proposals, get_chronic_violators |
+| `core/adapters/hitl_gateway.py` | 修改 | submit_proposal() + resolve_proposal() |
+| `demo/demo_renegotiate.py` | 新增 | 8/8 断言 |
+
+### 验证
+
+- [x] `python demo/demo_renegotiate.py` — 8/8 通过
+- [x] `python demo/demo_hitl.py` — 10/10 通过（Phase 24 不受影响）
+- [x] `pytest tests/ -q` — 854/854 通过, 0 回归

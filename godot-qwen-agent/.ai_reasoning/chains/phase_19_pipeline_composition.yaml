@@ -493,6 +493,32 @@ future_guidance:
     priority: medium
     phase_applicable: "Phase 24+"
 
+  contract_renegotiator:
+    summary: "ContractRenegotiator turns chronic violations into renegotiation proposals"
+    detail: "Phase 25 adds Memory Inspector (get_chronic_violators) and
+      RenegotiationProposal as a non-blocking counterpart to HumanTicket.
+      Critical design: proposals use a SEPARATE proposals table and emit
+      renegotiation_proposed (not human_intervention_required). This prevents
+      semantic contamination — HumanTicket = blocking emergency ('I am stuck'),
+      RenegotiationProposal = non-blocking suggestion ('consider changing X').
+      The HITLGateway now has two clean paths: request_intervention (blocking)
+      and submit_proposal (non-blocking). Both share the same EventSink
+      infrastructure but are semantically isolated."
+    priority: high
+    phase_applicable: "Phase 25+"
+
+  semantic_separation:
+    summary: "Blocking emergencies and non-blocking proposals must use separate data paths"
+    detail: "The temptation to 'whitewash' proposals as HumanTickets (reusing
+      the same table with a type field) must be resisted. Boolean blindness
+      results: human reviewers can't distinguish urgent interventions from
+      optimization suggestions. The fix: separate SQLite tables (human_tickets
+      vs proposals), separate event types (human_intervention_required vs
+      renegotiation_proposed), separate gateway methods (submit_decision vs
+      resolve_proposal). Same infrastructure, clean semantics."
+    priority: critical
+    phase_applicable: "Phase 25+"
+
 anti_patterns:
   - "Putting resolve() or any matching algorithm on CompositionBlueprint (data model)"
   - "SourceRouter producing I/O, network calls, or state mutation (must be pure)"
@@ -551,3 +577,6 @@ anti_patterns:
   - "HITLGateway polling or using an external message queue for MVP — sink already has the events, just scan it"
   - "HumanTicket as a mutable state machine instead of a frozen snapshot — tickets are records, not living objects"
   - "Forgetting to emit ticket_resolved after human decision — breaks the audit trail"
+  - "Whitewashing proposals as HumanTickets with a 'type' field — semantic contamination. Use separate table + event type"
+  - "Blocking execution while waiting for proposal approval — proposals are non-blocking suggestions, not emergency interventions"
+  - "Skipping chronic violator scan before generating proposal — proposals must be data-driven, not arbitrary"
