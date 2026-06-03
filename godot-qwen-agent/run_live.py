@@ -62,6 +62,22 @@ print(f"  trust: {trust:.2f} | sessions: {profile.session_count}")
 print(f"  /quit to exit | /new to start fresh conversation")
 print(f"{'='*50}")
 
+# ── Proposal application helper (dedup 3 duplicate blocks) ──
+def _apply_proposal(
+    prop: dict, bp, engine, profile, trust: float, label: str = "",
+) -> bool:
+    """Single entry point for all proposal evaluation + application."""
+    accepted, reason = engine.evaluate(prop, bp, trust)
+    if accepted:
+        ok, msg = bp.apply_proposal(prop["target_blueprint_key"], prop["new_value"])
+        if ok:
+            engine.record_evolution(trust)
+            profile.record_modification(prop["target_blueprint_key"], prop["new_value"])
+            if label:
+                print(f"  [{label}] {prop['target_blueprint_key']} -> {prop['new_value']}")
+            return True
+    return False
+
 # ── Boss 2: Explicit user command detection ──
 def _detect_explicit_command(text: str) -> tuple[str, str] | None:
     """Detect explicit user instructions and return (target_key, new_value)."""
@@ -216,17 +232,11 @@ while True:
             trust = max(0.0, trust - 0.03)
     trust_delta = trust - trust_before
 
-    # ── Apply proposals ──
+    # ── Apply pending proposals ──
     for prop in list(pending):
-        accepted, reason = engine.evaluate(prop, bp, trust)
-        if accepted:
-            ok, msg = bp.apply_proposal(prop["target_blueprint_key"], prop["new_value"])
-            if ok:
-                engine.record_evolution(trust)
-                profile.record_modification(prop["target_blueprint_key"], prop["new_value"])
-                event = f"[R{round_count}] {prop['target_blueprint_key']}: {prop.get('old_value','?')} -> {prop['new_value']}"
-                contract_events.append(event)
-                print(f"  [CONTRACT EVOLVED] {event}")
+        if _apply_proposal(prop, bp, engine, profile, trust, label="CONTRACT EVOLVED"):
+            event = f"[R{round_count}] {prop['target_blueprint_key']}: -> {prop['new_value']}"
+            contract_events.append(event)
         pending.remove(prop)
 
     # ── Boss 2: Explicit user commands bypass Trust gate ──
@@ -239,25 +249,13 @@ while True:
             "trigger_condition": "user_said_so",
             "human_reason": f"User explicitly requested: '{user[:40]}'.",
         }
-        accepted, reason = engine.evaluate(cmd_prop, bp, trust)
-        if accepted:
-            ok, msg = bp.apply_proposal(cmd_prop["target_blueprint_key"], cmd_prop["new_value"])
-            if ok:
-                engine.record_evolution(trust)
-                profile.record_modification(cmd_prop["target_blueprint_key"], cmd_prop["new_value"])
-                print(f"  [USER COMMAND] {cmd_prop['target_blueprint_key']} -> {cmd_prop['new_value']}")
+        _apply_proposal(cmd_prop, bp, engine, profile, trust, label="USER COMMAND")
 
     # ── SignalInterpreter: signal → Proposals → EvolutionEngine ──
     if USE_SEMANTIC and sem is not None and dim:
         sig_proposals = signal_interpret(dim, score, trust, bp.snapshot, user)
         for sp in sig_proposals:
-            accepted, reason = engine.evaluate(sp, bp, trust)
-            if accepted:
-                ok, msg = bp.apply_proposal(sp["target_blueprint_key"], sp["new_value"])
-                if ok:
-                    engine.record_evolution(trust)
-                    profile.record_modification(sp["target_blueprint_key"], sp["new_value"])
-                    print(f"  [SIGNAL→CONTRACT] {sp['target_blueprint_key']} -> {sp['new_value']} ({sp['human_reason'][:60]})")
+            _apply_proposal(sp, bp, engine, profile, trust, label="SIGNAL→CONTRACT")
 
     # ── Build prompt from Blueprint (data-driven, no hardcoded constraints) ──
     contract = build_contract_directive(bp.snapshot)
@@ -333,6 +331,8 @@ while True:
         auditor.audit_async(
             history[-20:], bp.snapshot, datetime.now().strftime("%H:%M"),
             callback=lambda p: pending.append(p) if p else None,
+            schema=BLUEPRINT_SCHEMA,
+            rejection_log=bp.rejection_log,
         )
 
     # ── Profile ──

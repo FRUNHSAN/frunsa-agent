@@ -79,19 +79,17 @@ class ContractAuditor:
         current_blueprint: dict,
         current_time: str = "",
         callback: Any = None,
+        schema: dict | None = None,
+        rejection_log: list[dict] | None = None,
     ) -> None:
-        """Launch async audit in a background thread.
-
-        Args:
-            history:           Last N rounds of user messages
-            current_blueprint: Current contract fields
-            current_time:      ISO timestamp or "02:30 AM" style
-            callback:          Called with (proposal_dict | None) on completion
-        """
+        """Launch async audit in a background thread."""
         self._call_count += 1
 
         def _run():
-            proposal = self._audit_sync(history, current_blueprint, current_time)
+            proposal = self._audit_sync(
+                history, current_blueprint, current_time,
+                schema=schema, rejection_log=rejection_log,
+            )
             if callback:
                 callback(proposal)
 
@@ -100,13 +98,32 @@ class ContractAuditor:
 
     def _audit_sync(
         self, history: list[str], blueprint: dict, current_time: str,
+        schema: dict | None = None,
+        rejection_log: list[dict] | None = None,
     ) -> dict | None:
         """Synchronous audit — called from background thread."""
-        user_prompt = (
-            f"当前时间: {current_time or '未知'}\n"
-            f"当前 Blueprint 状态: {json.dumps(blueprint, ensure_ascii=False)}\n"
-            f"最近 {len(history)} 轮用户输入:\n"
-        )
+        parts = [
+            f"当前时间: {current_time or '未知'}",
+            f"当前 Blueprint 状态: {json.dumps(blueprint, ensure_ascii=False)}",
+        ]
+
+        # ── Schema injection: System 2 now sees valid fields ──
+        if schema:
+            parts.append(
+                f"\n[可修改的契约字段及合法值]\n"
+                f"{json.dumps(schema, ensure_ascii=False)}\n"
+                f"你只能修改以上字段，new_value 必须是 allowed_values 之一。"
+            )
+
+        # ── Rejection history: System 2 learns from past mistakes ──
+        if rejection_log:
+            parts.append(
+                f"\n[最近被拒绝的提案 — 不要再重复]\n"
+                f"{json.dumps(rejection_log[-5:], ensure_ascii=False)}"
+            )
+
+        user_prompt = "\n".join(parts)
+        user_prompt += f"\n\n最近 {len(history)} 轮用户输入:\n"
         for i, msg in enumerate(history, 1):
             user_prompt += f"  Round {i}: {msg}\n"
         user_prompt += "\n请分析是否有隐式契约修改信号。严格按 JSON Schema 输出。"

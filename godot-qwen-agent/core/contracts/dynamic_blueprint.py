@@ -53,6 +53,7 @@ class DynamicBlueprint:
     fields: dict[str, Any] = field(default_factory=dict)
     _history: list[dict[str, Any]] = field(default_factory=list)
     _applied_count: int = 0
+    _rejection_log: list[dict] = field(default_factory=list)  # for System 2
     _baseline: dict[str, Any] = field(default_factory=dict)
     _last_modified: dict[str, float] = field(default_factory=dict)
     _round_counter: int = 0
@@ -77,6 +78,7 @@ class DynamicBlueprint:
           - Min autonomy: execution_autonomy can't drop below min_autonomy
         """
         if target_key in CONSTITUTION:
+            self._log_rejection(target_key, new_value, f"Gene lock: immutable")
             return False, f"Gene lock: '{target_key}' is immutable."
 
         # ── Schema validation ──
@@ -85,17 +87,21 @@ class DynamicBlueprint:
             field_schema = BLUEPRINT_SCHEMA.get(target_key)
             if field_schema and field_schema["type"] == "enum":
                 if new_value not in field_schema["values"]:
+                    self._log_rejection(target_key, new_value,
+                        f"Schema: '{new_value}' not in {field_schema['values']}")
                     return False, (
                         f"Schema violation: '{new_value}' not in "
                         f"{field_schema['values']} for '{target_key}'."
                     )
         except ImportError:
-            pass  # Schema not available, skip validation
+            pass
 
         # ── Cooldown guard ──
         if not ignore_cooldown and target_key in self._last_modified:
             rounds_since = self._round_counter - self._last_modified[target_key]
             if rounds_since < self.cooldown_rounds:
+                self._log_rejection(target_key, new_value,
+                    f"Cooldown: changed {rounds_since}r ago")
                 return False, (
                     f"Cooldown active: '{target_key}' changed "
                     f"{rounds_since} rounds ago (needs {self.cooldown_rounds})."
@@ -108,6 +114,8 @@ class DynamicBlueprint:
             new_num = AUTONOMY_SCALE.get(new_value, 99)
             min_num = AUTONOMY_SCALE.get(self.min_autonomy, 1)
             if new_num < min_num:
+                self._log_rejection(target_key, new_value,
+                    f"Min autonomy floor: {self.min_autonomy}")
                 return False, (
                     f"Min autonomy floor: can't drop below "
                     f"'{self.min_autonomy}'. Rejecting '{new_value}'."
@@ -188,6 +196,18 @@ class DynamicBlueprint:
         return changes
 
     # ── Enforcement interface ──
+    def _log_rejection(self, key: str, value: Any, reason: str) -> None:
+        self._rejection_log.append({
+            "key": key, "value": str(value),
+            "reason": reason, "round": self._round_counter,
+        })
+        if len(self._rejection_log) > 20:
+            self._rejection_log = self._rejection_log[-20:]
+
+    @property
+    def rejection_log(self) -> list[dict]:
+        return list(self._rejection_log)
+
     def enforce(self, key: str) -> Any | None:
         """Hard read of a contract field. For code-level enforcement.
 
