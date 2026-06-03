@@ -115,4 +115,18 @@ class ToolResult:
     data: Any = None
     error: str | None = None
     contract_violation: ContractViolation | None = None
+    # Phase 26 (PLAN2): when violation is INTENTIONAL, this carries the
+    # "moral intuition" — why the Agent chose to violate this contract
+    higher_value_reason: str | None = None
     timestamp: float = field(default_factory=time.time)
+
+    @property
+    def is_intentional_override(self) -> bool:
+        """True if this is a deliberate, trust-building violation (PLAN2).
+        Intentional violations bypass repair and build trust — they are
+        NOT failures. Agent chose to violate for a higher value.
+        """
+        return (
+            self.contract_violation is not None
+            and self.contract_violation == ContractViolation.INTENTIONAL_VIOLATION
+        )

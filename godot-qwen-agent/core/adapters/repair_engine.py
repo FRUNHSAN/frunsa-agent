@@ -167,6 +167,10 @@ class SelfRepairEngine:
         Only acts when severity is degraded or critical. Healthy reports
         produce no actions — the system is fine.
 
+        PLAN2: Intentional violations (INTENTIONAL_VIOLATION) are SKIPPED.
+        They are not failures — they are trust-building choices made by the
+        Agent for a higher value. They bypass repair entirely.
+
         Args:
             report: Health assessment from ContractHealthEvaluator
             sink:   Current event state for context
@@ -185,6 +189,11 @@ class SelfRepairEngine:
         for violation_type, count in report.violation_counts.items():
             if count == 0:
                 continue
+
+            # PLAN2: intentional violations never trigger repair
+            if violation_type == ContractViolation.INTENTIONAL_VIOLATION:
+                continue
+
             if not self._budget.can_repair(violation_type):
                 continue
 
@@ -343,6 +352,33 @@ class SelfRepairEngine:
                 "applied": result["applied"],
                 "budget_remaining": (
                     self._budget.max_total - self._budget.total_used
+                ),
+            },
+        ))
+
+    def record_trust_accumulation(
+        self, violation_type: str, reason: str, impact_score: int = 5,
+    ) -> None:
+        """Record a trust-building intentional violation (PLAN2).
+
+        Intentional violations are NOT failures — they demonstrate moral
+        intuition. The Agent chose to violate a contract for a higher value
+        (user fatigue, emergency, emotional resonance). This builds trust.
+        """
+        from core.contracts.composition import CompositionEvent
+
+        self._emit(CompositionEvent(
+            event_type="trust_accumulated",
+            correlation_id="trust",
+            timestamp=time.time(),
+            context={
+                "violation_type": violation_type,
+                "higher_value_reason": reason,
+                "impact_score": impact_score,
+                "message": (
+                    f"Trust accumulation (+{impact_score}): "
+                    f"Agent intentionally overrode contract for higher value. "
+                    f"Reason: {reason}"
                 ),
             },
         ))

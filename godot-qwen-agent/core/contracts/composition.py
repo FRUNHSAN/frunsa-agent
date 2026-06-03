@@ -238,7 +238,7 @@ class CompositionEvent:
         "chunker_instantiated", "document_failed", "assembly_complete",
         "tool_executed", "repair_attempted", "repair_budget_exhausted",
         "human_intervention_required", "ticket_resolved",
-        "renegotiation_proposed",
+        "renegotiation_proposed", "trust_accumulated",
     ]
     correlation_id: str
     timestamp: float
@@ -272,6 +272,9 @@ class ContractViolation(str, Enum):
     # Phase 22a: tool/function-calling violations
     TOOL_NOT_FOUND = "tool_not_found"
     TOOL_PARAM_MISMATCH = "tool_param_mismatch"
+
+    # Phase 26 (PLAN2): intentional — Agent chooses to violate for a higher value
+    INTENTIONAL_VIOLATION = "intentional_violation"
 
 
 # ── Severity Mapping (Phase 20) ─────────────────────────────────────
@@ -312,7 +315,12 @@ class SeverityMapping:
 
     @classmethod
     def default(cls) -> SeverityMapping:
-        """Factory producing sensible defaults for Phase 20 + Phase 22a."""
+        """Factory producing sensible defaults for Phase 20 + Phase 22a.
+
+        Note: INTENTIONAL_VIOLATION is deliberately excluded — it does not
+        reduce severity or compliance. Intentional violations are trust-building
+        events, not failures (PLAN2 axiom 2: Co-creation > Obedience).
+        """
         return cls(rules=(
             SeverityRule(
                 violation_type=ContractViolation.UNKNOWN_CHUNKER_STRATEGY,

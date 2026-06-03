@@ -1044,7 +1044,7 @@ class TestContractViolationEnum:
         d = {ContractViolation.UNKNOWN_CHUNKER_STRATEGY: 1}
         assert d["unknown_chunker_strategy"] == 1
 
-    def test_all_six_categories_defined(self):
+    def test_all_seven_categories_defined(self):
         names = {m.name for m in ContractViolation}
         assert names == {
             "UNKNOWN_CHUNKER_STRATEGY",
@@ -1053,6 +1053,7 @@ class TestContractViolationEnum:
             "OUTPUT_CONTRACT_VIOLATION",
             "TOOL_NOT_FOUND",
             "TOOL_PARAM_MISMATCH",
+            "INTENTIONAL_VIOLATION",
         }
 
 
@@ -1998,3 +1999,130 @@ class TestRelationshipMemoryStore:
         )
         history = store.get_history("fp-abc")
         assert history[0]["lifecycle"] == "draft"
+
+
+# ── PLAN2: Intentional Violation ────────────────────────────────────
+
+class TestIntentionalViolation:
+    """PLAN2 core test: intentional violations bypass repair and build trust."""
+
+    def test_intentional_violation_not_in_severity_mapping(self):
+        """Intentional violations must NOT appear in default SeverityMapping —
+        they don't reduce compliance or trigger repair."""
+        m = SeverityMapping.default()
+        intentional_rules = [
+            r for r in m.rules
+            if r.violation_type == ContractViolation.INTENTIONAL_VIOLATION
+        ]
+        assert len(intentional_rules) == 0, (
+            "INTENTIONAL_VIOLATION must NOT be in SeverityMapping — "
+            "it is a trust-building event, not a failure"
+        )
+
+    def test_is_intentional_override_property(self):
+        """ToolResult.is_intentional_override returns True only for INTENTIONAL."""
+        from core.contracts.tool import ToolResult
+        # Normal violation — not intentional
+        r1 = ToolResult(
+            call_id="a", tool_name="t", success=False,
+            contract_violation=ContractViolation.TOOL_NOT_FOUND,
+        )
+        assert not r1.is_intentional_override
+
+        # Intentional violation — trust-building
+        r2 = ToolResult(
+            call_id="b", tool_name="t", success=True,
+            contract_violation=ContractViolation.INTENTIONAL_VIOLATION,
+            higher_value_reason="User expressed fatigue; reducing cognitive load",
+        )
+        assert r2.is_intentional_override
+        assert r2.higher_value_reason is not None
+
+    def test_repair_engine_skips_intentional_violations(self):
+        """SelfRepairEngine.decide() must skip INTENTIONAL_VIOLATION
+        and not generate repair actions for it."""
+        from core.adapters.event_sink import ContractAwareEventSink
+        from core.adapters.health_evaluator import ContractHealthEvaluator
+
+        bp = CompositionBlueprint.from_dict({"version": "1.0.0"})
+        sink = ContractAwareEventSink()
+        evaluator = ContractHealthEvaluator()
+
+        # Simulate a mix: 1 intentional + 1 real violation
+        sink(CompositionEvent(
+            event_type="document_failed",
+            correlation_id="doc-1",
+            timestamp=time.time(),
+            context={
+                "contract_violation": ContractViolation.INTENTIONAL_VIOLATION,
+                "blueprint_lifecycle": "active",
+            },
+        ))
+        sink(CompositionEvent(
+            event_type="document_failed",
+            correlation_id="doc-2",
+            timestamp=time.time(),
+            context={
+                "contract_violation": ContractViolation.TOOL_NOT_FOUND,
+                "blueprint_lifecycle": "active",
+            },
+        ))
+
+        report = evaluator.evaluate(sink)
+        engine = SelfRepairEngine(bp)
+
+        actions = engine.decide(report, sink)
+        # Should have action for TOOL_NOT_FOUND
+        assert len(actions) >= 1
+        # But NONE of the actions should be for INTENTIONAL_VIOLATION
+        intentional_actions = [
+            a for a in actions
+            if a.violation_type == ContractViolation.INTENTIONAL_VIOLATION
+        ]
+        assert len(intentional_actions) == 0, (
+            "INTENTIONAL_VIOLATION must not generate repair actions"
+        )
+
+    def test_record_trust_accumulation(self):
+        """SelfRepairEngine.record_trust_accumulation() emits trust_accumulated."""
+        events = []
+        bp = CompositionBlueprint.from_dict({"version": "1.0.0"})
+        engine = SelfRepairEngine(bp, event_sink=events.append)
+
+        engine.record_trust_accumulation(
+            violation_type=ContractViolation.INTENTIONAL_VIOLATION,
+            reason="User fatigue; skipped non-critical validation",
+            impact_score=5,
+        )
+
+        trust_events = [e for e in events if e.event_type == "trust_accumulated"]
+        assert len(trust_events) == 1
+        ctx = dict(trust_events[0].context)
+        assert ctx["impact_score"] == 5
+        assert "User fatigue" in ctx["higher_value_reason"]
+        assert "Trust accumulation" in ctx["message"]
+
+    def test_intentional_violation_does_not_affect_compliance(self):
+        """A sink with only intentional violations should still be healthy."""
+        from core.adapters.event_sink import ContractAwareEventSink
+        from core.adapters.health_evaluator import ContractHealthEvaluator
+
+        sink = ContractAwareEventSink()
+        evaluator = ContractHealthEvaluator()
+
+        sink(CompositionEvent(
+            event_type="document_failed",
+            correlation_id="doc-1",
+            timestamp=time.time(),
+            context={
+                "contract_violation": ContractViolation.INTENTIONAL_VIOLATION,
+                "blueprint_lifecycle": "active",
+            },
+        ))
+
+        report = evaluator.evaluate(sink)
+        # Since SeverityMapping has no rule for INTENTIONAL_VIOLATION,
+        # it should NOT be flagged as degraded/critical
+        # The violation exists in the sink but doesn't reduce health
+        assert ContractViolation.INTENTIONAL_VIOLATION not in dict(report.violation_counts) or \
+            report.severity == "healthy"
