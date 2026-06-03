@@ -160,19 +160,29 @@ These thresholds were calibrated against a real human subject who was unaware of
 
 ### Fatigue Detection
 - **Trigger keywords**: "好累" (tired), "简单" (simple/brief) — single input containing both
-- **Energy transition**: NEUTRAL → LOW on the exact round containing fatigue keywords
+- **Energy transition**: NEUTRAL -> LOW on the exact round containing fatigue keywords
 - **Energy persistence**: LOW maintained across subsequent rounds (does not snap back)
-- **Response compression**: 156 chars → 34 chars (78% reduction) perceived as "listening", not as "broken"
+- **Response compression**: 78% reduction perceived as "listening", not as "broken"
 
 ### Trust Dynamics
-- **Trust stability**: trust_watermark remained at 0.5 throughout — no erosion during adaptation
+- **Asymmetric EMA**: negative signals alpha=0.30, positive signals alpha=0.08
+- **Trust stability**: no erosion during adaptation when intentional violation is perceived as agency
 - **Key finding**: INTENTIONAL_VIOLATION for fatigue did NOT reduce perceived trust. The user attributed the change to the agent's agency ("it listens"), not to a system failure.
+
+### Bayesian Engine Parameters
+- **Variance decay gamma**: 0.85 (each calm round shrinks variance by 15%)
+- **Variance floor**: 0.01 (prevents infinite certainty)
+- **Uncertain threshold**: 0.50 (above this -> conservative mode)
+- **Peace threshold**: 5 rounds (then baseline drift activates at +0.01/round toward 0.3)
+- **Energy confirm window**: 2 rounds (prevents false fatigue snap)
+- **Renegotiation trust threshold**: 0.55 (calibrated from blind test, was 0.7)
 
 ### Design Implications for PLAN3
 - `RelationalEvaluator` keyword heuristics are sufficient for Level 1 fatigue detection (Chinese + English)
-- Response compression ratio should target ~75-80% reduction for LOW energy mode
-- Trust gating for RenegotiationWatcher (0.7 threshold) is too high — real trust builds slowly. Consider 0.55-0.6 for first proposal.
+- Response compression ratio should target ~78% reduction for LOW energy mode
+- Trust gating for RenegotiationWatcher (0.55 threshold) calibrated from blind test — real trust builds slowly
 - EmbodiedReflex should NOT announce "I detected fatigue" — the subject felt the adaptation was natural, not mechanical
+
 
 ## PLAN2/3/4 Architectural Invariants (Phase 26-29)
 
