@@ -8,6 +8,7 @@ from .composer import AssemblyError, PipelineAssembler, PipelineComposer, Source
 from .event_sink import ContractAwareEventSink
 from .factory import create_step_factory
 from .health_evaluator import ContractHealthEvaluator
+from .hitl_gateway import HITLGateway
 from .persistence import RelationshipMemoryStore
 from .repair_engine import RepairAction, RepairBudget, RepairStrategy, SelfRepairEngine
 from .generator_adapter import GenerationAdapter, GenerationBackend, StreamingBackend

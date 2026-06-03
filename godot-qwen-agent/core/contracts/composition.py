@@ -237,6 +237,7 @@ class CompositionEvent:
         "rule_matched", "rule_skipped", "fallback_used",
         "chunker_instantiated", "document_failed", "assembly_complete",
         "tool_executed", "repair_attempted", "repair_budget_exhausted",
+        "human_intervention_required", "ticket_resolved",
     ]
     correlation_id: str
     timestamp: float
@@ -390,3 +391,28 @@ class ContractHealthReport:
             raise ValueError(
                 f"compliance_rate must be in [0.0, 1.0], got {self.compliance_rate}"
             )
+
+
+# ── Human Ticket (Phase 24) ──────────────────────────────────────────
+
+@dataclass(frozen=True)
+class HumanTicket:
+    """A frozen snapshot of a contract failure that requires human intervention.
+
+    Created by HITLGateway when SelfRepairEngine exhausts its RepairBudget.
+    Humans resolve the ticket by providing a directive (approve fallback,
+    suggest alternative, override parameter, etc.).
+
+    Attributes:
+        ticket_id:            Short unique ID for human reference
+        blueprint_fingerprint: Which contract this ticket belongs to
+        report_json:          JSON-serialized ContractHealthReport at failure time
+        created_at:           epoch seconds when the ticket was created
+        status:               PENDING | RESOLVED | IGNORED
+    """
+
+    ticket_id: str
+    blueprint_fingerprint: str
+    report_json: str = "{}"
+    created_at: float = field(default_factory=time.time)
+    status: Literal["PENDING", "RESOLVED", "IGNORED"] = "PENDING"

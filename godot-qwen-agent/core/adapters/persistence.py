@@ -114,6 +114,14 @@ class RelationshipMemoryStore:
 
         CREATE INDEX IF NOT EXISTS idx_lifecycle
             ON health_transitions(lifecycle);
+
+        CREATE TABLE IF NOT EXISTS human_tickets (
+            ticket_id TEXT PRIMARY KEY,
+            blueprint_fingerprint TEXT NOT NULL,
+            report_json TEXT NOT NULL DEFAULT '{}',
+            status TEXT NOT NULL DEFAULT 'PENDING',
+            created_at REAL NOT NULL
+        );
     """
 
     def __init__(self, db_path: str = ":memory:") -> None:
@@ -266,6 +274,46 @@ class RelationshipMemoryStore:
             ).fetchone()
 
         return row[0] if row else 0
+
+    # ── Human Tickets (Phase 24) ──────────────────────────────────
+
+    def create_ticket(
+        self,
+        ticket_id: str,
+        blueprint_fingerprint: str,
+        report_json: str,
+        created_at: float,
+    ) -> None:
+        """Create a human intervention ticket."""
+        with self._lock:
+            conn = self._get_conn()
+            conn.execute(
+                """INSERT OR REPLACE INTO human_tickets
+                   (ticket_id, blueprint_fingerprint, report_json, status, created_at)
+                   VALUES (?, ?, ?, 'PENDING', ?)""",
+                (ticket_id, blueprint_fingerprint, report_json, created_at),
+            )
+            conn.commit()
+
+    def resolve_ticket(self, ticket_id: str, decision: str) -> None:
+        """Resolve a ticket with a human decision (APPROVED/REJECTED)."""
+        status = "RESOLVED" if decision.upper() in ("APPROVE", "APPROVED") else "IGNORED"
+        with self._lock:
+            conn = self._get_conn()
+            conn.execute(
+                "UPDATE human_tickets SET status = ? WHERE ticket_id = ?",
+                (status, ticket_id),
+            )
+            conn.commit()
+
+    def get_pending_tickets(self) -> list[dict]:
+        """Return all unresolved tickets."""
+        with self._lock:
+            conn = self._get_conn()
+            rows = conn.execute(
+                "SELECT * FROM human_tickets WHERE status = 'PENDING'"
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     # ── Lifecycle ─────────────────────────────────────────────────
 
