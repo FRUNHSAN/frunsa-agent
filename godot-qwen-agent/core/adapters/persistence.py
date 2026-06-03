@@ -122,6 +122,17 @@ class RelationshipMemoryStore:
             status TEXT NOT NULL DEFAULT 'PENDING',
             created_at REAL NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS proposals (
+            proposal_id TEXT PRIMARY KEY,
+            blueprint_fingerprint TEXT NOT NULL,
+            violation_type TEXT NOT NULL,
+            deterioration_count INTEGER DEFAULT 0,
+            suggested_action TEXT DEFAULT '',
+            severity TEXT DEFAULT 'degraded',
+            status TEXT NOT NULL DEFAULT 'PENDING',
+            created_at REAL NOT NULL
+        );
     """
 
     def __init__(self, db_path: str = ":memory:") -> None:
@@ -257,6 +268,33 @@ class RelationshipMemoryStore:
 
         return row[0] if row else 0
 
+    def get_chronic_violators(
+        self, threshold: int = 3, days: int = 7
+    ) -> list[dict]:
+        """Find blueprints with sustained deterioration.
+
+        Returns blueprints where deterioration_count >= threshold
+        in the last N days. These are candidates for renegotiation.
+        """
+        cutoff = time.time() - (days * 86400)
+
+        with self._lock:
+            conn = self._get_conn()
+            rows = conn.execute(
+                """SELECT blueprint_fingerprint,
+                          COUNT(*) as deterioration_count,
+                          MAX(dominant_violation) as top_violation,
+                          MAX(severity_after) as current_severity
+                   FROM health_transitions
+                   WHERE timestamp >= ?
+                     AND compliance_delta < 0
+                   GROUP BY blueprint_fingerprint
+                   HAVING COUNT(*) >= ?""",
+                (cutoff, threshold),
+            ).fetchall()
+
+        return [dict(r) for r in rows]
+
     def get_deterioration_count(
         self, blueprint_fingerprint: str, days: int = 7
     ) -> int:
@@ -307,11 +345,57 @@ class RelationshipMemoryStore:
             conn.commit()
 
     def get_pending_tickets(self) -> list[dict]:
-        """Return all unresolved tickets."""
+        """Return all unresolved intervention tickets."""
         with self._lock:
             conn = self._get_conn()
             rows = conn.execute(
                 "SELECT * FROM human_tickets WHERE status = 'PENDING'"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ── Proposals (Phase 25) — separate from human_tickets ────────
+
+    def create_proposal(
+        self,
+        proposal_id: str,
+        blueprint_fingerprint: str,
+        violation_type: str,
+        deterioration_count: int,
+        suggested_action: str,
+        severity: str,
+        created_at: float,
+    ) -> None:
+        """Create a non-blocking renegotiation proposal."""
+        with self._lock:
+            conn = self._get_conn()
+            conn.execute(
+                """INSERT OR REPLACE INTO proposals
+                   (proposal_id, blueprint_fingerprint, violation_type,
+                    deterioration_count, suggested_action, severity,
+                    status, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?)""",
+                (proposal_id, blueprint_fingerprint, violation_type,
+                 deterioration_count, suggested_action, severity, created_at),
+            )
+            conn.commit()
+
+    def resolve_proposal(self, proposal_id: str, approved: bool) -> None:
+        """Resolve a proposal (approved or rejected)."""
+        status = "APPROVED" if approved else "REJECTED"
+        with self._lock:
+            conn = self._get_conn()
+            conn.execute(
+                "UPDATE proposals SET status = ? WHERE proposal_id = ?",
+                (status, proposal_id),
+            )
+            conn.commit()
+
+    def get_pending_proposals(self) -> list[dict]:
+        """Return all unresolved proposals."""
+        with self._lock:
+            conn = self._get_conn()
+            rows = conn.execute(
+                "SELECT * FROM proposals WHERE status = 'PENDING'"
             ).fetchall()
         return [dict(r) for r in rows]
 

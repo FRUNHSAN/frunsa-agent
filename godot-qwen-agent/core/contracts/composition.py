@@ -238,6 +238,7 @@ class CompositionEvent:
         "chunker_instantiated", "document_failed", "assembly_complete",
         "tool_executed", "repair_attempted", "repair_budget_exhausted",
         "human_intervention_required", "ticket_resolved",
+        "renegotiation_proposed",
     ]
     correlation_id: str
     timestamp: float
@@ -416,3 +417,31 @@ class HumanTicket:
     report_json: str = "{}"
     created_at: float = field(default_factory=time.time)
     status: Literal["PENDING", "RESOLVED", "IGNORED"] = "PENDING"
+
+
+# ── Renegotiation Proposal (Phase 25) ─────────────────────────────────
+
+@dataclass(frozen=True)
+class RenegotiationProposal:
+    """A proposal to modify a contract, generated from chronic violation patterns.
+
+    When RelationshipMemoryStore detects a blueprint with sustained
+    deterioration, the ContractRenegotiator generates one of these.
+    It flows through the same HITLGateway channel as emergency tickets —
+    a proposal is just a non-urgent ticket asking for human approval.
+
+    Attributes:
+        blueprint_fingerprint: Which contract needs renegotiation
+        violation_type:        The dominant violation driving this proposal
+        deterioration_count:   How many times this has deteriorated recently
+        suggested_action:      Human-readable suggested fix
+        severity:              Current health severity
+        created_at:            epoch seconds
+    """
+
+    blueprint_fingerprint: str
+    violation_type: str
+    deterioration_count: int = 0
+    suggested_action: str = ""
+    severity: str = "degraded"
+    created_at: float = field(default_factory=time.time)

@@ -9,6 +9,7 @@ from .composition import (
     ContractLifecycle,
     ContractViolation,
     HumanTicket,
+    RenegotiationProposal,
     SeverityMapping,
     SeverityRule,
     SourceRule,

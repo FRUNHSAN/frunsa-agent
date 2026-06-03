@@ -25,6 +25,7 @@ from core.contracts.composition import (
     CompositionEvent,
     ContractHealthReport,
     HumanTicket,
+    RenegotiationProposal,
 )
 
 
@@ -138,6 +139,74 @@ class HITLGateway:
                 "decision": decision,
             },
         ))
+
+    # ── Renegotiation Proposals (Phase 25) ────────────────────────
+    #
+    # Proposals are NON-BLOCKING. The system is not stuck — it's
+    # asking for permission to evolve the contract. They use a
+    # SEPARATE proposals table (not human_tickets) and emit
+    # renegotiation_proposed (not human_intervention_required).
+    # This prevents semantic contamination of "emergency" vs "suggestion."
+
+    def submit_proposal(self, proposal: RenegotiationProposal) -> str:
+        """Submit a non-blocking renegotiation proposal.
+
+        Unlike request_intervention (which blocks execution), proposals
+        are asynchronous — the system continues running while waiting
+        for human review of the suggested contract change.
+
+        Args:
+            proposal: RenegotiationProposal with suggested action
+
+        Returns:
+            proposal_id for tracking
+        """
+        proposal_id = (
+            f"reneg_{proposal.blueprint_fingerprint[:8]}"
+            f"_{int(time.time())}"
+        )
+
+        self._memory.create_proposal(
+            proposal_id,
+            proposal.blueprint_fingerprint,
+            proposal.violation_type,
+            proposal.deterioration_count,
+            proposal.suggested_action,
+            proposal.severity,
+            time.time(),
+        )
+
+        self._sink(CompositionEvent(
+            event_type="renegotiation_proposed",
+            correlation_id=proposal_id,
+            timestamp=time.time(),
+            context={
+                "proposal_id": proposal_id,
+                "blueprint_fingerprint": proposal.blueprint_fingerprint,
+                "violation_type": proposal.violation_type,
+                "suggested_action": proposal.suggested_action,
+            },
+        ))
+
+        return proposal_id
+
+    def resolve_proposal(self, proposal_id: str, approved: bool) -> None:
+        """Resolve a proposal with human decision."""
+        self._memory.resolve_proposal(proposal_id, approved)
+        self._sink(CompositionEvent(
+            event_type="ticket_resolved",
+            correlation_id=proposal_id,
+            timestamp=time.time(),
+            context={
+                "proposal_id": proposal_id,
+                "approved": approved,
+            },
+        ))
+
+    @property
+    def pending_proposals(self) -> list[dict]:
+        """All unresolved proposals from persistence."""
+        return self._memory.get_pending_proposals()
 
     # ── Properties ────────────────────────────────────────────────
 
