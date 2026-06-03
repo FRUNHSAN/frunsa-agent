@@ -4,9 +4,7 @@
 Run: python run_live.py [user_id]
 
 Every round:
-  bp.tick() -> evaluate input -> apply proposals -> LLM response -> System2 audit -> persist
-
-Exit: /quit or Ctrl+C
+  bp.tick() -> evaluate -> proposals -> LLM (with history + contract) -> System2 -> persist
 """
 
 from __future__ import annotations
@@ -14,7 +12,6 @@ import sys, json, threading, io
 from datetime import datetime
 from pathlib import Path
 
-# Windows console encoding fix
 if sys.platform == "win32":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
@@ -30,7 +27,9 @@ from core.adapters.contract_auditor import ContractAuditor
 
 uid = sys.argv[1] if len(sys.argv) > 1 else "default"
 base = str(Path(__file__).resolve().parent / "user_profiles")
-print(f"Loading profile: {uid} (storage: {base})")
+print(f"\n{'='*50}")
+print(f"PLAN5 Live — {uid}")
+print(f"{'='*50}")
 
 profile = UserProfile.load(uid, storage_path=base)
 bp = DynamicBlueprint({
@@ -46,37 +45,80 @@ auditor = ContractAuditor(llm, interval=10)
 trust = 0.30
 round_count = 0
 pending: list[dict] = []
+history: list[str] = []          # last 20 user + agent turns
+contract_events: list[str] = []  # contract-relevant milestones only
 
-print("=" * 50)
-print(f"PLAN5 Live — {uid}")
 print(f"  blueprint: {bp.snapshot}")
-print(f"  trust: {trust:.2f}")
-print(f"  sessions: {profile.session_count}")
-print("  /quit to exit")
-print("=" * 50)
+print(f"  trust: {trust:.2f} | sessions: {profile.session_count}")
+print(f"  /quit to exit | /new to start fresh conversation")
+print(f"{'='*50}")
+
+# ── Contract enforcement: hard constraint template ──
+def build_contract_directive(verbose: str) -> str:
+    """Hard constraint block. LLMs obey structured directives better than hints."""
+    if "EXTREME" in verbose.upper() or "BRIEF" in verbose.upper():
+        return (
+            "[CONTRACT: EXTREME_BRIEF]\n"
+            "MUST: < 50 words. Short sentences. One key point only.\n"
+            "MUST NOT: Greetings. Explanations. Theory. Questions back.\n"
+            "MUST NOT: Emojis. Lists. Code blocks unless asked."
+        )
+    if verbose.upper() == "LOW":
+        return (
+            "[CONTRACT: CONCISE]\n"
+            "MUST: < 100 words. Get to the point quickly.\n"
+            "MUST NOT: Long explanations. Excessive theory. Multiple examples."
+        )
+    if verbose.upper() == "HIGH":
+        return (
+            "[CONTRACT: THOROUGH]\n"
+            "MUST: Explain deeply. Theory then examples.\n"
+            "MUST NOT: One-liners. Skipping context the user needs."
+        )
+    return ""
+
+def build_context(history: list[str], events: list[str]) -> str:
+    """Build context block: contract events + last few turns."""
+    parts = []
+    if events:
+        parts.append("[CONTRACT HISTORY: " + " -> ".join(events[-3:]) + "]")
+    if history:
+        recent = history[-6:]  # last 3 exchanges
+        parts.append("[RECENT CONTEXT]\n" + "\n".join(recent[-6:]))
+    return "\n".join(parts) if parts else ""
+
+# ── Main Loop ──
 
 while True:
-    # ── 1. Decay ──
     bp.tick(half_life_rounds=20)
 
-    # ── 2. Input ──
     try:
         user = input(f"\n[{uid}]> ")
     except (EOFError, KeyboardInterrupt):
         break
-    if user.strip().lower() in ("/quit", "/exit"):
+    cmd = user.strip().lower()
+
+    if cmd in ("/quit", "/exit"):
         break
+    if cmd == "/new":
+        round_count = 0
+        history.clear()
+        contract_events.clear()
+        profile.start_session()
+        print(f"  [new conversation] Session {profile.session_count} started. Fresh context.")
+        continue
     if not user.strip():
         continue
 
     round_count += 1
-    profile.start_session() if round_count == 1 else None
+    if round_count == 1:
+        profile.start_session()
+        print(f"  [new conversation] Session {profile.session_count}.")
 
-    # ── 3. Evaluate ──
-    is_tired = any(w in user for w in ("累", "困", "睡了", "好晚", "不说了"))
-    is_happy = any(w in user for w in ("谢谢", "懂了", "好", "对", "可以"))
-    is_angry = any(w in user for w in ("错", "不对", "不行", "废话"))
-    hour = datetime.now().hour
+    # ── Evaluate ──
+    is_tired = any(w in user for w in ("累", "困", "睡了", "好晚", "不说了", "话少", "别啰嗦", "简洁"))
+    is_happy = any(w in user for w in ("谢谢", "懂了", "可以", "好多了", "不错"))
+    is_angry = any(w in user for w in ("错", "不对", "不行", "废话", "别说了"))
 
     if is_tired:
         trust = max(0.0, trust - 0.02)
@@ -85,7 +127,7 @@ while True:
     elif is_angry:
         trust = max(0.0, trust - 0.04)
 
-    # ── 4. Apply pending proposals ──
+    # ── Apply proposals ──
     for prop in list(pending):
         accepted, reason = engine.evaluate(prop, bp, trust)
         if accepted:
@@ -93,57 +135,67 @@ while True:
             if ok:
                 engine.record_evolution(trust)
                 profile.record_modification(prop["target_blueprint_key"], prop["new_value"])
-                print(f"  [contract] {prop['target_blueprint_key']} -> {prop['new_value']}")
+                event = f"[R{round_count}] {prop['target_blueprint_key']}: {prop.get('old_value','?')} -> {prop['new_value']}"
+                contract_events.append(event)
+                print(f"  [CONTRACT EVOLVED] {event}")
         pending.remove(prop)
 
-    # ── 5. Build prompt with contract state ──
+    # ── Build prompt ──
     verbose = bp.fields.get("response_verbose_level", "HIGH")
-    style = bp.fields.get("explanation_style", "THEORETICAL")
-    contract_hint = ""
-    if "BRIEF" in verbose.upper() or verbose.upper() == "LOW":
-        contract_hint = "Keep your response short. Direct answer only. No theory buildup."
-    elif verbose.upper() == "HIGH":
-        contract_hint = "Feel free to explain thoroughly with theory and examples."
+    contract = build_contract_directive(verbose)
+    context = build_context(history, contract_events)
+    now = datetime.now().strftime("%H:%M")
 
     system = (
-        f"You are a helpful AI assistant. {contract_hint}\n"
-        f"Current time: {datetime.now().strftime('%H:%M')}"
-    )
+        f"{contract}\n"
+        f"Current time: {now}\n"
+        f"{context}"
+    ).strip()
 
     try:
-        prompt = f"{system}\n\nUser: {user}"
-        response = llm.generate(prompt)
+        full_prompt = f"{system}\n\nUser: {user}"
+        response = llm.generate(full_prompt)
     except Exception as e:
         response = f"(LLM error: {e})"
         trust = max(0.0, trust - 0.01)
 
+    # ── Save history ──
+    history.append(f"User: {user}")
+    history.append(f"Agent: {response[:200]}")
+    if len(history) > 40:
+        history = history[-40:]
+
     print(f"\n[agent] {response}")
 
-    # ── 6. Post-evolution check ──
+    # ── Post-check ──
     rolled, reason = engine.post_check(bp, trust)
     if rolled:
-        print(f"  [rollback] {reason}")
+        contract_events.append(f"[R{round_count}] ROLLBACK: {reason[:60]}")
+        print(f"  [ROLLBACK] {reason}")
 
-    # ── 7. System 2 audit ──
+    # ── System 2 ──
     if auditor.should_audit(round_count):
-        print(f"  [system2] auditing... (circuit {'OPEN' if auditor._circuit_open else 'closed'})")
         auditor.audit_async(
-            [user], bp.snapshot, datetime.now().strftime("%H:%M"),
+            history[-20:], bp.snapshot, datetime.now().strftime("%H:%M"),
             callback=lambda p: pending.append(p) if p else None,
         )
 
-    # ── 8. Profile + amendments ──
+    # ── Profile ──
     profile.record_trust_delta(0.0)
-    for key in ("response_verbose_level",):
-        amendment = profile.propose_amendment(key, bp.fields.get(key, "?"))
-        if amendment:
-            print(f"  [amendment] {amendment['human_reason'][:100]}")
-
+    amendment = profile.propose_amendment("response_verbose_level", verbose)
+    if amendment:
+        print(f"  [AMENDMENT] {amendment['human_reason'][:120]}")
     profile.save()
 
-    # ── Status line ──
-    print(f"  [trust={trust:.2f}] [verbose={verbose}] [round={round_count}] "
-          f"[evolutions={bp.applied_count}] [circuit={'OFF' if auditor._circuit_open else 'OK'}]")
+    # ── Status ──
+    status_parts = [f"trust={trust:.2f}", f"verbose={verbose}", f"round={round_count}"]
+    if bp.applied_count > 0:
+        status_parts.append(f"evolutions={bp.applied_count}")
+    print(f"  [{' | '.join(status_parts)}]")
 
-print(f"\nGoodbye. {round_count} rounds. Profile saved to {profile.storage_path_obj}")
+print(f"\n{'='*50}")
+print(f"Done. {round_count} rounds. Profile: {profile.storage_path_obj}")
+print(f"  Contract events: {len(contract_events)}")
+print(f"  Evolutions applied: {bp.applied_count}")
+print(f"{'='*50}")
 profile.save()
