@@ -154,6 +154,26 @@ These are non-negotiable. Violating any of them will break the platform contract
 | 36 | **EventSink 单向写 — 核心层只 emit，不 subscribe**: business logic (health_evaluator, repair_engine) MUST only `emit` events into EventSink. Reading/querying event history for decision-making belongs to InteractionRepository or dedicated Query adapters. EventSink Protocol defines `__call__` as the write path; read methods are implementation convenience, not architectural commitment. | phase_25_anti_corruption |
 | 37 | **LLM Provider 接入走 ToolFormatRegistry，禁止 if/elif 分支**: adding a new LLM provider MUST NOT modify `tool_adapter.py`. Register a `ToolFormatAdapter` implementation (bidirectional: `format_tools` + `parse_response`) via `ToolFormatRegistry.register()`. The USB model applies to LLM providers the same way it applies to tools and chunkers — O(1) kernel change, O(N) adapter growth. | phase_25_anti_corruption |
 
+## PLAN2 Golden Parameters (from blind test, 2026-05-29)
+
+These thresholds were calibrated against a real human subject who was unaware of PLAN2. The subject reported the system "听得进去" (listens and understands) — confirming the relational adaptation was perceptible and positive.
+
+### Fatigue Detection
+- **Trigger keywords**: "好累" (tired), "简单" (simple/brief) — single input containing both
+- **Energy transition**: NEUTRAL → LOW on the exact round containing fatigue keywords
+- **Energy persistence**: LOW maintained across subsequent rounds (does not snap back)
+- **Response compression**: 156 chars → 34 chars (78% reduction) perceived as "listening", not as "broken"
+
+### Trust Dynamics
+- **Trust stability**: trust_watermark remained at 0.5 throughout — no erosion during adaptation
+- **Key finding**: INTENTIONAL_VIOLATION for fatigue did NOT reduce perceived trust. The user attributed the change to the agent's agency ("it listens"), not to a system failure.
+
+### Design Implications for PLAN3
+- `RelationalEvaluator` keyword heuristics are sufficient for Level 1 fatigue detection (Chinese + English)
+- Response compression ratio should target ~75-80% reduction for LOW energy mode
+- Trust gating for RenegotiationWatcher (0.7 threshold) is too high — real trust builds slowly. Consider 0.55-0.6 for first proposal.
+- EmbodiedReflex should NOT announce "I detected fatigue" — the subject felt the adaptation was natural, not mechanical
+
 ## Machine Enforcement (Phase 8.0)
 
 Architectural invariants are **machine-enforced**, not just documented. Before every commit, `python -m guardrails check` runs AST-based rules. Violations of severity ERROR block the commit.
