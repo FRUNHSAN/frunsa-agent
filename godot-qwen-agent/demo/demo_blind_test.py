@@ -52,6 +52,13 @@ from core.adapters.repair_engine import SelfRepairEngine
 # For the blind test, pre-crafted responses let us control
 # exactly how the adaptation feels to the user.
 
+_BASIC_RESPONSES = {
+    "你好": "你好！有什么想了解的话题吗？直接问我就行。",
+    "谢谢": "不客气！还有什么想查的吗？",
+    "你是谁": "我是你的研究助手，可以帮你查资料、整理信息。有什么想了解的？",
+    "再见": "再见！有需要随时找我。",
+}
+
 _RESPONSES_NORMAL = {
     "量子": (
         "量子计算使用量子比特（qubit）替代经典比特。"
@@ -118,10 +125,16 @@ _GREETING = (
 def _pick_response(user_input: str, field: RelationalField) -> str:
     """Pick a response based on user's question and relational state."""
     text = user_input.lower()
-    responses = _RESPONSES_LOW_ENERGY if field.is_low_energy else _RESPONSES_NORMAL
 
+    # Basic conversation first
+    for keyword, response in _BASIC_RESPONSES.items():
+        if keyword.lower() in text:
+            return response
+
+    # Topic-specific responses (adapted to energy level)
+    responses = _RESPONSES_LOW_ENERGY if field.is_low_energy else _RESPONSES_NORMAL
     for keyword, response in responses.items():
-        if keyword in text:
+        if keyword.lower() in text:
             return response
     return responses["default"]
 
