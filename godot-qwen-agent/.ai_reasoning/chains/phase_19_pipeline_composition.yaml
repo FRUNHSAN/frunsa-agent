@@ -183,7 +183,8 @@ evidence:
     - "demo_battle.py: 24 assertions (full closed-loop: Round1→Round2→TOOL_NOT_FOUND→HealthEval→SelfRepair→Round4→PostHealth→Memory)"
     - "components/tools/simulated_search.py: 2 registered tools (web_search + brave_search), class-level fail injection"
     - "Anti-corruption layers: EventSink Protocol, InteractionRepository Protocol, ToolFormatAdapter + ToolFormatRegistry"
-    - "Full suite: 854 passed + 3 battle demos (24 + 10 + 8 assertions), 0 regression, 0 guardrail errors"
+    - "PLAN2: INTENTIONAL_VIOLATION, RelationalField + RelationalEvaluator, EmbodiedReflex, RenegotiationWatcher"
+    - "Full suite: 874 passed + 6 battle demos (24+6+10+8+11+7=66 assertions), 0 regression, 0 guardrail errors"
 
 # ── 6. Future Guidance ───────────────────────────────────────────────
 
@@ -559,6 +560,31 @@ future_guidance:
     priority: critical
     phase_applicable: "Phase 26+ (PLAN2)"
 
+  embodied_reflex:
+    summary: "EmbodiedReflex is the translation membrane between machine reality and human perception"
+    detail: "Phase 28 implements PLAN2 Axiom 1 (Tech Recesses, Relation Emerges) via
+      Scheme B: intercept ToolResult at the presentation layer, not the call layer.
+      LLM function calling runs normally (stable, auditable); user sees natural-language
+      intuition instead of tool invocations. _summarize() uses heuristics per tool
+      type (web_search, weather, calendar); Phase 32+ replaces with small-model
+      semantic summarizer. Intentional violation integration: when Agent chooses
+      INTENTIONAL_VIOLATION, intuition reflects it ('Sensing your fatigue...').
+      Failure intuition: errors become 'intuition gaps', never raw error messages."
+    priority: high
+    phase_applicable: "Phase 28+ (PLAN2)"
+
+  renegotiation_watcher:
+    summary: "RenegotiationWatcher crystallizes accumulated trust into contract evolution proposals"
+    detail: "Phase 29 completes PLAN2 Axiom 2: background scanner watches for
+      INTENTIONAL_VIOLATION events, groups by tool/contract, identifies dominant
+      reasons. When count >= threshold (3) AND trust_watermark >= 0.7, crystallizes
+      into RenegotiationProposal via HITLGateway.submit_proposal() (Phase 25 channel).
+      Trust-gated: won't propose if trust is low (Agent stays silent). This closes
+      the loop: Phase 26 (decide) -> Phase 27 (sense) -> Phase 28 (embody) ->
+      Phase 29 (evolve). The Agent doesn't just follow contracts — it co-evolves them."
+    priority: critical
+    phase_applicable: "Phase 29+ (PLAN2 complete)"
+
 anti_patterns:
   - "Putting resolve() or any matching algorithm on CompositionBlueprint (data model)"
   - "SourceRouter producing I/O, network calls, or state mutation (must be pure)"
@@ -628,3 +654,6 @@ anti_patterns:
   - "Adding INTENTIONAL_VIOLATION to SeverityMapping — intentional violations are trust events, not failures"
   - "Treating intentional violations as failures in compliance_rate — they should be excluded from severity calculation"
   - "Confusing 'I cannot do X' (passive violation) with 'I choose not to do X because Y' (intentional violation) — different event paths"
+  - "Exposing raw tool names or error messages to the user — EmbodiedReflex should translate everything into intuition"
+  - "Modifying LLM function calling to use custom semantic tags (Scheme A) — keep native function calling (Scheme B), transform at presentation layer"
+  - "RenegotiationWatcher proposing when trust is below threshold — low-trust proposals damage relationships"

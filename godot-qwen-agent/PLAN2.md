@@ -190,3 +190,129 @@ PLAN2 (Phase 26+):
 - [x] `record_trust_accumulation()` 发出 `trust_accumulated` 事件
 - [x] 仅 intentional violations 的 sink 仍为 healthy
 - [x] `pytest tests/ -q` — 859/859 通过
+
+---
+
+## 八、PLAN2 第二块基石：RelationalField + RelationalEvaluator（已完成）
+
+### 完成日期
+
+2026-05-29
+
+### Commit
+
+`aec7982 feat(plan2): RelationalField + RelationalEvaluator`
+
+### 变更
+
+| 文件 | 变更 |
+|------|------|
+| `core/contracts/relational_field.py` | `RelationalField` dataclass + `EnergyLevel`/`Urgency` enums + `trust_watermark` |
+| `core/adapters/relational_evaluator.py` | `RelationalEvaluator` — Level 1 启发式旁路传感器 |
+| `tests/unit/test_pipeline_composer.py` | 15 个 PLAN2 测试 (7 RelationalField + 8 RelationalEvaluator) |
+
+### 核心行为
+
+```
+用户: "好累，随便弄弄就行"
+    ↓
+RelationalEvaluator.evaluate(user_input, current_field)
+    ↓
+energy_level = LOW, narrative = "User shows signs of fatigue/low energy"
+    ↓
+RelationalField (frozen snapshot) 传递给 Agent
+    ↓
+Agent 选择 INTENTIONAL_VIOLATION (Phase 26 闭环)
+```
+
+### 验证
+
+- [x] 中英文关键词检测 (energy/urgency/trust)
+- [x] trust_watermark 双向调整 (感谢 +0.02, 抱怨 -0.03, 限幅 0.0-1.0)
+- [x] frozen dataclass 不可变
+- [x] 同一输入 = 同一输出（确定性）
+- [x] `pytest tests/ -q` — 874/874 通过
+
+---
+
+## 九、PLAN2 第三块基石：EmbodiedReflex（已完成）
+
+### 完成日期
+
+2026-05-29
+
+### Commit
+
+`23092b5 feat(plan2): EmbodiedReflex — Axiom 1`
+
+### 变更
+
+| 文件 | 变更 |
+|------|------|
+| `core/adapters/embodied_reflex.py` | `EmbodiedReflex` — 呈现层翻译膜 (~100行) |
+| `demo/demo_embodied.py` | 11/11 — PLAN1 vs PLAN2 对比演示 |
+
+### 核心行为
+
+```
+ToolResult(success=True, tool_name="web_search", data={...})
+    ↓
+EmbodiedReflex.process(result, user_intent)
+    ↓
+PLAN1: "Calling web_search... Result received"
+PLAN2: "(Intuition: I recall several key points about this topic)"
+```
+
+### 设计原则
+
+- **Scheme B**: 拦截 Result，不拦截 Call。LLM function calling 原样运行
+- **审计保留**: event_sink 仍记录完整 ToolResult
+- **启发式直觉**: `_summarize()` 按 tool_name 映射（web_search → "I recall...", weather → "it feels like..."）
+- **Phase 32+ 接口**: `_summarize()` 可替换为小模型，外部接口 `process()` 不动
+
+---
+
+## 十、PLAN2 第四块基石：RenegotiationWatcher（已完成）
+
+### 完成日期
+
+2026-05-29
+
+### Commit
+
+`e13401a feat(plan2): RenegotiationWatcher — Axiom 2 complete`
+
+### 变更
+
+| 文件 | 变更 |
+|------|------|
+| `core/adapters/renegotiation_watcher.py` | `RenegotiationWatcher` — 后台巡检员 (~90行) |
+| `demo/demo_plan2_closed_loop.py` | 7/7 — PLAN2 完整闭环 |
+
+### 核心行为
+
+```
+4 次 INTENTIONAL_VIOLATION against "web_search"
+    ↓
+RenegotiationWatcher.scan(sink, field, fp)
+    ↓ trust_watermark >= 0.7? YES
+    ↓ count >= threshold (3)? YES (4)
+    ↓
+RenegotiationProposal(
+    suggested_action="Relax strict constraints on 'web_search'..."
+)
+    ↓
+HITLGateway.submit_proposal(proposal) → 人类审批 → 契约进化
+```
+
+### PLAN2 完整闭环
+
+```
+Phase 26 (decide) → Phase 27 (sense) → Phase 28 (embody) → Phase 29 (evolve)
+INTENTIONAL_VIOLATION → RelationalField → EmbodiedReflex → RenegotiationWatcher
+```
+
+### 验证
+
+- [x] `demo_plan2_closed_loop.py` — 7/7 通过
+- [x] `pytest tests/ -q` — 874/874 通过
