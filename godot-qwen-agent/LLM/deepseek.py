@@ -60,6 +60,22 @@ class DeepSeekClient(BaseLLMClient):
         except Exception as e:
             raise RuntimeError(f"调用 DeepSeek 模型失败: {e}") from e
 
+    def generate_stream(self, prompt: str):
+        """Stream response chunks. Yields str chunks as they arrive."""
+        try:
+            stream = self.client.chat.completions.create(
+                model=self.model,
+                max_tokens=self.max_tokens,
+                temperature=self.temperature,
+                messages=[{"role": "user", "content": prompt}],
+                stream=True,
+            )
+            for chunk in stream:
+                if chunk.choices and chunk.choices[0].delta.content:
+                    yield chunk.choices[0].delta.content
+        except Exception as e:
+            yield f"\n[Stream error: {e}]"
+
     def generate_with_tools(
         self, prompt: str, tools: list[dict] | None = None,
     ) -> LLMResponse:

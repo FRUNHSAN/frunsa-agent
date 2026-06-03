@@ -152,20 +152,26 @@ while True:
         f"{context}"
     ).strip()
 
+    print()
+    full_prompt = f"{system}\n\nUser: {user}"
+    full_response = ""
     try:
-        full_prompt = f"{system}\n\nUser: {user}"
-        response = llm.generate(full_prompt)
+        for chunk in llm.generate_stream(full_prompt):
+            # Strip markdown noise for terminal
+            clean = chunk.replace("**", "").replace("__", "")
+            print(clean, end="", flush=True)
+            full_response += chunk
     except Exception as e:
-        response = f"(LLM error: {e})"
+        print(f"(LLM error: {e})")
+        full_response = f"(LLM error: {e})"
         trust = max(0.0, trust - 0.01)
+    print()
 
     # ── Save history ──
     history.append(f"User: {user}")
-    history.append(f"Agent: {response[:200]}")
+    history.append(f"Agent: {full_response[:200]}")
     if len(history) > 40:
         history = history[-40:]
-
-    print(f"\n[agent] {response}")
 
     # ── Post-check ──
     rolled, reason = engine.post_check(bp, trust)
