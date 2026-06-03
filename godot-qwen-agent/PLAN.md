@@ -6026,3 +6026,64 @@ HAVING COUNT(*) >= ?
 - [x] `python demo/demo_renegotiate.py` — 8/8 通过
 - [x] `python demo/demo_hitl.py` — 10/10 通过（Phase 24 不受影响）
 - [x] `pytest tests/ -q` — 854/854 通过, 0 回归
+
+---
+
+## Phase 25 P0: 防腐层 — 六边形架构落地
+
+### 完成日期
+
+2026-05-29
+
+### 定位
+
+内核的消费者（health_evaluator, repair_engine, hitl_gateway, tool_adapter）直接依赖具体实现类（ContractAwareEventSink, sqlite3, if/elif 厂商分支）。换存储、换事件总线、换 LLM 都需要改业务代码。
+
+三个防腐层（Anti-Corruption Layer）用纯 Python Protocol 隔离了三大基础设施维度。
+
+### 三个 Protocol
+
+| Protocol | 隔离什么 | 当前实现 | 可替换为 |
+|----------|---------|---------|---------|
+| `InteractionRepository` | 持久化存储 | RelationshipMemoryStore (SQLite) | PostgreSQL, MongoDB |
+| `EventSink` | 事件流 | ContractAwareEventSink (内存) | Redis Streams, Kafka |
+| `ToolFormatAdapter` + `ToolFormatRegistry` | LLM 工具格式 | AnthropicToolFormat, OpenAIToolFormat | 任意新 LLM 厂商 |
+
+### 架构
+
+```
+业务逻辑层 (只依赖 Protocol)
+    │                │                    │
+    ▼                ▼                    ▼
+EventSink    InteractionRepository   ToolFormatAdapter
+(Protocol)       (Protocol)           (Protocol)
+    │                │                    │
+    ▼                ▼                    ▼
+ContractAware   RelationshipMemory    AnthropicToolFormat
+EventSink       Store (SQLite)        OpenAIToolFormat
+```
+
+### ToolFormatAdapter 双向设计
+
+```
+去程: 内部 Tool 定义 → format_tools() → LLM 原生 JSON
+回程: LLM 原始响应 → parse_response() → {"name": ..., "arguments": ...}
+```
+
+Registry 消除 `if provider == "anthropic" elif provider == "openai"` 分支。新 LLM 接入 = 写一个 adapter + `registry.register("new_llm", adapter)`。
+
+### 消费者改造
+
+| 文件 | 改前 | 改后 |
+|------|------|------|
+| `health_evaluator.py` | `ContractAwareEventSink` | `EventSink` (Protocol) |
+| `repair_engine.py` | `ContractAwareEventSink` | `EventSink` (Protocol) |
+| `hitl_gateway.py` | `ContractAwareEventSink` + `RelationshipMemoryStore` | `EventSink` + `InteractionRepository` (双 Protocol) |
+
+### 验证
+
+- [x] `pytest tests/ -q` — 854/854 通过
+- [x] 三个 demo 全部通过
+- [x] `isinstance(store, InteractionRepository)` — 显式满足
+- [x] `isinstance(sink, EventSink)` — 显式满足
+- [x] `isinstance(AnthropicToolFormat(), ToolFormatAdapter)` — 显式满足

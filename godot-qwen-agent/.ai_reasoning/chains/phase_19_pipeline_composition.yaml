@@ -182,7 +182,8 @@ evidence:
     - "TestRelationshipMemoryStore: 11 tests (empty, first transition, delta tracking, get_latest, limit, count, deterioration, blueprint isolation, clear, JSON snapshot, lifecycle stored)"
     - "demo_battle.py: 24 assertions (full closed-loop: Round1→Round2→TOOL_NOT_FOUND→HealthEval→SelfRepair→Round4→PostHealth→Memory)"
     - "components/tools/simulated_search.py: 2 registered tools (web_search + brave_search), class-level fail injection"
-    - "Full suite: 854 unit + 24 battle assertions, 0 regression, 0 guardrail errors"
+    - "Anti-corruption layers: EventSink Protocol, InteractionRepository Protocol, ToolFormatAdapter + ToolFormatRegistry"
+    - "Full suite: 854 passed + 3 battle demos (24 + 10 + 8 assertions), 0 regression, 0 guardrail errors"
 
 # ── 6. Future Guidance ───────────────────────────────────────────────
 
@@ -519,6 +520,19 @@ future_guidance:
     priority: critical
     phase_applicable: "Phase 25+"
 
+  anti_corruption_layer:
+    summary: "Three Protocols decouple kernel from infrastructure: EventSink, InteractionRepository, ToolFormatAdapter"
+    detail: "Phase 25 P0 refactoring extracted three anti-corruption layers: (1) EventSink
+      Protocol isolates event emission from concrete implementations — swap in-memory
+      to Redis/Kafka by writing one adapter; (2) InteractionRepository Protocol isolates
+      persistence from SQLite — swap to Postgres by writing one adapter; (3) ToolFormatAdapter
+      Protocol with bidirectional conversion + ToolFormatRegistry eliminates the if/elif
+      provider switch — new LLM = new adapter + register, zero ToolAdapter changes.
+      Together these form a hexagonal architecture: the kernel depends on Protocols,
+      never on concrete infrastructure classes."
+    priority: critical
+    phase_applicable: "Phase 25+"
+
 anti_patterns:
   - "Putting resolve() or any matching algorithm on CompositionBlueprint (data model)"
   - "SourceRouter producing I/O, network calls, or state mutation (must be pure)"
@@ -580,3 +594,6 @@ anti_patterns:
   - "Whitewashing proposals as HumanTickets with a 'type' field — semantic contamination. Use separate table + event type"
   - "Blocking execution while waiting for proposal approval — proposals are non-blocking suggestions, not emergency interventions"
   - "Skipping chronic violator scan before generating proposal — proposals must be data-driven, not arbitrary"
+  - "Business logic importing concrete infrastructure classes (ContractAwareEventSink, sqlite3) instead of depending on Protocols"
+  - "Adding a new LLM provider by modifying tool_adapter.py if/elif chain — register a ToolFormatAdapter instead"
+  - "Putting read/query methods on EventSink Protocol — EventSink should be write-only (emit); reads belong to InteractionRepository"
