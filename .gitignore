@@ -9,3 +9,5 @@ build/
 *.rar
 *.docx
 .vs/
+.claude/settings.local.json
+.gitignore

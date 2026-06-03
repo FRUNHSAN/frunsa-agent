@@ -2185,12 +2185,12 @@ class TestRelationalEvaluator:
     def test_detects_low_energy_from_keywords(self):
         f = RelationalEvaluator.evaluate("好累，随便弄弄就行", None)
         assert f.energy_level == EnergyLevel.LOW
-        assert "fatigue" in f.recent_narrative.lower()
+        assert "疲惫" in f.recent_narrative or "低能量" in f.recent_narrative
 
     def test_detects_critical_urgency(self):
         f = RelationalEvaluator.evaluate("快！紧急！救命！")
         assert f.urgency == Urgency.CRITICAL
-        assert "urgency" in f.recent_narrative.lower()
+        assert "紧迫" in f.recent_narrative
 
     def test_trust_increases_with_gratitude(self):
         base = RelationalField.default()

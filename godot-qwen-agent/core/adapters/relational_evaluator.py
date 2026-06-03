@@ -98,7 +98,7 @@ class RelationalEvaluator:
             hour = datetime.now().hour
             if hour >= 23 or hour <= 5:
                 energy = EnergyLevel.LOW
-                narrative += " Late-night interaction detected."
+                narrative += " 检测到深夜交互。"
 
         return RelationalField(
             energy_level=energy,
@@ -154,15 +154,15 @@ class RelationalEvaluator:
         """Build a 1-sentence narrative summary."""
         parts = []
         if energy == EnergyLevel.LOW:
-            parts.append("User shows signs of fatigue/low energy")
+            parts.append("检测到疲惫/低能量信号")
         elif energy == EnergyLevel.HIGH:
-            parts.append("User appears excited/energized")
+            parts.append("用户显得兴奋/精力充沛")
         if urgency == Urgency.CRITICAL:
-            parts.append("high urgency")
+            parts.append("高紧迫度")
         elif urgency == Urgency.LEISURE:
-            parts.append("leisurely pace")
+            parts.append("轻松节奏")
         if trust_delta > 0:
-            parts.append("trust signals detected")
+            parts.append("信任信号")
         elif trust_delta < 0:
-            parts.append("frustration signals detected")
-        return ". ".join(parts) + "." if parts else "Routine interaction."
+            parts.append("挫败信号")
+        return "。".join(parts) + "。" if parts else "常规交互。"

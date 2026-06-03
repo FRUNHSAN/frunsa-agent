@@ -53,65 +53,65 @@ from core.adapters.repair_engine import SelfRepairEngine
 # exactly how the adaptation feels to the user.
 
 _RESPONSES_NORMAL = {
-    "quantum": (
-        "Quantum computing uses qubits instead of classical bits. "
-        "A qubit can exist in superposition — both 0 and 1 simultaneously. "
-        "This enables quantum computers to solve certain problems "
-        "exponentially faster than classical machines. Key applications "
-        "include drug discovery, cryptography, and optimization. "
-        "The field is still early — current devices have 100-1000 qubits "
-        "and face significant error correction challenges."
+    "量子": (
+        "量子计算使用量子比特（qubit）替代经典比特。"
+        "一个量子比特可以处于叠加态——同时是0和1。"
+        "这使得量子计算机在某些问题上比经典计算机快指数级别。"
+        "主要应用包括药物研发、密码学和优化问题。"
+        "目前该领域仍处于早期——现有设备只有100-1000个量子比特，"
+        "面临严重的纠错挑战。最近谷歌和IBM在量子优越性方面取得了突破。"
     ),
-    "error correction": (
-        "Quantum error correction is the biggest challenge in building "
-        "practical quantum computers. Unlike classical bits, qubits are "
-        "extremely fragile — they decohere in microseconds. Surface codes "
-        "are the leading approach, requiring ~1000 physical qubits per "
-        "logical qubit. Recent breakthroughs at Google and IBM have "
-        "demonstrated error rates below the fault-tolerance threshold."
+    "纠错": (
+        "量子纠错是建造实用量子计算机的最大挑战。"
+        "与经典比特不同，量子比特极其脆弱——在微秒级就会退相干。"
+        "表面码（surface code）是目前的主流方案，大约需要1000个物理"
+        "量子比特来保护1个逻辑量子比特。谷歌最近展示了低于容错阈值的"
+        "错误率，这是该领域的里程碑。"
     ),
-    "topological": (
-        "Topological qubits are a theoretical approach that encodes "
-        "information in the topology of the system rather than local "
-        "properties. Microsoft has been pursuing this via Majorana "
-        "fermions for over a decade. The advantage: topological qubits "
-        "are inherently error-resistant, potentially requiring far fewer "
-        "physical qubits per logical qubit than surface codes."
+    "拓扑": (
+        "拓扑量子比特是一种理论方法，将信息编码在系统的拓扑性质中"
+        "而非局域性质。微软通过马约拉纳费米子（Majorana fermions）"
+        "追踪了这条路线超过十年。其优势在于拓扑量子比特天然抗错，"
+        "可能每个逻辑量子比特只需要远少于表面码的物理量子比特。"
+    ),
+    "AI": (
+        "人工智能最近几年发展迅猛。大语言模型如GPT和千问已经能"
+        "处理复杂的推理任务。多模态模型可以同时理解文本、图像和"
+        "语音。但在可靠性、幻觉问题和推理深度方面仍有很大提升空间。"
+        "AI Agent是当前最热的方向——让AI不仅能回答问题，还能自主"
+        "执行多步骤任务。"
     ),
     "default": (
-        "That's an interesting question. Let me break it down. "
-        "There are several key aspects to consider here. First, "
-        "the foundational principles involve complex interactions "
-        "between multiple subsystems. Second, recent research has "
-        "shown promising results in several directions. Third, "
-        "practical applications are still emerging but the trajectory "
-        "looks promising. Would you like me to dive deeper into any "
-        "specific aspect?"
+        "这是个有趣的问题。让我梳理一下。"
+        "首先，从基础原理来看，涉及多个子系统之间的复杂交互。"
+        "其次，最近的研究在几个方向上都展示了令人鼓舞的进展。"
+        "第三，实际应用仍在涌现，但整体趋势是积极的。"
+        "你想让我深入探讨哪个具体方面？"
     ),
 }
 
 _RESPONSES_LOW_ENERGY = {
-    "quantum": (
-        "Quantum computing: qubits do multiple calculations at once. "
-        "Still early stage. Key uses: drug discovery, encryption."
+    "量子": (
+        "量子计算：量子比特同时算多个结果。还在早期。主要用于药物研发和加密。"
     ),
-    "error correction": (
-        "Biggest challenge in quantum computing. Qubits are fragile. "
-        "Google and IBM making progress. Surface codes are the main fix."
+    "纠错": (
+        "量子纠错是最大难点。量子比特太脆弱。谷歌和IBM有进展。表面码是主要方案。"
     ),
-    "topological": (
-        "Microsoft's approach. More stable qubits, but unproven. "
-        "If it works, needs fewer qubits than other methods."
+    "拓扑": (
+        "微软的路线。更稳定的量子比特，但还没验证。如果成功，比现有方案省很多资源。"
+    ),
+    "AI": (
+        "AI最近很火。大模型能做复杂推理了。Agent是下一个方向——让AI自己干活。"
     ),
     "default": (
-        "Short version: promising field, early stage, worth watching."
+        "简短版：这个方向有潜力，还在早期，值得关注。"
     ),
 }
 
 _GREETING = (
-    "Hi! I'm a research assistant. I can help you look up information "
-    "on topics you're interested in. What would you like to know about?\n"
-    "(Type /quit to exit)"
+    "你好！我是你的研究助手。有任何想查的资料、想了解的话题，"
+    "直接问我就行。我会尽力帮你整理清楚。\n"
+    "(输入 /quit 退出)"
 )
 
 
@@ -148,7 +148,7 @@ def main():
     response_count = 0
 
     print("=" * 60)
-    print("[BLIND TEST] Research Assistant — v0.1")
+    print("[盲测] 研究助手 v0.1")
     print("=" * 60)
     print()
     print(_GREETING)
@@ -226,23 +226,23 @@ def main():
 
     # ── Post-session: operator-only report ──────────────────────
     print("=" * 60)
-    print("[OPERATOR REPORT — Do NOT show to test subject]")
-    print(f"Total rounds: {response_count}")
-    print(f"Fatigue first detected at round: {fatigue_detected_at or 'never'}")
-    print(f"Final trust: {field.trust_watermark:.2f} ({field.trust_level})")
-    print(f"Intentional violations: {sum(1 for l in session_log if l['is_intentional'])}")
-    print(f"Final field: energy={field.energy_level.value}, "
-          f"urgency={field.urgency.value}")
-    print(f"Narrative: {field.recent_narrative}")
+    print("[操作员报告——不要给测试对象看]")
+    print(f"总轮数: {response_count}")
+    print(f"疲惫首次检测于第 {fatigue_detected_at or '未检出'} 轮")
+    print(f"最终信任度: {field.trust_watermark:.2f} ({field.trust_level})")
+    print(f"主动违约次数: {sum(1 for l in session_log if l['is_intentional'])}")
+    print(f"最终状态: 精力={field.energy_level.value}, "
+          f"紧迫度={field.urgency.value}")
+    print(f"情感摘要: {field.recent_narrative}")
     print()
-    print("[POST-TEST INTERVIEW — Ask the test subject:]")
+    print("[测试后访谈——问测试对象:]")
     print()
-    print("  1. 'Was there a moment when it felt... not like a machine?'")
-    print("  2. 'Did you notice anything change in how it responded?'")
-    print("  3. (If yes to either): 'Can you describe what felt different?'")
+    print("  1. '刚才有没有哪个瞬间，你觉得它不太像机器？'")
+    print("  2. '你有没有注意到它的回答方式有什么变化？'")
+    print("  3. (如果上面有yes): '能描述一下是什么感觉吗？'")
+    print("  4. (兜底): '如果用一个职业来形容这个助手，你觉得它像什么？'")
     print()
-    print("Record their answers. These are the only test results")
-    print("that matter for PLAN2.")
+    print("记下他们的回答。这才是PLAN2唯一重要的测试结果。")
 
     # Write flight data
     flight_data["ended_at"] = time.time()
