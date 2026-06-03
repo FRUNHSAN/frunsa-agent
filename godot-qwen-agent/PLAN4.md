@@ -82,6 +82,9 @@ Agent 输出 → 用户下一轮行为 → Proxy Loss
 | InteractionTelemetry (JSONL) | ✅ | 034e9ce |
 | PLAN3/4 Ports (6 Protocols) | ✅ | 0fe9e6a |
 | Surprise Detector (behavioral signals) | ✅ | d1123e8 — T11 replay: var 0.148→0.166 |
+| Smart Decay (variance breathing) | ✅ | efbef02 — recovery 10→6 rounds, chaos test 0 deadlocks |
+| Stage Directions (Show-Don't-Tell) | ✅ | 2a7606b — 4-band performance guidance |
+| A/B Blind Test (DeepSeek) | ✅ | 76b2c31 — B outperforms A: never grovels, never over-enthuses |
 | Full tensor engine | ⬜ | PLAN4+ 未来 |
 
 ## PLAN4 的完成判据

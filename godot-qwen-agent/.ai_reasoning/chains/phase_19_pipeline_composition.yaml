@@ -667,6 +667,31 @@ future_guidance:
     priority: high
     phase_applicable: "PLAN4+"
 
+  stage_directions:
+    summary: "Stage Directions translate Bayesian variance into LLM performance guidance (Show-Don't-Tell)"
+    detail: "PLAN4 _stage_directions() converts (energy_var, trust_var) into four-band
+      natural-language performance guidance injected into PromptGenerator seeds.
+      Bands: <0.05 confident/direct, 0.05-0.15 cautious openness/mild confirmation,
+      0.15-0.25 alert/acknowledge complexity first, >0.25 highly uncertain/play it safe.
+      Key insight: these are NOT emotion labels ('be empathetic') — they are behavioral
+      boundaries ('do not over-apologize, do not over-enthuse'). LLM reads actions,
+      not feelings. A/B blind test with DeepSeek confirmed B (Stage Directions)
+      outperforms A (bare LLM): B never grovels, never over-thanks, modulates tone
+      appropriately across 12 rounds of emotional whiplash chaos."
+    priority: critical
+    phase_applicable: "PLAN4+"
+
+  smart_decay:
+    summary: "Smart Decay prevents PTSD: exponential variance reduction (gamma=0.85) when no surprise detected"
+    detail: "PLAN4 decay_variances() applies gamma=0.85 per calm round (surprise<0.3).
+      Before: variance took 10+ rounds to recover from shock. After: 6 rounds to
+      full recovery. Fixes T32 blind spot (Judge score=4) where system treated
+      normal follow-up as threat because variance hadn't decayed from prior shock.
+      Chaos test: 15 rounds emotional whiplash, 0 sustained deadlocks, breathing
+      at var=0.100 by T15. Configurable via InertiaConfig.variance_decay_gamma."
+    priority: high
+    phase_applicable: "PLAN4+"
+
 anti_patterns:
   - "Putting resolve() or any matching algorithm on CompositionBlueprint (data model)"
   - "SourceRouter producing I/O, network calls, or state mutation (must be pure)"
@@ -745,3 +770,6 @@ anti_patterns:
   - "Relying solely on keyword detection for energy transitions — behavioral signals (length_ratio, exclamation density) catch what keywords miss"
   - "Allowing variance to continuously shrink without behavioral surprise checks — low variance creates confirmation bias blindness"
   - "Using pipe input for Chinese stress testing — garbled encoding masks real detector behavior. Always test in real terminal"
+  - "Using emotion labels in Stage Directions ('be empathetic') instead of behavioral boundaries ('do not over-apologize') — LLM acts, not feels"
+  - "Letting variance stay elevated after a single shock without decay mechanism — creates 'stuck PTSD' where system treats all input as threat"
+  - "Trust variance dead (not receiving surprise injection) while Energy variance is alive — creates asymmetric awareness where system doubts user state but not its own relationship"

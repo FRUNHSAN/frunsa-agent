@@ -92,6 +92,9 @@ aggregate(current_field, previous_contexts) → smoothed_context
 | Bayesian Uncertainty (mean+variance) | ✅ | 034e9ce |
 | Surprise Detector (behavioral signals) | ✅ | d1123e8 — T11 replay: variance 0.148→0.166 |
 | PLAN3/4 Ports (6 Protocols) | ✅ | 0fe9e6a |
+| Smart Decay (variance breathing) | ✅ | efbef02 — recovery 10→6 rounds |
+| Stage Directions (Show-Don't-Tell) | ✅ | 2a7606f — 4-band performance guidance |
+| A/B Blind Test (DeepSeek) | ✅ | 76b2c31 — B outperforms A, never grovels |
 | Blind Test 2.0 (20轮稳定性) | ⬜ | — |
 
 ## Vibe Test 结果（已完成）
