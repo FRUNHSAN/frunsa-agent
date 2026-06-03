@@ -174,6 +174,21 @@ These thresholds were calibrated against a real human subject who was unaware of
 - Trust gating for RenegotiationWatcher (0.7 threshold) is too high — real trust builds slowly. Consider 0.55-0.6 for first proposal.
 - EmbodiedReflex should NOT announce "I detected fatigue" — the subject felt the adaptation was natural, not mechanical
 
+## PLAN2/3/4 Architectural Invariants (Phase 26-29)
+
+These are non-negotiable mathematical and architectural contracts derived from 50 commits of Bayesian engine development.
+
+| # | Invariant | Source |
+|---|----------|--------|
+| 38 | **Trust range [0,1], silently clamped**: trust_watermark MUST be clamped to [0.0, 1.0] in RelationalField.__post_init__. Negative trust (from prolonged negative input) saturates at 0.0, not throw. | 500-round stress test (Trust hit floor at T200) |
+| 39 | **Variance floor 0.01**: Bayesian variance MUST never reach 0.0. A variance of 0 means the system is infinitely certain — which causes confirmation bias blindness. `max(0.01, var)` is mandatory in all variance update paths. | T11 Surprise Detector replay |
+| 40 | **INTENTIONAL_VIOLATION excluded from SeverityMapping**: intentional violations are trust-building events, NOT failures. They must NOT reduce compliance_rate or trigger repair. SeverityMapping.default() excludes INTENTIONAL_VIOLATION. | PLAN2 Axiom 2 |
+| 41 | **Smart Decay only when surprise < 0.3**: decay_variances(gamma=0.85) MUST only apply when no behavioral anomaly detected. Threat present (surprise >= 0.3) → skip decay. Calm round → multiply variance by 0.85. | Chaos test: 15 rounds, 0 deadlocks |
+| 42 | **Stage Directions are behavioral boundaries, not emotion labels**: PromptGenerator._stage_directions() MUST use action-oriented language ("do not over-apologize", "mild confirmation") — never emotion labels ("be empathetic"). Show-Don't-Tell. | A/B blind test: B outperforms A |
+| 43 | **Energy confirm window = 2 rounds**: energy level transitions MUST require 2 consecutive readings of the new level. Prevents false fatigue detection from single-keyword matches. | RelationalInertia design |
+| 44 | **Trust EMA asymmetric by design**: negative trust signals (observed < current) use alpha=0.30; positive signals use alpha=0.08. Trust erodes faster than it builds — matching human psychology (negativity bias). | 500-round test: Trust hit floor, needs slow rebuild path |
+| 45 | **Vibe Test gate before time-dimension work**: PromptGenerator seeds MUST be validated via LLM-as-Judge before adding inertia, momentum, or decay on top. Building temporal smoothing on broken spatial semantics = persistent error. | PLAN3 Vibe Test: 4/4 passed before RelationalInertia |
+
 ## Machine Enforcement (Phase 8.0)
 
 Architectural invariants are **machine-enforced**, not just documented. Before every commit, `python -m guardrails check` runs AST-based rules. Violations of severity ERROR block the commit.
