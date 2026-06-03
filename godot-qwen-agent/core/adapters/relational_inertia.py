@@ -283,6 +283,61 @@ class RelationalHistory:
                     current + self._drift_rate,
                 )
 
+    # ── P2-8: Cross-Session Persistence ──────────────────────
+
+    def save_state(self, db_path: str, user_id: str = "default") -> None:
+        """Persist all relational state to SQLite for cross-session memory.
+
+        Stores means, variances, peace_streak, trust_ema, round_count.
+        Restore with load_state() next session — Agent remembers.
+        """
+        import sqlite3, json
+        state = {
+            "means": self._means,
+            "variances": self._variances,
+            "peace_streak": self._peace_streak,
+            "trust_ema": self._trust_ema,
+            "round_count": self._round_count,
+        }
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS relational_history
+               (user_id TEXT PRIMARY KEY, state_json TEXT, updated_at REAL)"""
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO relational_history VALUES (?, ?, ?)",
+            (user_id, json.dumps(state), __import__("time").time()),
+        )
+        conn.commit()
+        conn.close()
+
+    @classmethod
+    def load_state(
+        cls, db_path: str, user_id: str = "default",
+    ) -> RelationalHistory | None:
+        """Restore relational state from SQLite. Returns None if no saved state."""
+        import sqlite3, json
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS relational_history
+               (user_id TEXT PRIMARY KEY, state_json TEXT, updated_at REAL)"""
+        )
+        row = conn.execute(
+            "SELECT state_json FROM relational_history WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        conn.close()
+        if not row:
+            return None
+        state = json.loads(row[0])
+        hist = cls()
+        hist._means = state.get("means", hist._means)
+        hist._variances = state.get("variances", hist._variances)
+        hist._peace_streak = state.get("peace_streak", 0)
+        hist._trust_ema = state.get("trust_ema", 0.5)
+        hist._round_count = state.get("round_count", 0)
+        return hist
+
     def trust_repair(self, amount: float = 0.02) -> None:
         """P1-5: Intentional Violation builds trust through demonstrated integrity.
 
