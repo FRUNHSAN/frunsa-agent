@@ -33,6 +33,8 @@ from core.adapters.signal_interpreter import interpret as signal_interpret
 from core.adapters.output_pipeline import OutputPipeline
 from core.adapters.output_grammar import build_grammar as build_gbnf
 from core.adapters.agent_router import decide as route_decide
+from core.adapters.stream_interceptor import StreamInterceptor, FSMState
+from core.adapters.action_pipeline import ActionPipeline
 
 # ── PLAN7.4: Dual-backend with active routing ──
 from LLM.native_llm import NativeLLMClient
@@ -64,6 +66,8 @@ local_llm = NativeLLMClient(max_tokens=512, temperature=0.7, n_ctx=2048, n_gpu_l
 auditor = ContractAuditor(cloud_llm, interval=10)
 print(f"  [PLAN7.4] Dual-backend: DeepSeek + Qwen3.5-4B (router active)")
 pipeline = OutputPipeline(bp)
+action = ActionPipeline(bp, trust=0.30)
+fsm = StreamInterceptor()
 
 trust = 0.30
 round_count = 0
@@ -319,6 +323,25 @@ while True:
         trust = max(0.0, trust - penalty)
     if len(full_response) < original_len * 0.7:
         print(f"  [pipeline] {original_len}→{len(full_response)} chars")
+
+    # ── V2: StreamInterceptor — scan for tool calls ──
+    action.trust = trust
+    for token in full_response:
+        result = fsm.feed(token)
+    # If stream ended mid-buffer, force complete
+    if fsm.state == FSMState.BUFFERING:
+        result = fsm.force_complete()
+
+    if fsm.state == FSMState.VALIDATING:
+        tool_name = fsm._last_buffer and fsm._extract_tool_name(fsm._last_buffer) or "unknown"
+        check = action.check(tool_name) if tool_name != "unknown" else {"allowed": False, "reason": "Unknown tool"}
+        if check["allowed"]:
+            fsm.accept()
+            print(f"  [V2-FSM] Tool '{tool_name}' ALLOWED → would execute")
+        else:
+            fsm.reject(check["reason"])
+            print(f"  [V2-FSM] Tool '{tool_name}' BLOCKED: {check['reason']}")
+            full_response = f"[Contract blocked tool '{tool_name}': {check['reason']}]"
 
     print(f"\n[agent] {full_response}")
 
