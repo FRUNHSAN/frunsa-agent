@@ -1,50 +1,50 @@
 # Reasoning Chain: PLAN7 — Environmental Physics
 chain_id: plan7_environmental_physics
-title: "PLAN7 Environmental Physics: OutputPipeline + constrained decoding paradigm"
+title: "PLAN7 Environmental Physics: OutputPipeline + GBNF constrained decoding + Cloud-Edge"
 created_at: "2026-06-04T00:00:00Z"
 status: active
-tags: [plan7, output_pipeline, constrained_decoding, environmental_physics, post_processing]
+tags: [plan7, output_pipeline, constrained_decoding, gbnf, native_llm, cloud_edge, qwen3.5]
 related_chains: [plan6_semantic_trust, plan5_contract_lifecycle, plan4_bayesian_engine]
 
 context: |
-  PLAN1-6 progressively built sensor layers (EMA, Trust, Surprise, Semantic Trust)
-  and actuator layers (DynamicBlueprint, ContractEvolutionEngine, SignalInterpreter).
-  But the execution model had fundamental impedance mismatch: a deterministic state
-  machine (contract engine) driving a non-deterministic system (LLM). Every prompt
-  constraint was a "request" the LLM could ignore.
+  PLAN1-6 built a sophisticated relational engine (sensors) and a living contract
+  system (actuators). But enforcement relied on LLM "complying" with prompt
+  constraints — fundamentally probabilistic. PLAN7 shifted the paradigm:
+  the contract controls the ENVIRONMENT around the LLM, not the LLM itself.
 
 decision: |
-  Shift from "prompt-based contract enforcement" to "environmental physics."
-  The contract no longer asks the LLM to comply — it controls the environment
-  AROUND the LLM. OutputPipeline applies deterministic post-processing:
-  sentence truncation, format sanitization, tone filtering.
-  Future phases: constrained decoding (GBNF) at token level, zero-shot
-  classification replacing embedding similarity.
+  Three-layer control plane:
+  1. Prompt constraints (probabilistic, ~50% compliance)
+  2. OutputPipeline (deterministic post-processing, 100%)
+  3. GBNF grammar (token-level physical constraint, 100%, local only)
+
+  Local inference was required for Layer 3 (GBNF). This accidentally created
+  a cloud-edge dual-backend architecture: DeepSeek for open-ended chat,
+  Qwen3.5-4B for contract-enforced responses.
 
 rationale: |
-  30-round live test validated: contract events went from 0 to 6, evolutions
-  from 2 to 6. "拜拜" no longer triggers follow-up questions. User commands
-  ("字少点") correctly modify contract. Frustration signal now reduces
-  verbosity as first action (not tone/anchoring as before).
-  Default verbose reduced from HIGH to MEDIUM — eliminating 200-word essays
-  for simple inputs. Sentence caps: MINIMAL=2, LOW=3, MEDIUM=5, HIGH=8.
+  Verified with Qwen3.5-4B Q4_K_M (2.8GB, 7 t/s CPU):
+  - FREE: "你好！有什么我可以帮助你的吗？" — natural Chinese
+  - GBNF MINIMAL: "你好！很高兴为你详细拆解量子计算。" — strictly 2 sentences
+  - <think> blocks stripped via regex, GBNF naturally blocks thinking tokens
+  - llama.cpp build 9496 (2025-06-04) required for Qwen3.5 architecture support
+  - Verified GBNF MINIMAL: 2 sentences hard limit, GBNF blocks think tokens naturally
 
 future_guidance:
-  output_pipeline:
-    summary: "Deterministic post-processor: sentence truncation, format sanitization, tone filtering, sycophancy detection"
-    priority: critical
+
+future_guidance:
   three_layer_control:
-    summary: "Layer1=Prompt(constraints-as-text), Layer2=OutputPipeline(code-level), Layer3=ConstrainedDecoding(token-level)"
+    summary: "Layer1=Prompt, Layer2=Pipeline, Layer3=GBNF. Each layer is progressively more deterministic."
     priority: critical
-  environmental_physics:
-    summary: "Contract controls the environment around the LLM, not the LLM itself. From negotiation to physical law."
+  cloud_edge_duality:
+    summary: "Cloud (DeepSeek) for intelligence+speed. Local (Qwen3.5+GBNF) for determinism. Shared UserProfile + Blueprint."
     priority: high
-  local_inference:
-    summary: "Phase 7.3: GBNF grammar + logit bias for physical token-space constraints. Only possible with local models."
-    priority: medium
+  contract_routing:
+    summary: "PLAN7.4: Contract strictness → backend selection. HIGH strictness → local+GBNF. LOW strictness → cloud."
+    priority: high
 
 anti_patterns:
-  - "Using prompt constraints as primary enforcement — they are probabilistic suggestions, not physical laws"
-  - "Streaming with post-processing — OutputPipeline needs complete text for sentence counting"
-  - "Hardcoding enforcement rules in run_live.py — use OutputPipeline component"
-  - "Setting default verbose=HIGH — leads to 200-word essays for casual inputs"
+  - "Using prompt constraints as primary enforcement — Layer 1 alone is ~50% reliable"
+  - "Expecting GPU on laptops — P2000 4GB may not offload. CPU is fallback"
+  - "Forgetting --no-display-prompt behavior differs between llama.cpp builds"
+  - "Using Qwen3.5 with builds older than b9000 — qwen35 architecture not supported"
