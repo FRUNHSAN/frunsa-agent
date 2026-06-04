@@ -59,8 +59,8 @@ profile = UserProfile.load(uid, storage_path=base)
 bp = DynamicBlueprint(blueprint_defaults())
 engine = ContractEvolutionEngine(trust_threshold=0.10, rollback_window=3)
 if USE_LOCAL_LLM:
-    llm = NativeLLMClient(max_tokens=256, temperature=0.7)
-    print(f"  [PLAN7.3] Native CUDA Qwen2.5-0.5B + GBNF (~3s/round)")
+    llm = NativeLLMClient(max_tokens=512, temperature=0.7, n_ctx=2048, n_gpu_layers=0)
+    print(f"  [PLAN7.3] Qwen3.5-4B Q4 CPU (~8s/round)")
 else:
     llm = DeepSeekClient(model="deepseek-chat", temperature=0.7, max_tokens=512)
 auditor = None if USE_LOCAL_LLM else ContractAuditor(llm, interval=10)
