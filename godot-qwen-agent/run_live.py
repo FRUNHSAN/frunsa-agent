@@ -27,6 +27,12 @@ from core.adapters.contract_evolution_engine import ContractEvolutionEngine
 from core.adapters.contract_auditor import ContractAuditor
 from core.adapters.signal_interpreter import interpret as signal_interpret
 from core.adapters.output_pipeline import OutputPipeline
+from core.adapters.output_grammar import build_grammar as build_gbnf
+
+# ── PLAN7.3: Local LLM backend (with GBNF constrained decoding) ──
+USE_LOCAL_LLM = "--local" in sys.argv
+if USE_LOCAL_LLM:
+    from LLM.local_llm import LocalLLMClient
 
 # ── PLAN6: Semantic Trust Engine (with keyword fallback) ──
 try:
@@ -48,8 +54,17 @@ print(f"{'='*50}")
 profile = UserProfile.load(uid, storage_path=base)
 bp = DynamicBlueprint(blueprint_defaults())
 engine = ContractEvolutionEngine(trust_threshold=0.10, rollback_window=3)
-llm = DeepSeekClient(model="deepseek-chat", temperature=0.7, max_tokens=512)
-auditor = ContractAuditor(llm, interval=10)
+if USE_LOCAL_LLM:
+    llm = LocalLLMClient(
+        "models/qwen2.5-0.5b-instruct-q4_k_m.gguf",
+        max_tokens=256, temperature=0.7,
+    )
+    print(f"  [PLAN7.3] Local Qwen2.5-0.5B with GBNF grammar")
+else:
+    llm = DeepSeekClient(model="deepseek-chat", temperature=0.7, max_tokens=512)
+auditor = ContractAuditor(llm if not USE_LOCAL_LLM else None, interval=10)
+if USE_LOCAL_LLM:
+    auditor = None  # 0.5B model can't do deep audit — skip System 2
 pipeline = OutputPipeline(bp)
 
 trust = 0.30
@@ -285,7 +300,10 @@ while True:
 
     try:
         # Collect full response — OutputPipeline needs complete text
-        full_response = llm.generate(full_prompt)
+        if USE_LOCAL_LLM:
+            full_response = llm.generate(full_prompt, grammar=build_gbnf(bp.snapshot))
+        else:
+            full_response = llm.generate(full_prompt)
     except Exception as e:
         full_response = f"(LLM error: {e})"
         trust = max(0.0, trust - 0.01)
@@ -315,7 +333,7 @@ while True:
         print(f"  [ROLLBACK] {reason}")
 
     # ── System 2 ──
-    if auditor.should_audit(round_count):
+    if auditor and auditor.should_audit(round_count):
         auditor.audit_async(
             history[-20:], bp.snapshot, datetime.now().strftime("%H:%M"),
             callback=lambda p: pending.append(p) if p else None,

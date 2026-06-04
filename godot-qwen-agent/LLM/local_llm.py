@@ -16,7 +16,7 @@ import os
 from typing import Any
 
 try:
-    from llama_cpp import Llama
+    from llama_cpp import Llama, LlamaGrammar
     HAS_LLAMA_CPP = True
 except ImportError:
     HAS_LLAMA_CPP = False
@@ -72,7 +72,7 @@ class LocalLLMClient:
             "temperature": self._temperature,
         }
         if grammar:
-            kwargs["grammar"] = grammar
+            kwargs["grammar"] = LlamaGrammar.from_string(grammar)
         if logit_bias:
             kwargs["logit_bias"] = logit_bias
 
