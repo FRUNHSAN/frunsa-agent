@@ -120,7 +120,7 @@ def build_contract_directive(bp_fields: dict) -> str:
     tone = bp_fields.get("tone_style", "WARM")
     anchoring = bp_fields.get("contextual_anchoring", "HIGH")
 
-    parts = ["[CONTRACT STATE]"]
+    parts = ["[CURRENT MODE]"]
 
     # Verbose
     v_map = {
