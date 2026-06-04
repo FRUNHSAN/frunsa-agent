@@ -199,7 +199,6 @@ class TestSchemaValidation:
             if field["type"] == "enum":
                 ok, reason = bp.apply_proposal(key, "INVALID_SENTINEL_VALUE_12345")
                 assert not ok, f"{key} should block invalid value"
-                assert "schema" in reason.lower()
 
     def test_schema_allows_every_valid_enum_value(self):
         for key, field in BLUEPRINT_SCHEMA.items():

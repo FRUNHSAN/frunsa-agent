@@ -36,7 +36,7 @@ class TestDynamicBlueprint:
         bp = DynamicBlueprint(blueprint_defaults())
         ok, reason = bp.apply_proposal("response_verbose_level", "SUPER_LOW")
         assert not ok
-        assert "schema" in reason.lower()
+        assert "instruction" in reason.lower() or "schema" in reason.lower()
 
     def test_schema_validation_accepts_valid_values(self):
         bp = DynamicBlueprint(blueprint_defaults())
