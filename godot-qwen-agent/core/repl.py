@@ -339,7 +339,6 @@ class Repl:
         print(f"结束。{self.round_count} 轮。")
         # Save session log
         if session_log:
-            from datetime import datetime
             log_file = f"session_{uid}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
             with open(log_file, "w", encoding="utf-8") as f:
                 f.write(f"=== Session: {uid} | {datetime.now().isoformat()} | {self.round_count} rounds ===\n\n")
