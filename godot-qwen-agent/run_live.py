@@ -8,7 +8,7 @@ Every round:
 """
 
 from __future__ import annotations
-import sys, json, threading, io, re
+import sys, json, threading, io
 from datetime import datetime
 from pathlib import Path
 
@@ -26,6 +26,7 @@ from core.contracts.blueprint_schema import blueprint_defaults, BLUEPRINT_SCHEMA
 from core.adapters.contract_evolution_engine import ContractEvolutionEngine
 from core.adapters.contract_auditor import ContractAuditor
 from core.adapters.signal_interpreter import interpret as signal_interpret
+from core.adapters.output_pipeline import OutputPipeline
 
 # ── PLAN6: Semantic Trust Engine (with keyword fallback) ──
 try:
@@ -49,6 +50,7 @@ bp = DynamicBlueprint(blueprint_defaults())
 engine = ContractEvolutionEngine(trust_threshold=0.10, rollback_window=3)
 llm = DeepSeekClient(model="deepseek-chat", temperature=0.7, max_tokens=512)
 auditor = ContractAuditor(llm, interval=10)
+pipeline = OutputPipeline(bp)
 
 trust = 0.30
 round_count = 0
@@ -281,45 +283,22 @@ while True:
     full_prompt = f"{system}\n\nUser: {user}"
     full_response = ""
 
-    # ── Layer 3: Enforcement reads contract, not hardcoded maps ──
-    verbose = bp.enforce("response_verbose_level") or "HIGH"
-    max_sentences = {"HIGH": 999, "MEDIUM": 999, "LOW": 3, "MINIMAL": 2}.get(verbose, 999)
-    tone = bp.enforce("tone_style") or "WARM"
-    initiative = bp.enforce("conversational_initiative") or "BALANCED"
-
     try:
-        sent_count = 0
-        for chunk in llm.generate_stream(full_prompt):
-            full_response += chunk
-
-            # ── Format sanitization ──
-            # Strip leading markdown list markers and headers
-            clean = chunk.replace("**", "").replace("__", "").replace("###", "").replace("---", "")
-            # In LOW/MINIMAL mode, kill bullet points and numbered lists
-            if verbose in ("LOW", "MINIMAL"):
-                clean = re.sub(r'^\s*[-*]\s+', '', clean)
-                clean = re.sub(r'^\s*\d+\.\s+', '', clean)
-                clean = re.sub(r'\n\s*[-*]\s+', ' ', clean)
-                clean = re.sub(r'\n\s*\d+\.\s+', ' ', clean)
-
-            print(clean, end="", flush=True)
-
-            # ── Token abort: count sentence terminators ──
-            sent_count += chunk.count("。") + chunk.count("！") + chunk.count("？")
-            if sent_count >= max_sentences:
-                # Physically abort — LLM's "free will" ends here
-                break
-
+        # Collect full response — OutputPipeline needs complete text
+        full_response = llm.generate(full_prompt)
     except Exception as e:
-        print(f"(LLM error: {e})")
         full_response = f"(LLM error: {e})"
         trust = max(0.0, trust - 0.01)
-    print()
 
-    # ── Sycophancy penalty: punish formulaic validation ──
-    if full_response.strip().startswith(("你说得对", "你的判断正确", "你的判断很", "非常准确")):
-        trust = max(0.0, trust - 0.03)
-        print(f"  [SYCOPHANCY] Detected formulaic opening. trust={trust:.2f}")
+    # ── PLAN7: OutputPipeline — contract-enforced post-processing ──
+    original_len = len(full_response)
+    full_response, penalty = pipeline.process(full_response.strip())
+    if penalty:
+        trust = max(0.0, trust - penalty)
+    if len(full_response) < original_len * 0.7:
+        print(f"  [pipeline] {original_len}→{len(full_response)} chars")
+
+    print(f"\n[agent] {full_response}")
 
     # ── Save history ──
     history.append(f"User: {user}")
