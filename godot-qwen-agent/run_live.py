@@ -36,7 +36,7 @@ from core.adapters.output_grammar import build_grammar as build_gbnf
 # ── PLAN7.3: Local LLM backend (with GBNF constrained decoding) ──
 USE_LOCAL_LLM = "--local" in sys.argv
 if USE_LOCAL_LLM:
-    from LLM.local_llm import LocalLLMClient
+    from LLM.native_llm import NativeLLMClient
 
 # ── PLAN6: Semantic Trust Engine (with keyword fallback) ──
 try:
@@ -59,16 +59,13 @@ profile = UserProfile.load(uid, storage_path=base)
 bp = DynamicBlueprint(blueprint_defaults())
 engine = ContractEvolutionEngine(trust_threshold=0.10, rollback_window=3)
 if USE_LOCAL_LLM:
-    llm = LocalLLMClient(
-        "models/qwen2.5-0.5b-instruct-q4_k_m.gguf",
-        max_tokens=256, temperature=0.7,
-    )
-    print(f"  [PLAN7.3] Local Qwen2.5-0.5B with GBNF grammar")
+    llm = NativeLLMClient(max_tokens=256, temperature=0.7)
+    print(f"  [PLAN7.3] Native CUDA Qwen2.5-0.5B + GBNF (~3s/round)")
 else:
     llm = DeepSeekClient(model="deepseek-chat", temperature=0.7, max_tokens=512)
-auditor = ContractAuditor(llm if not USE_LOCAL_LLM else None, interval=10)
+auditor = None if USE_LOCAL_LLM else ContractAuditor(llm, interval=10)
 if USE_LOCAL_LLM:
-    auditor = None  # 0.5B model can't do deep audit — skip System 2
+    print(f"  [PLAN7.3] Auditor disabled (0.5B insufficient for deep audit)")
 pipeline = OutputPipeline(bp)
 
 trust = 0.30
@@ -231,7 +228,10 @@ while True:
     # ── PLAN6 Evaluate: semantic trust or keyword fallback ──
     trust_before = trust
     if USE_SEMANTIC and sem is not None:
-        sig = sem.detect(user)
+        try:
+            sig = sem.detect(user)
+        except Exception:
+            sig = {"dimension": None, "score": 0.0, "all_scores": {}}
         dim, score = sig["dimension"], sig["score"]
         if dim == "fatigue":
             trust = max(0.0, trust - 0.01 * (1 + score))

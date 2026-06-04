@@ -59,15 +59,17 @@ class LocalLLMClient:
     ) -> str:
         """Generate text with optional grammar constraints.
 
-        Args:
-            prompt: The text prompt
-            grammar: GBNF grammar string. If empty, unconstrained generation.
-            logit_bias: {token_id: bias} map. Negative = suppressed.
-
-        Returns: Generated text string.
+        Wraps raw prompt in Qwen chat template.
         """
+        # Qwen2.5 chat template
+        formatted = (
+            f"<|im_start|>system\n你是一个友好的AI助手。<|im_end|>\n"
+            f"<|im_start|>user\n{prompt}<|im_end|>\n"
+            f"<|im_start|>assistant\n"
+        )
+
         kwargs: dict[str, Any] = {
-            "prompt": prompt,
+            "prompt": formatted,
             "max_tokens": self._max_tokens,
             "temperature": self._temperature,
         }
@@ -78,7 +80,12 @@ class LocalLLMClient:
 
         try:
             output = self._model(**kwargs)
-            return output["choices"][0]["text"].strip() or ""
+            text = output["choices"][0]["text"].strip() or ""
+            # Strip stray assistant prefixes
+            for prefix in ("Assistant:", "assistant:", "<|im_start|>assistant"):
+                if text.startswith(prefix):
+                    text = text[len(prefix):].strip()
+            return text
         except Exception as e:
             return f"(Local LLM error: {e})"
 
