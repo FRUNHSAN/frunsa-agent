@@ -1,0 +1,47 @@
+# 推理链: V2 — 流式拦截 + 在线学习
+chain_id: v2_stream_interceptor
+title: "V2 流式拦截状态机 + 在线阈值学习 — 契约控制的最后一块拼图"
+created_at: "2026-06-04T00:00:00Z"
+status: active
+tags: [v2, stream_interceptor, fsm, online_learning, ema, tool_contract, sqlite]
+related_chains: [plan7_environmental_physics, plan6_semantic_trust, plan5_contract_lifecycle]
+
+context: |
+  V1 (PLAN1-8) 建立了三层控制面 (Prompt/Pipeline/GBNF) 和工具契约
+  (ActionPipeline/ToolContract)。但存在两个根本性缺口:
+  1. 契约校验发生在 LLM 生成完整输出之后，而非生成过程中
+  2. SignalInterpreter 的阈值是硬编码的，不随用户调整
+
+decision: |
+  V2 引入两个核心组件:
+  1. StreamInterceptor — 五态有限状态机，在 token 级别拦截工具调用
+  2. EMALearner + FeedbackListener — 指数移动平均在线学习个人化阈值
+
+rationale: |
+  StreamInterceptor 解决了"时机"问题。LLM 输出工具调用 JSON 时，
+  状态机在 BUFFERING 态挂起流式输出，VALIDATING 态校验契约，
+  FALLBACK 态丢弃危险 JSON 并注入拦截提示。前端永不看到被拦截内容。
+
+  在线学习解决了"个性化"问题。EMA 公式 (α=0.2) 从用户显式反馈
+  (说"字少点") 和隐式反馈 (对长回复回"哦") 中学习个人阈值。
+  硬护栏 [0.30, 0.80] 防止恶意驯化或阈值漂移。
+
+future_guidance:
+  stream_fsm:
+    summary: "五态 FSM: TEXT→BUFFERING→VALIDATING→EXECUTING/FALLBACK。滑动窗口 200 字符检测触发符"
+    priority: critical
+  online_learning:
+    summary: "EMA 公式: new_t = (1-α)*old + α*triggered。显式反馈 α=0.25，隐式 α=0.05。SQLite 持久化"
+    priority: critical
+  interface_decoupling:
+    summary: "ThresholdLearner Protocol — 未来可替换为 NeuralLearner 或 RLLearner"
+    priority: high
+  sqlite_wal:
+    summary: "WAL 模式 + 5s busy_timeout。多用户隔离。自动迁移遗留 JSON"
+    priority: high
+
+anti_patterns:
+  - "用 Prompt 约束代替代码拦截 — 概率性建议无法替代确定性拦截"
+  - "硬编码阈值 — 每个用户的'累'不一样，等待足够样本再个性化"
+  - "把拦截到的危险 JSON 展示给用户 — FALLBACK 态必须丢弃 Buffer"
+  - "不用滑动窗口做触发检测 — 字符级 token 无法匹配完整触发符"

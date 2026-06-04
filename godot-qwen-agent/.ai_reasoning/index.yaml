@@ -256,6 +256,13 @@ chains:
     tags: [plan7, output_pipeline, constrained_decoding, environmental_physics, post_processing]
     status: active
 
+  - chain_id: v2_stream_interceptor
+    file: chains/v2_stream_interceptor.yaml
+    title: "V2 流式拦截状态机 + 在线阈值学习 — 契约控制的最后拼图"
+    layer: plan
+    tags: [v2, stream_interceptor, fsm, online_learning, ema, tool_contract, sqlite]
+    status: active
+
   # ── Real LLM Orchestration + Critic Engines ──
   - chain_id: phase_18_real_orch_critic
     file: chains/phase_18_real_orch_critic.yaml
@@ -414,3 +421,8 @@ tag_index:
   constrained_decoding: [plan7_environmental_physics]
   environmental_physics: [plan7_environmental_physics]
   post_processing: [plan7_environmental_physics]
+  v2: [v2_stream_interceptor]
+  stream_interceptor: [v2_stream_interceptor]
+  fsm: [v2_stream_interceptor]
+  online_learning: [v2_stream_interceptor]
+  ema: [v2_stream_interceptor]

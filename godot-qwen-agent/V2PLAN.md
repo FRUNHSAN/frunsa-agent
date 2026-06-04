@@ -1,95 +1,128 @@
-# V2 Plan — Stream Interception + Foundation Hardening
+# V2 计划 — 流式拦截 + 在线学习
 
 > **代码钳制，不是 Prompt 建议。**
-> V1 proved the contract engine works. V2 makes it intercept LLM output in real-time.
+> V1 证明了契约引擎可行。V2 让契约在 token 级别拦截 LLM 输出，并学会个人化。
 
-## V2 Priorities
+## V2 优先级与完成状态
 
-| # | Priority | Scope | Rationale |
-|---|----------|-------|-----------|
-| 1 | 200+ tests | PLAN5-8 edge cases | Refactoring safety net |
-| 2 | SQLite persistence | Replace UserProfile JSON | Concurrent-safe, WAL mode |
-| 3 | llama-server HTTP | Replace subprocess IPC | Persistent model, no cold start |
-| 4 | Stream Interceptor | Token-level contract enforcement | **The crown jewel** |
-
----
-
-## Stream Interception State Machine
-
-The core V2 innovation. When LLM streams output, the contract must intercept
-BEFORE dangerous tokens reach the user or trigger frontend auto-execution.
-
-```
-TEXT_MODE ──[detects <tool>]──→ BUFFERING ──[JSON complete]──→ VALIDATING
-    ↑                              │                                │
-    │                        [timeout/overflow]               ┌────┴────┐
-    │                              │                          │         │
-    └──────────────────────────────┘                    [PASS] ✓     [FAIL] ✋
-                                                           │           │
-                                                      EXECUTING   FALLBACK
-                                                           │           │
-                                                      [result→LLM]  [inject alert→LLM]
-                                                           │           │
-                                                           └─────┬─────┘
-                                                                 ↓
-                                                            TEXT_MODE
-```
-
-### State Definitions
-
-| State | Condition | Action |
-|-------|-----------|--------|
-| **TEXT_MODE** | Default. LLM outputs natural language. | Tokens stream directly to frontend. |
-| **BUFFERING** | `<tool>` or `{` detected at stream start. | Hold stream. Accumulate tokens in memory. Max 4KB buffer. 10s timeout. |
-| **VALIDATING** | Buffer contains complete JSON. | Parse tool_name + params. Call `ContractGateway.authorize_action()`. |
-| **EXECUTING** | Contract ALLOWED. | Execute tool. Feed result back to LLM. Resume streaming. |
-| **FALLBACK** | Contract BLOCKED. | Discard buffer. Inject `[ContractViolation]` into LLM context. Never expose blocked JSON to user. |
-
-### Edge Cases (The Hard Parts)
-
-1. **Half JSON**: LLM outputs `{"tool": "de` then network dies. → Timeout (10s) → discard buffer → FALLBACK.
-2. **Buffer overflow**: LLM outputs 8KB JSON (attack/malfunction). → 4KB limit → truncate → FALLBACK.
-3. **Nested tool calls**: LLM outputs `<tool>...</tool><tool>...</tool>`. → Process first, buffer second.
-4. **False positive**: User says "use `<tool>` in your response". → Heuristic: only trigger BUFFERING if tool marker appears at line start or after `\n\n`.
-5. **Stream resume**: After FALLBACK, LLM must generate a new natural-language response. The injected alert is: `[System] Your tool call was blocked by the contract engine. Reason: {reason}. Explain this to the user and ask for authorization.`
+| # | 优先级 | 范围 | 状态 |
+|---|--------|------|------|
+| 1 | 175+ 测试 | PLAN5-8 边界覆盖 + V2 新组件 | ✅ 完成 |
+| 2 | SQLite 持久化 | 替换 JSON UserProfile，WAL 模式 | ✅ 完成 |
+| 3 | 流式拦截 FSM | 五态状态机，token 级契约拦截 | ✅ 完成 |
+| 4 | 在线阈值学习 | EMA 个人化阈值 + 反馈采集 | ✅ 完成 |
+| 5 | llama-server HTTP | 替换子进程，常驻模型 | ⏸️ 等待稳定版 |
 
 ---
 
-## Architecture Decisions (ADR-002 through ADR-004)
+## 流式拦截状态机
 
-### ADR-002: Stream Interceptor is a separate component
-
-The interceptor sits between `llm.generate_stream()` and the frontend.
-It is NOT part of ActionPipeline — ActionPipeline validates complete tool calls.
-The interceptor decides WHEN to invoke ActionPipeline.
+V2 核心创新。LLM 流式输出时，契约在危险 token 到达用户之前拦截。
 
 ```
-LLM stream → [Interceptor FSM] → validated JSON → ActionPipeline.check()
-                  │
-                  ├── TEXT_MODE tokens → frontend (direct)
-                  └── FALLBACK injection → LLM context (never frontend)
+文本模式 ──[检测到 <tool_call>]──→ 缓冲模式 ──[JSON 闭合]──→ 校验模式
+    ↑                                  │                          │
+    │                          [超时/溢出]                  ┌─────┴─────┐
+    │                                  │                    │           │
+    └──────────────────────────────────┘              [通过] ✓     [拒绝] ✋
+                                                         │           │
+                                                    执行模式     降级模式
+                                                         │           │
+                                                    [结果回注]  [注入拦截提示]
 ```
 
-### ADR-003: SQLite WAL mode is mandatory
+### 状态定义
 
-`PRAGMA journal_mode=WAL;` enables concurrent reads during writes.
-Without WAL, every `profile.save()` locks the database.
-`busy_timeout=5000` gives 5 seconds for lock contention before throwing.
+| 状态 | 条件 | 动作 |
+|------|------|------|
+| **文本** | 默认。LLM 正常输出。 | token 直接透传到前端。 |
+| **缓冲** | 检测到工具调用标记。 | 挂起流。token 吸入内存 Buffer。上限 4KB。超时 10 秒。 |
+| **校验** | Buffer 包含完整 JSON。 | 解析工具名和参数。调用 ActionPipeline 校验。 |
+| **执行** | 契约放行。 | 执行工具。结果回注 LLM。恢复流式。 |
+| **降级** | 契约拒绝。 | 丢弃 Buffer。注入拦截提示。危险 JSON 绝不泄露。 |
 
-### ADR-004: llama-server HTTP replaces subprocess
+### 边界处理
 
-Persistent process. Model loads ONCE. All requests share the loaded model.
-Removes 2-3s cold start. Enables streaming (server-sent events).
-Backward compatible: `NativeLLMClient` becomes `HttpLLMClient`, same `generate()` signature.
+1. **残缺 JSON**：LLM 输出了 `{"tool": "de` 后断网 → 超时 → 丢弃 → 降级。
+2. **缓冲区溢出**：LLM 输出 8KB 恶意数据 → 4KB 硬上限 → 截断 → 降级。
+3. **嵌套工具调用**：LLM 输出 `<tool>...</tool><tool>...</tool>` → 处理第一个，缓冲第二个。
+4. **误触发**：用户说"用 `<tool_call>` 标签" → 触发缓冲，但因无有效 JSON 被 force_complete 拒绝。可接受。
+5. **流恢复**：降级后，注入拦截提示到 LLM 上下文，让 LLM 重新生成自然语言回复。
 
 ---
 
-## Timeline
+## 在线阈值学习
+
+### 核心理念
+
+不是神经网络。就是统计。EMA 公式：
 
 ```
-Week 1-2:  200+ tests (DynamicBlueprint, EvolutionEngine, ActionPipeline, Backlash)
-Week 3:    SQLite persistence (drop-in replacement for JSON UserProfile)
-Week 4:    llama-server HTTP (replace subprocess, test streaming)
-Week 5-6:  Stream Interceptor FSM (implement 5 states, edge case testing)
-Week 7:    Integration testing + ADR documentation
+新阈值 = (1 - α) × 旧阈值 + α × 触发分数
+α = 0.25 (显式反馈: 用户说"字少点")
+α = 0.05 (隐式反馈: 用户对长回复回"哦")
+```
+
+### 硬护栏
+
+| 维度 | 下限 | 上限 | 理由 |
+|------|------|------|------|
+| fatigue | 0.30 | 0.80 | 不能太敏感（永远降级），也不能太迟钝（永不降级） |
+| frustration | 0.30 | 0.80 | 同上 |
+| gratitude | 0.30 | 0.70 | 感激阈值保持保守 |
+| curiosity | 0.25 | 0.65 | 好奇心阈值保持敏感 |
+
+### 架构解耦
+
+```python
+# 当前：EMA 学习器
+learner = EMALearner(user_id="frunhsan")
+new_t = learner.update("fatigue", 0.42, alpha=0.2)
+
+# 未来：神经网络学习器（接口不变）
+learner = NeuralLearner(user_id="frunhsan")
+new_t = learner.update("fatigue", 0.42)  # 同一个接口
+```
+
+`ThresholdLearner` 是 Protocol，任何实现只要满足 `update()` 和 `get()` 签名即可替换。
+
+---
+
+## 架构决策记录
+
+### ADR-002：流式拦截器是独立组件
+
+拦截器位于 `llm.generate_stream()` 和前端之间。
+它不属于 ActionPipeline——ActionPipeline 校验完整的工具调用。
+拦截器决定**何时**调用 ActionPipeline。
+
+```
+LLM 流 → [FSM 拦截器] → 校验通过的 JSON → ActionPipeline.check()
+              │
+              ├── 文本模式 token → 前端 (直接透传)
+              └── 降级模式注入 → LLM 上下文 (绝不透传)
+```
+
+### ADR-003：SQLite WAL 模式是强制的
+
+`PRAGMA journal_mode=WAL` 启用读写并发。
+不开启 WAL，每次 `profile.save()` 锁死整个数据库。
+`busy_timeout=5000` 给 5 秒锁等待时间。
+
+### ADR-005：EMA 学习率按反馈强度分级
+
+显式反馈 (用户说"字少点") → α=0.25，强信号，快速调整。
+隐式反馈 (用户回"哦") → α=0.05，弱信号，缓慢漂移。
+硬护栏钳位，防止恶意驯化和阈值漂移。
+
+---
+
+## 时间线
+
+```
+第 1-2 周: 175+ 测试 (DynamicBlueprint, EvolutionEngine, ActionPipeline, Backlash) ✅
+第 3 周:   SQLite 持久化 (WAL 模式 + JSON 自动迁移) ✅
+第 4-5 周: 流式拦截 FSM (五态实现 + 边界测试) ✅
+第 6 周:   在线阈值学习 (EMA + 反馈采集 + 接口解耦) ✅
+第 7 周:   llama-server HTTP (子进程替换，待稳定版)
 ```
