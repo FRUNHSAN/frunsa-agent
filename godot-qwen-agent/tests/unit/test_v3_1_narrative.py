@@ -55,7 +55,7 @@ class TestNarrativeEmergence:
         for _ in range(3):
             repo.record("user_a", "fatigue_explicit", "brevity_command")
 
-        llm = FakeLLM("该用户在周二下午和深夜时段容易疲惫，偏好简洁直接的沟通方式。")
+        llm = FakeLLM("根据多次对话观察，该用户在周二下午和深夜时段容易感到疲惫，此时偏好简洁直接的沟通方式，抵触长篇大论。")
         ne = NarrativeEmergence(repo, llm)
         r1 = ne.generate("user_a")
         r2 = ne.generate("user_a")  # Should hit cache
