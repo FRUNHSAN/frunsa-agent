@@ -35,6 +35,8 @@ from core.adapters.output_grammar import build_grammar as build_gbnf
 from core.adapters.agent_router import decide as route_decide
 from core.adapters.stream_interceptor import StreamInterceptor, FSMState
 from core.adapters.action_pipeline import ActionPipeline
+from core.adapters.threshold_learner import EMALearner
+from core.adapters.feedback_listener import FeedbackListener
 
 # ── PLAN7.4: Dual-backend with active routing ──
 from LLM.native_llm import NativeLLMClient
@@ -68,8 +70,12 @@ print(f"  [PLAN7.4] Dual-backend: DeepSeek + Qwen3.5-4B (router active)")
 pipeline = OutputPipeline(bp)
 action = ActionPipeline(bp, trust=0.30)
 fsm = StreamInterceptor()
+learner = EMALearner(user_id=uid)
+listener = FeedbackListener(learner)
 
 trust = 0.30
+prev_response_len = 0
+prev_signal: dict = {"dimension": None, "score": 0.0}
 round_count = 0
 pending: list[dict] = []
 history: list[str] = []
@@ -281,7 +287,9 @@ while True:
 
     # ── SignalInterpreter: signal → Proposals → EvolutionEngine ──
     if USE_SEMANTIC and sem is not None and dim:
-        sig_proposals = signal_interpret(dim, score, trust, bp.snapshot, user)
+        # Personalized thresholds from online learning
+        learned = learner.get_all_thresholds() if USE_SEMANTIC else {}
+        sig_proposals = signal_interpret(dim, score, trust, bp.snapshot, user, thresholds=learned)
         for sp in sig_proposals:
             if _apply_proposal(sp, bp, engine, profile, trust, label="SIGNAL→CONTRACT"):
                 contract_events.append(
@@ -344,6 +352,18 @@ while True:
             full_response = f"[Contract blocked tool '{tool_name}': {check['reason']}]"
 
     print(f"\n[agent] {full_response}")
+
+    # ── V2.1: Feedback collection for online learning ──
+    if prev_signal.get("dimension"):
+        result = listener.on_user_input(user, prev_signal, prev_response_len)
+        if result:
+            print(f"  [learn] {result['dimension']}: alpha={result['alpha']} "
+                  f"{result['old_threshold']:.3f}→{result['new_threshold']:.3f} "
+                  f"({result['reason']})")
+
+    # Store for next round
+    prev_response_len = len(full_response)
+    prev_signal = {"dimension": dim, "score": score} if USE_SEMANTIC and dim else {"dimension": None, "score": 0.0}
 
     # ── Save history ──
     history.append(f"User: {user}")

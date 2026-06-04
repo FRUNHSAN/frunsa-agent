@@ -27,18 +27,24 @@ def interpret(
     trust: float,
     current_bp: dict[str, str],
     user_text: str = "",
+    thresholds: dict[str, float] | None = None,
 ) -> list[dict]:
     """Translate a trust signal into 0-N contract proposals.
+
+    Args:
+        thresholds: Per-user learned thresholds. Falls back to defaults.
 
     Returns list of proposal dicts, each with:
       {target_blueprint_key, new_value, trigger_condition, human_reason}
     """
     proposals: list[dict] = []
+    t = thresholds or {}  # Personalized thresholds
 
     # ── Complexity: user asks a big question → temporary verbosity lift ──
     verbose = current_bp.get("response_verbose_level", "HIGH")
+    complexity_threshold = t.get("curiosity", 0.40)
     if verbose in ("LOW", "MINIMAL", "VERY_LOW"):
-        if dim not in ("fatigue", "frustration") or score < 0.55:
+        if dim not in ("fatigue", "frustration") or score < t.get("fatigue", 0.55):
             if any(m in user_text for m in COMPLEXITY_MARKERS):
                 proposals.append({
                     "target_blueprint_key": "response_verbose_level",
@@ -50,11 +56,11 @@ def interpret(
                     ),
                 })
 
-    if not dim or score < 0.4:
+    if not dim or score < t.get("fatigue", 0.40) if not dim else score < complexity_threshold:
         return proposals
 
     # ── Fatigue: stop pushing, stop performing ──
-    if dim == "fatigue" and score > 0.55:
+    if dim == "fatigue" and score > t.get("fatigue", 0.55):
         if current_bp.get("conversational_initiative") != "RESPONSIVE_ONLY":
             proposals.append({
                 "target_blueprint_key": "conversational_initiative",
@@ -78,7 +84,7 @@ def interpret(
             })
 
     # ── Frustration: drop the act, be direct ──
-    if dim == "frustration" and score > 0.55:
+    if dim == "frustration" and score > t.get("frustration", 0.55):
         # First: reduce verbosity — the #1 frustration driver
         if current_bp.get("response_verbose_level") not in ("LOW", "MINIMAL"):
             proposals.append({
