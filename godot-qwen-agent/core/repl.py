@@ -149,6 +149,41 @@ class Repl:
             return ("conversational_initiative", "PROACTIVE")
         return None
 
+    def _do_rag(self, query: str, xray: XRay) -> str:
+        """Execute RAG pipeline: search → guard → return context or blocked message."""
+        from core.adapters.knowledge_search import search as kb_search
+        check = self.c.action_pipeline.check("knowledge_search")
+        if not check["allowed"]:
+            reason = check["reason"]
+            print(f"  [RAG] 🔴 拦截: {reason}")
+            xray.log("知识网关", f"拦截: {reason}")
+            return f"[RAG拦截: {reason}]"
+
+        results = kb_search(query, max_results=5)
+        if not results:
+            print(f"  [RAG] 未找到匹配: {query}")
+            return ""
+
+        filtered = self.c.action_pipeline.guard_post_retrieval("knowledge_search", results)
+        context_parts = []
+        blocked_count = 0
+        for r in filtered:
+            blocked = "不可访问" in r.get("content", "")
+            if blocked:
+                blocked_count += 1
+                xray.log("知识网关", f"拦截 {r['file']}")
+            else:
+                xray.log("RAG检索", f"命中 {r['file']}")
+            context_parts.append(f"[来源: {r['file']}]\n{r['content']}")
+
+        if blocked_count > 0:
+            print(f"  [RAG] 🔴 {blocked_count} 个文件被拦截, {len(filtered)-blocked_count} 个放行")
+
+        rag_context = "\n\n".join(context_parts)
+        if not rag_context.strip():
+            return "[RAG: 未找到可访问的匹配内容]"
+        return rag_context
+
     def _apply_proposal(self, prop: dict, label: str = "") -> bool:
         accepted, reason = self.c.engine.evaluate(prop, self.c.bp, self.trust)
         if accepted:
@@ -167,6 +202,7 @@ class Repl:
         bp, trust = self.c.bp, self.trust
         uid = self.c.cfg.user_id
         session_log: list[str] = []
+        rag_mode = False  # Toggle: /rag on | /rag off
 
         print(f"\n{'='*50}")
         print(f"PLAN5 Live — {uid}")
@@ -208,27 +244,19 @@ class Repl:
                 print(f"  当前: tone={bp.fields.get('tone_style','?')} "
                       f"trust={trust:.2f} initiative={bp.fields.get('conversational_initiative','?')}")
                 continue
+            if cmd == "/rag on":
+                rag_mode = True
+                print(f"  [RAG] 本地知识库模式已开启。每次提问将先检索再回答。")
+                continue
+            if cmd == "/rag off":
+                rag_mode = False
+                print(f"  [RAG] 本地知识库模式已关闭。恢复普通对话。")
+                continue
             if cmd.startswith("/rag"):
-                xray = XRay()  # Per-round dashboard
-                # Real knowledge search with contract gating
+                # Direct RAG query: /rag 微服务
+                xray = XRay()
                 query = user[5:].strip() or "test"
-                check = self.c.action_pipeline.check("knowledge_search")
-                if not check["allowed"]:
-                    print(f"  [RAG] BLOCKED: {check['reason']}")
-                    xray.log("知识网关", f"拦截: {check['reason']}")
-                else:
-                    # Real file search from knowledge_base/
-                    from core.adapters.knowledge_search import search as kb_search
-                    results = kb_search(query, max_results=5)
-                    if not results:
-                        print(f"  [RAG] 未找到匹配结果: {query}")
-                        continue
-                    filtered = self.c.action_pipeline.guard_post_retrieval("knowledge_search", results)
-                    for r in filtered:
-                        blocked = "不可访问" in r.get("content", "")
-                        status = "🔴 拦截" if blocked else "🟢 放行"
-                        print(f"  [RAG] {status} {r['file']}: {r['content'][:80]}...")
-                        xray.log("知识网关" if blocked else "RAG检索", f"{status} {r['file']}")
+                self._do_rag(query, xray)
                 continue
             if not user.strip():
                 continue
@@ -299,9 +327,16 @@ class Repl:
                         self.contract_events.append(f"[R{self.round_count}] {sp['target_blueprint_key']} -> {sp['new_value']}")
                         xray.log("契约演化", f"{sp['target_blueprint_key']} → {sp['new_value']} ({sp.get('human_reason','')[:40]})")
 
+            # ── Auto-RAG: inject knowledge context when mode is on ──
+            rag_context = ""
+            if rag_mode and not cmd.startswith("/"):
+                rag_context = self._do_rag(user, xray)
+                if rag_context:
+                    rag_context = f"\n\n[本地知识库检索结果]\n{rag_context}\n[/知识库]"
+
             # ── Build prompt + generate ──
             system = self._build_prompt(uid)
-            full_prompt = f"{system}\n\nUser: {user}"
+            full_prompt = f"{system}{rag_context}\n\nUser: {user}"
 
             backend = route_decide(bp.snapshot, user, trust)
             if backend == "local":
