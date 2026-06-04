@@ -216,13 +216,13 @@ class Repl:
                     print(f"  [RAG] BLOCKED: {check['reason']}")
                     xray.log("知识网关", f"拦截: {check['reason']}")
                 else:
-                    # Simulate search results
-                    mock_results = [
-                        {"file": "public_docs/faq.md", "content": "Q: 量子计算是什么？A: 利用量子比特的叠加态进行计算...", "query": query},
-                        {"file": "hr_docs/layoff_plan_2024.docx", "content": "机密：Q3裁员计划，涉及边缘业务线200人...", "query": query},
-                        {"file": "company_wiki/architecture.md", "content": "系统架构采用微服务设计，核心服务包含...", "query": query},
-                    ]
-                    filtered = self.c.action_pipeline.guard_post_retrieval("knowledge_search", mock_results)
+                    # Real file search from knowledge_base/
+                    from core.adapters.knowledge_search import search as kb_search
+                    results = kb_search(query, max_results=5)
+                    if not results:
+                        print(f"  [RAG] 未找到匹配结果: {query}")
+                        continue
+                    filtered = self.c.action_pipeline.guard_post_retrieval("knowledge_search", results)
                     for r in filtered:
                         blocked = "不可访问" in r.get("content", "")
                         status = "🔴 拦截" if blocked else "🟢 放行"
