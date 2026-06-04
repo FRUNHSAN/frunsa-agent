@@ -66,10 +66,17 @@ class Repl:
         now = datetime.now().strftime("%H:%M")
         system = f"{contract}\n当前时间: {now}\n{context}".strip()
 
+        # ── V2.2: Relational hint ──
         hint = self.c.patterns.generate_hint(self.c.cfg.user_id) if self.round_count <= 2 else None
         if hint:
             system = f"{hint}\n\n{system}"
             print(f"  [relation] {hint[:100]}")
+        # ── V3.1: Narrative emergence (first round only) ──
+        if self.round_count == 1:
+            narrative = self.c.narrative.inject(uid)
+            if narrative:
+                system = f"{narrative}\n\n{system}"
+                print(f"  [narrative] injected user profile ({len(narrative)} chars)")
         return system
 
     def _detect_explicit_command(self, text: str) -> tuple[str, str] | None:
