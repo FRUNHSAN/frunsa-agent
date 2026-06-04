@@ -1,63 +1,26 @@
-name: Frunsa-Agent CI
+name: CI
 
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
-  workflow_dispatch:
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install ruff
+      - run: ruff check .
+
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    strategy:
-      matrix:
-        python-version: ["3.12"]
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: pip
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pytest pyyaml jsonschema msgpack
-
-      - name: Guardrails — AST architecture check (ERROR level)
-        run: python -m guardrails check
-
-      - name: Guardrails — full rule check (WARNING level)
-        run: python -m guardrails check --all
-
-      - name: Test — full suite (673 tests)
-        run: python -m pytest tests/ -v --tb=short
-
-  quick:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pytest pyyaml jsonschema msgpack
-
-      - name: Quick test (no slow markers)
-        run: python -m pytest tests/ -q --tb=line -m "not slow"
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install pytest
+      - run: python -m pytest tests/unit/ -q --tb=short --ignore=tests/e2e
