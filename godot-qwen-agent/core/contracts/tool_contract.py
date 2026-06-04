@@ -114,7 +114,7 @@ TOOLS: dict[str, dict[str, Any]] = {
         "risk_level": RiskLevel.READ,
         "min_trust": 0.20,
         "category": "knowledge",
-        "whitelist": ["knowledge_base/public_docs/", "knowledge_base/company_wiki/"],
+        "whitelist": ["public_docs/", "company_wiki/"],
         "blocked_keywords": ["机密", "confidential", "裁员", "layoff", "高管", "executive"],
         "max_results": 3,
     },
