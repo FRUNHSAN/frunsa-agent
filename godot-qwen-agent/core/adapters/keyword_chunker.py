@@ -9,10 +9,10 @@ from __future__ import annotations
 from typing import ClassVar
 
 from core.contracts.chunking import Chunk, ContentBlock, SemVer, ChunkingStrategy
-from core.contracts.registry import COMPONENT_REGISTRY
+from core.contracts.registry import register_component
 
 
-@COMPONENT_REGISTRY.register("chunker", "keyword")
+@register_component("chunker", "keyword")
 class KeywordChunker:
     """Paragraph-based chunking. Overlap = 1 sentence."""
 
@@ -43,17 +43,17 @@ class KeywordChunker:
         for para in paragraphs:
             if len(buffer) + len(para) > self._size and buffer:
                 chunks.append(Chunk(
-                    text=buffer.strip(), sequence=seq,
+                    text=buffer.strip(), span=(seq, seq + len(buffer)),
                     metadata={"chunker": "keyword", "chunk_size": len(buffer)},
                 ))
-                seq += 1
+                seq += len(buffer)
                 # Overlap: keep last N chars
                 buffer = buffer[-self._overlap:] if self._overlap > 0 else ""
             buffer += para + "\n\n"
 
         if buffer.strip():
             chunks.append(Chunk(
-                text=buffer.strip(), sequence=seq,
+                text=buffer.strip(), span=(seq, seq + len(buffer)),
                 metadata={"chunker": "keyword", "chunk_size": len(buffer)},
             ))
 

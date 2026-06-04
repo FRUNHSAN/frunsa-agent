@@ -16,30 +16,34 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent / "knowledge_base"
 SUPPORTED_SUFFIXES = {".txt", ".md", ".py", ".yaml", ".yml", ".json", ".log"}
 
 
-def search(query: str, max_results: int = 3, chunker_name: str = "keyword") -> list[dict]:
+def search(
+    query: str, max_results: int = 3,
+    chunker_name: str = "keyword",
+    mode: str = "keyword",  # "keyword" | "semantic"
+) -> list[dict]:
     """Pipeline-composable knowledge search.
 
     1. Load files → ContentBlock
     2. Chunk via COMPONENT_REGISTRY (default: KeywordChunker)
-    3. Keyword match scoring
+    3. Score: keyword match (mode="keyword") or embedding cosine (mode="semantic")
     4. Return top-N results → ActionPipeline.guard_post_retrieval()
 
     Swap chunker: search("query", chunker_name="semantic")
-    Swap to embedding: replace keyword match with vector similarity.
+    Swap retriever: search("query", mode="semantic")
     """
     if not BASE_DIR.exists():
         return []
 
-    # Get chunker from registry
-    chunker = COMPONENT_REGISTRY.get("chunker", chunker_name)
-    if chunker is None:
-        # Fallback: instantiate keyword chunker directly
+    # Get chunker from registry (import ensures registration)
+    import core.adapters.keyword_chunker  # noqa: triggers @register_component
+    chunker_cls = COMPONENT_REGISTRY.get("chunker", chunker_name)
+    if chunker_cls is None:
         from core.adapters.keyword_chunker import KeywordChunker
-        chunker = KeywordChunker()
+        chunker_cls = KeywordChunker
+    chunker = chunker_cls()  # Instantiate the chunker class
 
-    keywords = set(query.lower().split())
-    results: list[tuple[int, str, str]] = []  # (score, file, chunk_text)
-
+    # Phase 1: Load + Chunk all files
+    all_chunks: list[dict] = []
     for file_path in BASE_DIR.rglob("*"):
         if file_path.suffix not in SUPPORTED_SUFFIXES:
             continue
@@ -47,20 +51,30 @@ def search(query: str, max_results: int = 3, chunker_name: str = "keyword") -> l
             raw = file_path.read_text(encoding="utf-8")
         except Exception:
             continue
+        block = ContentBlock(text=raw, source=str(file_path))
+        for chunk in chunker.chunk(block):
+            all_chunks.append({
+                "file": str(file_path.relative_to(BASE_DIR)),
+                "content": chunk.text[:800],
+                "query": query,
+            })
 
-        # Pipeline: ContentBlock → ChunkingStrategy.chunk()
-        block = ContentBlock(text=raw, metadata={"source": str(file_path)})
-        chunks = chunker.chunk(block)
+    # Phase 2: Score + Rank
+    if mode == "semantic":
+        try:
+            from core.adapters.semantic_retriever import SemanticRetriever
+            retriever = SemanticRetriever()
+            return retriever.rank(query, all_chunks, top_k=max_results)
+        except (ImportError, OSError):
+            pass  # Fall through to keyword mode
 
-        for chunk in chunks:
-            text_lower = chunk.text.lower()
-            score = sum(1 for kw in keywords if kw in text_lower)
-            if score > 0:
-                rel_path = str(file_path.relative_to(BASE_DIR))
-                results.append((score, rel_path, chunk.text[:800]))
-
-    results.sort(key=lambda r: r[0], reverse=True)
-    return [
-        {"file": r[1], "content": r[2], "query": query}
-        for r in results[:max_results]
-    ]
+    # Keyword mode (default + fallback)
+    keywords = set(query.lower().split())
+    scored = []
+    for c in all_chunks:
+        score = sum(1 for kw in keywords if kw in c["content"].lower())
+        if score > 0:
+            c["score"] = float(score)
+            scored.append(c)
+    scored.sort(key=lambda c: c.get("score", 0), reverse=True)
+    return scored[:max_results]
