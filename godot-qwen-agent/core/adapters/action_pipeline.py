@@ -85,8 +85,9 @@ class ActionPipeline:
             path = r.get("file", "") or r.get("source", "")
             content = r.get("content", "") or r.get("snippet", "")
 
-            # Check whitelist
-            if whitelist and not any(path.startswith(w) for w in whitelist):
+            # Check whitelist (normalize slashes for cross-platform)
+            path_norm = path.replace("\\", "/")
+            if whitelist and not any(path_norm.startswith(w) for w in whitelist):
                 r["content"] = "<SYSTEM>此知识源在当前契约下不可访问。</SYSTEM>"
                 blocked_count += 1
 

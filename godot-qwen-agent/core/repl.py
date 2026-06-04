@@ -209,7 +209,8 @@ class Repl:
                       f"trust={trust:.2f} initiative={bp.fields.get('conversational_initiative','?')}")
                 continue
             if cmd.startswith("/rag"):
-                # Demo: simulate knowledge search with contract gating
+                xray = XRay()  # Per-round dashboard
+                # Real knowledge search with contract gating
                 query = user[5:].strip() or "test"
                 check = self.c.action_pipeline.check("knowledge_search")
                 if not check["allowed"]:
