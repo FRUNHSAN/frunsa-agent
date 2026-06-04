@@ -18,18 +18,19 @@ BINARY = Path(__file__).resolve().parent.parent / "llama" / "llama-completion.ex
 # Default: auto-detect best model available
 def _default_model() -> Path:
     base = Path(__file__).resolve().parent.parent
-    # Best → fallback. Absolute paths for models outside project dir.
-    for pattern, is_abs in [
-        ("models/qwen2.5-coder-1.5b*q4*", False),
-        ("d:/tuili/qwen2.5-coder-1.5b*q4*", True),
-        ("models/Qwen3.5-4B-Q4_K_M.gguf", False),
-        ("models/qwen2.5-7b*q4*00001*", False),
-        ("models/qwen2.5-0.5b*q4*", False),
-    ]:
-        root = Path(".") if is_abs else base
-        matches = sorted(root.glob(pattern))
-        if matches:
-            return matches[0]
+    # Best → fallback
+    candidates = [
+        Path("d:/tuili/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"),
+        base / "models/Qwen3.5-4B-Q4_K_M.gguf",
+        base / "models/qwen2.5-7b*q4*00001*",
+        base / "models/qwen2.5-0.5b*q4*",
+    ]
+    for p in candidates:
+        if "*" in str(p):
+            matches = sorted(base.glob(str(p).split("/")[-1]))
+            if matches: return matches[0]
+        elif p.exists():
+            return p
     return base / "models/qwen2.5-0.5b-instruct-q4_k_m.gguf"
 
 
