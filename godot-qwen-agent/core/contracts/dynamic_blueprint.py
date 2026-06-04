@@ -55,6 +55,7 @@ class DynamicBlueprint:
     _applied_count: int = 0
     _rejection_log: list[dict] = field(default_factory=list)  # for System 2
     _instructions: dict[str, str] = field(default_factory=dict)  # (field:value) → instruction
+    _instruction_last_used: dict[str, int] = field(default_factory=dict)  # (field:value) → round last used
     _baseline: dict[str, Any] = field(default_factory=dict)
     _last_modified: dict[str, float] = field(default_factory=dict)
     _round_counter: int = 0
@@ -166,6 +167,9 @@ class DynamicBlueprint:
         Returns dict of {field: "old -> new"} for logging, empty if no decay.
         """
         self._round_counter += 1
+        # Periodic GC: clean stale instructions every 10 rounds
+        if self._round_counter % 10 == 0:
+            self.gc_instructions(stale_rounds=60)
         changes: dict[str, str] = {}
 
         for key, baseline_val in self._baseline.items():
@@ -228,7 +232,20 @@ class DynamicBlueprint:
     def get_instruction(self, key: str) -> str:
         """Get execution instruction for a field's current value."""
         val = self.fields.get(key, "")
+        if val:
+            self._instruction_last_used[f"{key}:{val}"] = self._round_counter
         return self._instructions.get(f"{key}:{val}", "")
+
+    def gc_instructions(self, stale_rounds: int = 60) -> int:
+        """Remove novel values unused for ≥stale_rounds. Returns count removed."""
+        removed = 0
+        for kv in list(self._instructions.keys()):
+            last = self._instruction_last_used.get(kv, 0)
+            if self._round_counter - last >= stale_rounds:
+                del self._instructions[kv]
+                self._instruction_last_used.pop(kv, None)
+                removed += 1
+        return removed
 
     @property
     def applied_count(self) -> int:
