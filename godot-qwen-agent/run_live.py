@@ -37,6 +37,7 @@ from core.adapters.stream_interceptor import StreamInterceptor, FSMState
 from core.adapters.action_pipeline import ActionPipeline
 from core.adapters.threshold_learner import EMALearner
 from core.adapters.feedback_listener import FeedbackListener
+from core.adapters.relational_patterns import RelationalPatterns
 
 # ── PLAN7.4: Dual-backend with active routing ──
 from LLM.native_llm import NativeLLMClient
@@ -72,6 +73,7 @@ action = ActionPipeline(bp, trust=0.30)
 fsm = StreamInterceptor()
 learner = EMALearner(user_id=uid)
 listener = FeedbackListener(learner)
+patterns = RelationalPatterns()
 
 trust = 0.30
 prev_response_len = 0
@@ -307,6 +309,12 @@ while True:
         f"{context}"
     ).strip()
 
+    # ── V2.2: Proactive relational hint ──
+    hint = patterns.generate_hint(uid) if round_count <= 2 else None
+    if hint:
+        system = f"{hint}\n\n{system}"
+        print(f"  [relation] {hint[:100]}")
+
     print()
     full_prompt = f"{system}\n\nUser: {user}"
     full_response = ""
@@ -360,6 +368,12 @@ while True:
             print(f"  [learn] {result['dimension']}: alpha={result['alpha']} "
                   f"{result['old_threshold']:.3f}→{result['new_threshold']:.3f} "
                   f"({result['reason']})")
+
+    # ── V2.2: Record relational pattern ──
+    if USE_SEMANTIC and dim == "fatigue" and score > 0.5:
+        patterns.record(uid, behavior="fatigue_brevity", action="verbose_reduce")
+    if any(w in user for w in ("字少点", "别啰嗦", "简洁")):
+        patterns.record(uid, behavior="fatigue_explicit", action="brevity_command")
 
     # Store for next round
     prev_response_len = len(full_response)
