@@ -88,6 +88,8 @@ def _detect_explicit_command(text: str) -> tuple[str, str] | None:
         return ("response_verbose_level", "MINIMAL")
     if any(w in t for w in ("详细点", "展开", "多说点", "讲详细", "展开讲讲")):
         return ("response_verbose_level", "HIGH")
+    if any(w in t for w in ("字多点", "多一点", "多一点点", "再多一点")):
+        return ("response_verbose_level", "MEDIUM")
 
     # Tone commands
     if any(w in t for w in ("带点感情", "来点人味", "别这么机器", "像朋友", "像人一样", "自然点")):
@@ -234,9 +236,10 @@ while True:
 
     # ── Apply pending proposals ──
     for prop in list(pending):
-        if _apply_proposal(prop, bp, engine, profile, trust, label="CONTRACT EVOLVED"):
-            event = f"[R{round_count}] {prop['target_blueprint_key']}: -> {prop['new_value']}"
-            contract_events.append(event)
+        if _apply_proposal(prop, bp, engine, profile, trust, label="SYSTEM2"):
+            contract_events.append(
+                f"[R{round_count}] {prop['target_blueprint_key']} -> {prop['new_value']}"
+            )
         pending.remove(prop)
 
     # ── Boss 2: Explicit user commands bypass Trust gate ──
@@ -249,13 +252,19 @@ while True:
             "trigger_condition": "user_said_so",
             "human_reason": f"User explicitly requested: '{user[:40]}'.",
         }
-        _apply_proposal(cmd_prop, bp, engine, profile, trust, label="USER COMMAND")
+        if _apply_proposal(cmd_prop, bp, engine, profile, trust, label="USER COMMAND"):
+            contract_events.append(
+                f"[R{round_count}] {cmd_prop['target_blueprint_key']} -> {cmd_prop['new_value']}"
+            )
 
     # ── SignalInterpreter: signal → Proposals → EvolutionEngine ──
     if USE_SEMANTIC and sem is not None and dim:
         sig_proposals = signal_interpret(dim, score, trust, bp.snapshot, user)
         for sp in sig_proposals:
-            _apply_proposal(sp, bp, engine, profile, trust, label="SIGNAL→CONTRACT")
+            if _apply_proposal(sp, bp, engine, profile, trust, label="SIGNAL→CONTRACT"):
+                contract_events.append(
+                    f"[R{round_count}] {sp['target_blueprint_key']} -> {sp['new_value']}"
+                )
 
     # ── Build prompt from Blueprint (data-driven, no hardcoded constraints) ──
     contract = build_contract_directive(bp.snapshot)
