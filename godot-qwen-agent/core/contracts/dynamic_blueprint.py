@@ -103,6 +103,7 @@ class DynamicBlueprint:
                         return False, "Instruction must be ≤80 characters."
                     # Accept novel value with instruction
                     self._instructions[f"{target_key}:{new_value}"] = instruction
+                    return True, "Accepted with instruction."
         except ImportError:
             pass
 
@@ -119,7 +120,6 @@ class DynamicBlueprint:
 
         # ── Min autonomy floor ──
         if target_key == "execution_autonomy":
-            from .dynamic_blueprint import AUTONOMY_SCALE
             current_num = AUTONOMY_SCALE.get(self.fields.get(target_key, self.min_autonomy), 99)
             new_num = AUTONOMY_SCALE.get(new_value, 99)
             min_num = AUTONOMY_SCALE.get(self.min_autonomy, 1)
