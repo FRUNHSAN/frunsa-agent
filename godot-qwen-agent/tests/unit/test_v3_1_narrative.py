@@ -55,7 +55,7 @@ class TestNarrativeEmergence:
         for _ in range(3):
             repo.record("user_a", "fatigue_explicit", "brevity_command")
 
-        llm = FakeLLM("第一版叙事")
+        llm = FakeLLM("该用户在周二下午和深夜时段容易疲惫，偏好简洁直接的沟通方式。")
         ne = NarrativeEmergence(repo, llm)
         r1 = ne.generate("user_a")
         r2 = ne.generate("user_a")  # Should hit cache
@@ -76,11 +76,11 @@ class TestNarrativeEmergence:
         for _ in range(3):
             repo.record("user_a", "fatigue_explicit", "brevity_command")
 
-        llm = FakeLLM("该用户偏好简短回复。")
+        llm = FakeLLM("该用户偏好简短回复，在疲惫时尤其希望AI能直接给出结论而非长篇大论。")
         ne = NarrativeEmergence(repo, llm)
         result = ne.inject("user_a")
         assert "用户画像" in result
-        assert "该用户偏好简短回复" in result
+        assert "简短" in result
 
     def test_short_narrative_rejected(self):
         repo = MockPatternRepository()
