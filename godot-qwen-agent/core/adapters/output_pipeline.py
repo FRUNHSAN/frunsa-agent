@@ -88,17 +88,28 @@ class OutputPipeline:
 
     @staticmethod
     def _truncate_sentences(text: str, max_sentences: int) -> str:
-        """Cut text after N sentence-ending punctuations."""
+        """Cut text after N sentence-ending punctuations.
+
+        Smart boundary: '.' only counts as sentence end when followed by
+        space+capital or end-of-string — avoids splitting on 'e.g.', '3.14', etc.
+        """
         count = 0
         result: list[str] = []
-        for ch in text:
+        chars = list(text)
+        for i, ch in enumerate(chars):
             result.append(ch)
-            if ch in "。！？.!?":
+            if ch in "。！？!?":
                 count += 1
-                if count >= max_sentences:
-                    # Include this sentence terminator, then stop
-                    # Don't add ellipsis — clean cut
-                    return "".join(result).rstrip()
+            elif ch == ".":
+                # Only count as sentence end if followed by space+uppercase or end
+                next_ch = chars[i + 1] if i + 1 < len(chars) else ""
+                next_next = chars[i + 2] if i + 2 < len(chars) else ""
+                if not next_ch or (next_ch == " " and next_next.isupper()):
+                    count += 1
+                elif next_ch == "\n":
+                    count += 1
+            if count >= max_sentences:
+                return "".join(result).rstrip()
         return "".join(result)
 
     @staticmethod

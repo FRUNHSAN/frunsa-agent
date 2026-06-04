@@ -134,6 +134,14 @@ class DynamicBlueprint:
                 return False, "No-op: same value."
 
         elif target_key not in self.fields:
+            # Only allow fields defined in schema
+            try:
+                from .blueprint_schema import BLUEPRINT_SCHEMA
+                if target_key not in BLUEPRINT_SCHEMA:
+                    self._log_rejection(target_key, new_value, f"Unknown field: {target_key}")
+                    return False, f"Unknown field: '{target_key}' not in schema."
+            except ImportError:
+                pass
             self.fields[target_key] = new_value
             self._last_modified[target_key] = self._round_counter
             return True, "Created new field."

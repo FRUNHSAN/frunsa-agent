@@ -72,7 +72,7 @@ class EMALearner:
 
     def __init__(self, user_id: str, db_path: str = "thresholds.db") -> None:
         self._user_id = user_id
-        self._conn = sqlite3.connect(db_path)
+        self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA busy_timeout=5000")
         self._conn.execute(
@@ -129,9 +129,6 @@ class EMALearner:
         self._conn.commit()
 
     def close(self) -> None:
-        self._conn.close()
-
-    def __del__(self) -> None:
         try:
             self._conn.close()
         except Exception:
