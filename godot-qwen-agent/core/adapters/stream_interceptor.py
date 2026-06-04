@@ -95,8 +95,10 @@ class StreamInterceptor:
         elif self.state == FSMState.VALIDATING:
             return self._handle_validating()
         elif self.state == FSMState.EXECUTING:
+            self.state = FSMState.TEXT
             return InterceptResult(state=FSMState.TEXT, output_token="")
         elif self.state == FSMState.FALLBACK:
+            self.state = FSMState.TEXT
             return InterceptResult(state=FSMState.TEXT, output_token="")
         return InterceptResult(state=FSMState.TEXT, output_token=token)
 
@@ -139,7 +141,13 @@ class StreamInterceptor:
         self._text_window = (self._text_window + token)[-200:]  # Keep last 200 chars
         if self._is_trigger(self._text_window):
             self.state = FSMState.BUFFERING
-            self._buffer = [self._text_window[self._text_window.rfind("<"):]]  # From trigger start
+            # Find trigger start: XML uses '<', JSON uses '{'
+            trigger_start = max(
+                self._text_window.rfind("<"),
+                self._text_window.rfind('{"tool"'),
+                self._text_window.rfind('{"tool_call"'),
+            )
+            self._buffer = [self._text_window[trigger_start:]] if trigger_start >= 0 else [self._text_window]
             self._text_window = ""
             return InterceptResult(state=FSMState.BUFFERING)
         return InterceptResult(state=FSMState.TEXT, output_token=token)
@@ -213,18 +221,20 @@ class StreamInterceptor:
     def _is_complete(self, content: str) -> bool:
         if self.END_MARKER in content:
             return True
-        # Brace-depth method: count { and }
+        # Brace-depth method: count { and } with correct escape tracking
         depth = 0
         in_string = False
+        prev_char = ''
         for ch in content:
-            if ch == '"' and (len(content) > 0 and content[-2] != '\\'):
+            if ch == '"' and prev_char != '\\':
                 in_string = not in_string
             if not in_string:
                 if ch == '{':
                     depth += 1
                 elif ch == '}':
                     depth -= 1
-        return depth == 0 and depth is not None and '{' in content
+            prev_char = ch
+        return depth == 0 and '{' in content
 
     @staticmethod
     def _extract_tool_name(content: str) -> str:

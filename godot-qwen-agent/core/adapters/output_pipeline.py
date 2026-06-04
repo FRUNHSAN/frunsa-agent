@@ -112,8 +112,15 @@ class OutputPipeline:
 
     @staticmethod
     def _detect_sycophancy(text: str) -> float:
-        """Return trust penalty if sycophancy detected."""
+        """Return trust penalty if sycophancy detected anywhere."""
+        t = text.strip()
         for pattern in SYCOPHANCY_PATTERNS:
-            if text.strip().startswith(pattern):
+            # Check start AND first sentence (after ？。！)
+            if t.startswith(pattern):
                 return 0.03
+            # Also check after first sentence boundary
+            for sep in ("。", "？", "！", ". ", "? ", "! "):
+                idx = t.find(sep)
+                if idx > 0 and pattern in t[idx:idx + 30]:
+                    return 0.02
         return 0.0

@@ -15,6 +15,11 @@ from enum import Enum
 from typing import Any
 
 
+# ── Validation constants ──
+MIN_TRUST_MIN = 0.0
+MIN_TRUST_MAX = 1.0
+
+
 class RiskLevel(str, Enum):
     READ = "read"              # Query only, no side effects
     WRITE = "write"            # Creates/modifies data
@@ -38,6 +43,13 @@ class ToolContract:
     require_hitl: bool = False       # Always require human confirmation
     category: str = "general"        # For Constitution checks
     tags: frozenset[str] = field(default_factory=frozenset)
+
+    def __post_init__(self) -> None:
+        if not self.name or not self.name.strip():
+            raise ValueError("ToolContract name cannot be empty")
+        clamped = max(MIN_TRUST_MIN, min(MIN_TRUST_MAX, self.min_trust))
+        if clamped != self.min_trust:
+            object.__setattr__(self, "min_trust", clamped)
 
     def check_trust(self, current_trust: float) -> tuple[bool, str]:
         """Can this tool execute at the current trust level?"""
