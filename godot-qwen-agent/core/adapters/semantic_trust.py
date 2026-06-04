@@ -14,6 +14,9 @@ Design:
 
 from __future__ import annotations
 
+import os as _os
+_os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+
 import numpy as np
 
 try:
@@ -95,7 +98,7 @@ class SemanticTrustEngine:
         # Pre-compute anchor centers ONCE
         self._centers: dict[str, np.ndarray] = {}
         for dim, sentences in ANCHOR_SENTENCES.items():
-            embs = self._model.encode(sentences, convert_to_numpy=True)
+            embs = self._model.encode(sentences, convert_to_numpy=True)  # list already
             self._centers[dim] = np.mean(embs, axis=0)
 
     def detect(self, text: str) -> dict:
@@ -103,7 +106,7 @@ class SemanticTrustEngine:
 
         Returns: {"dimension": str|None, "score": float, "all_scores": dict}
         """
-        user_emb = self._model.encode(text, convert_to_numpy=True)
+        user_emb = self._model.encode([text], convert_to_numpy=True)
         all_scores: dict[str, float] = {}
         best_dim, best_score = None, 0.0
 

@@ -18,6 +18,10 @@ if sys.platform == "win32":
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+# ── HF mirror for Chinese users ──
+import os as _os
+_os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+
 from dotenv import load_dotenv; load_dotenv()
 from LLM.deepseek import DeepSeekClient
 from core.contracts.dynamic_blueprint import DynamicBlueprint
