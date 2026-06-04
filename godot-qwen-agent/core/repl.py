@@ -30,7 +30,7 @@ class Repl:
 
     # ── Prompt construction (delegates to adapters) ──
 
-    def _build_prompt(self) -> str:
+    def _build_prompt(self, uid: str = "default") -> str:
         from core.adapters.output_grammar import build_grammar as build_gbnf
 
         def _build_contract_directive(bp_fields: dict) -> str:
@@ -204,7 +204,7 @@ class Repl:
                         xray.log("契约演化", f"{sp['target_blueprint_key']} → {sp['new_value']} ({sp.get('human_reason','')[:40]})")
 
             # ── Build prompt + generate ──
-            system = self._build_prompt()
+            system = self._build_prompt(uid)
             full_prompt = f"{system}\n\nUser: {user}"
 
             backend = route_decide(bp.snapshot, user, trust)
