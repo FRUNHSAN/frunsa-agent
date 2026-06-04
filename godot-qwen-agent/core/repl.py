@@ -13,6 +13,44 @@ from core.adapters.agent_router import decide as route_decide
 from core.adapters.stream_interceptor import FSMState
 from core.xray import XRay
 
+# ── Semantic command classifier (embedding-based, no hardcoded keywords) ──
+_EMBED_MODEL: object | None = None
+
+
+def _get_command_model():
+    global _EMBED_MODEL
+    if _EMBED_MODEL is None:
+        import numpy as np
+        from sentence_transformers import SentenceTransformer, util as st_util
+        m = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+        anchors = {
+            "response_verbose_level:MINIMAL": ["字少点", "别啰嗦", "简单点说", "话少点", "精简", "简洁", "短一点"],
+            "response_verbose_level:HIGH": ["详细点", "展开讲讲", "多说点", "再讲讲", "展开来说"],
+            "response_verbose_level:MEDIUM": ["字多点", "多一点", "多一点点", "多讲几句"],
+            "conversational_initiative:PROACTIVE": ["你问", "问问题", "反问", "问我", "你问我", "问我几个", "你倒是问"],
+            "conversational_initiative:RESPONSIVE_ONLY": ["别问了", "不要问", "别反问", "别老问我"],
+            "tone_style:WARM": ["带点感情", "自然点", "像朋友", "来点人味"],
+        }
+        centers = {}
+        for label, sentences in anchors.items():
+            centers[label] = np.mean(m.encode(sentences), axis=0)
+        _EMBED_MODEL = (m, st_util, centers)
+    return _EMBED_MODEL
+
+
+def _classify_command(text: str) -> tuple[str, str] | None:
+    m, st_util, centers = _get_command_model()
+    emb = m.encode(text)
+    best_label, best_score = None, 0.0
+    for label, center in centers.items():
+        s = float(st_util.cos_sim(emb, center))
+        if s > best_score:
+            best_label, best_score = label, s
+    if best_label and best_score > 0.45:
+        key, val = best_label.split(":", 1)
+        return (key, val)
+    return None
+
 
 class Repl:
     """Interactive chat loop. Assembled by Container, run by main()."""
@@ -83,16 +121,24 @@ class Repl:
         return system
 
     def _detect_explicit_command(self, text: str) -> tuple[str, str] | None:
+        """Semantic command detection via embedding — no hardcoded keywords."""
+        try:
+            return _classify_command(text)
+        except Exception:
+            return self._keyword_fallback(text)
+
+    @staticmethod
+    def _keyword_fallback(text: str) -> tuple[str, str] | None:
         t = text.strip()
-        if any(w in t for w in ("字少点", "别啰嗦", "简洁", "简单点说")):
+        if any(w in t for w in ("字少点", "别啰嗦", "简洁", "简单点说", "短一点")):
             return ("response_verbose_level", "MINIMAL")
         if any(w in t for w in ("详细点", "展开", "多说点", "展开讲讲")):
             return ("response_verbose_level", "HIGH")
-        if any(w in t for w in ("字多点", "多一点", "多一点点")):
+        if any(w in t for w in ("字多点", "多一点", "多一点点", "多讲几句")):
             return ("response_verbose_level", "MEDIUM")
         if any(w in t for w in ("带点感情", "来点人味", "像朋友")):
             return ("tone_style", "WARM")
-        if any(w in t for w in ("别问了", "不要问")):
+        if any(w in t for w in ("别问了", "不要问", "别反问", "别老问")):
             return ("conversational_initiative", "RESPONSIVE_ONLY")
         if any(w in t for w in ("你问", "问问题", "反问", "问我", "问几个")):
             return ("conversational_initiative", "PROACTIVE")
