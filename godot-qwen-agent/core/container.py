@@ -42,6 +42,10 @@ class Container:
         self.fsm = StreamInterceptor()
         self.listener = FeedbackListener(self.learner)
 
+        # ── Pre-load all registered components before sealing ──
+        import core.adapters.keyword_chunker  # noqa: triggers @register_component
+        import core.adapters.semantic_chunker  # noqa: triggers @register_component
+
         # ── Seal the registry (invariant #23) ──
         COMPONENT_REGISTRY.freeze()
 
