@@ -208,6 +208,27 @@ class Repl:
                 print(f"  当前: tone={bp.fields.get('tone_style','?')} "
                       f"trust={trust:.2f} initiative={bp.fields.get('conversational_initiative','?')}")
                 continue
+            if cmd.startswith("/rag"):
+                # Demo: simulate knowledge search with contract gating
+                query = user[5:].strip() or "test"
+                check = self.c.action_pipeline.check("knowledge_search")
+                if not check["allowed"]:
+                    print(f"  [RAG] BLOCKED: {check['reason']}")
+                    xray.log("知识网关", f"拦截: {check['reason']}")
+                else:
+                    # Simulate search results
+                    mock_results = [
+                        {"file": "public_docs/faq.md", "content": "Q: 量子计算是什么？A: 利用量子比特的叠加态进行计算...", "query": query},
+                        {"file": "hr_docs/layoff_plan_2024.docx", "content": "机密：Q3裁员计划，涉及边缘业务线200人...", "query": query},
+                        {"file": "company_wiki/architecture.md", "content": "系统架构采用微服务设计，核心服务包含...", "query": query},
+                    ]
+                    filtered = self.c.action_pipeline.guard_post_retrieval("knowledge_search", mock_results)
+                    for r in filtered:
+                        blocked = "不可访问" in r.get("content", "")
+                        status = "🔴 拦截" if blocked else "🟢 放行"
+                        print(f"  [RAG] {status} {r['file']}: {r['content'][:80]}...")
+                        xray.log("知识网关" if blocked else "RAG检索", f"{status} {r['file']}")
+                continue
             if not user.strip():
                 continue
 

@@ -108,6 +108,16 @@ TOOLS: dict[str, dict[str, Any]] = {
         "require_hitl": True,
         "category": "system_admin",
     },
+    "knowledge_search": {
+        "name": "knowledge_search",
+        "description": "Search the internal knowledge base with trust-gated access",
+        "risk_level": RiskLevel.READ,
+        "min_trust": 0.20,
+        "category": "knowledge",
+        "whitelist": ["public_docs/", "company_wiki/"],
+        "blocked_keywords": ["机密", "confidential", "裁员", "layoff", "高管", "executive"],
+        "max_results": 3,
+    },
 }
 
 # Permanent constitutional ban: these categories are NEVER allowed

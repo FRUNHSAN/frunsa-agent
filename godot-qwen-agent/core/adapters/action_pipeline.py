@@ -59,6 +59,53 @@ class ActionPipeline:
 
         return {"allowed": True, "reason": "OK", "requires_hitl": tc.require_hitl}
 
+    def guard_post_retrieval(self, tool_name: str, results: list[dict]) -> list[dict]:
+        """Post-retrieval guardrail: filter/replace results that violate contract.
+
+        For knowledge_search: checks whitelist paths and blocked keywords.
+        Replaces violating content with '<SYSTEM>不可访问</SYSTEM>' — the LLM
+        never sees the original data.
+        """
+        if tool_name != "knowledge_search":
+            return results
+
+        tc = self._get_contract(tool_name)
+        if tc is None:
+            return []
+
+        # Read guard metadata from TOOLS dict (not ToolContract dataclass)
+        raw = TOOLS.get(tool_name, {})
+        whitelist: list[str] = raw.get("whitelist", [])
+        blocked: list[str] = raw.get("blocked_keywords", [])
+        max_results: int = raw.get("max_results", 3)
+        filtered: list[dict] = []
+        blocked_count = 0
+
+        for r in results[:max_results]:
+            path = r.get("file", "") or r.get("source", "")
+            content = r.get("content", "") or r.get("snippet", "")
+
+            # Check whitelist
+            if whitelist and not any(path.startswith(w) for w in whitelist):
+                r["content"] = "<SYSTEM>此知识源在当前契约下不可访问。</SYSTEM>"
+                blocked_count += 1
+
+            # Check blocked keywords in content
+            elif any(kw in content for kw in blocked):
+                r["content"] = "<SYSTEM>此内容包含受限信息，已被拦截。</SYSTEM>"
+                blocked_count += 1
+
+            # Check blocked keywords in query/request
+            elif any(kw in r.get("query", "") for kw in blocked):
+                r["content"] = "<SYSTEM>查询包含受限关键词，已被拦截。</SYSTEM>"
+                blocked_count += 1
+
+            filtered.append(r)
+
+        if blocked_count > 0:
+            self.record_result(tool_name, success=False)
+        return filtered
+
     def record_result(self, tool_name: str, success: bool) -> None:
         """Record tool execution result for Backlash loop."""
         if success:
