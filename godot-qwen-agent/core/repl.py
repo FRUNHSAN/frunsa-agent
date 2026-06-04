@@ -94,6 +94,8 @@ class Repl:
             return ("tone_style", "WARM")
         if any(w in t for w in ("别问了", "不要问")):
             return ("conversational_initiative", "RESPONSIVE_ONLY")
+        if any(w in t for w in ("你问", "问问题", "反问", "问我", "问几个")):
+            return ("conversational_initiative", "PROACTIVE")
         return None
 
     def _apply_proposal(self, prop: dict, label: str = "") -> bool:
@@ -113,7 +115,7 @@ class Repl:
     def run(self) -> None:
         bp, trust = self.c.bp, self.trust
         uid = self.c.cfg.user_id
-        xray = XRay()
+        session_log: list[str] = []
 
         print(f"\n{'='*50}")
         print(f"PLAN5 Live — {uid}")
@@ -151,6 +153,7 @@ class Repl:
             if not user.strip():
                 continue
 
+            xray = XRay()  # Fresh dashboard each round
             self.round_count += 1
             if self.round_count == 1:
                 self.c.profile.start_session()
@@ -240,6 +243,7 @@ class Repl:
                     full_response = f"[契约拦截 {tool_name}: {check['reason']}]"
 
             print(f"\n[agent] {full_response}")
+            session_log.append(f"User: {user}\nAgent: {full_response}\n")
 
             # ── Feedback ──
             if self.prev_signal.get("dimension"):
@@ -287,3 +291,11 @@ class Repl:
 
         print(f"\n{'='*50}")
         print(f"结束。{self.round_count} 轮。")
+        # Save session log
+        if session_log:
+            from datetime import datetime
+            log_file = f"session_{uid}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+            with open(log_file, "w", encoding="utf-8") as f:
+                f.write(f"=== Session: {uid} | {datetime.now().isoformat()} | {self.round_count} rounds ===\n\n")
+                f.write("\n".join(session_log))
+            print(f"日志已保存: {log_file}")
