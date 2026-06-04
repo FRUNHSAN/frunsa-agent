@@ -113,7 +113,7 @@ class TestNarrativeEmergence:
         for _ in range(3):
             repo.record("user_a", "fatigue_explicit", "brevity_command")
 
-        llm = FakeLLM("用户性格叙事: 该用户在疲惫时偏好简洁沟通。")
+        llm = FakeLLM("用户性格叙事: 该用户在周二下午和深夜时段容易感到疲惫，偏好简洁直接的沟通方式，对AI有明确的期待。")
         ne = NarrativeEmergence(repo, llm)
         result = ne.generate("user_a")
         assert result is not None
@@ -126,7 +126,7 @@ class TestNarrativeEmergence:
         for _ in range(3):
             repo.record("user_a", "fatigue_explicit", "brevity_command")
 
-        llm = FakeLLM("测试叙事内容足够长了。用户的沟通习惯偏向简洁。")
+        llm = FakeLLM("该用户在周二下午和深夜时段容易感到疲惫，偏好简洁直接的沟通方式，对AI有明确的期待和边界感。")
         ne = NarrativeEmergence(repo, llm)
         ne.generate("user_a")
         assert "user_a" in ne.cached
