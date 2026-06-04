@@ -18,7 +18,7 @@ from __future__ import annotations
 import re
 
 # ── Verbose → max sentences ──
-VERBOSE_SENTENCE_LIMITS = {"HIGH": 999, "MEDIUM": 999, "LOW": 3, "MINIMAL": 2}
+VERBOSE_SENTENCE_LIMITS = {"HIGH": 8, "MEDIUM": 5, "LOW": 3, "MINIMAL": 2}
 
 # ── PRAGMATIC tone: filler phrases to strip ──
 PRAGMATIC_FILLERS = [

@@ -15,7 +15,7 @@ BLUEPRINT_SCHEMA: dict[str, dict] = {
     "response_verbose_level": {
         "type": "enum",
         "values": ["HIGH", "MEDIUM", "LOW", "MINIMAL"],
-        "default": "HIGH",
+        "default": "MEDIUM",
         "description": (
             "Response length. HIGH: detailed with examples. "
             "MEDIUM: balanced. LOW: concise 2-3 sentences. "
