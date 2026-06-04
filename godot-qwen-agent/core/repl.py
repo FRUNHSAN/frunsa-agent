@@ -198,8 +198,14 @@ class Repl:
                 self.round_count = 0
                 self.history.clear()
                 self.contract_events.clear()
+                self.c.bp.apply_proposal("tone_style", "WARM", ignore_cooldown=True)
+                self.c.bp.apply_proposal("conversational_initiative", "BALANCED", ignore_cooldown=True)
                 self.c.profile.start_session()
-                print(f"  [新对话] Session {self.c.profile.session_count}.")
+                print(f"  [新对话] Session {self.c.profile.session_count}. 情绪状态已重置。")
+                continue
+            if cmd == "/mood":
+                print(f"  当前: tone={bp.fields.get('tone_style','?')} "
+                      f"trust={trust:.2f} initiative={bp.fields.get('conversational_initiative','?')}")
                 continue
             if not user.strip():
                 continue
