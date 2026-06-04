@@ -87,6 +87,11 @@ class Repl:
             parts.append(f"语气: {tone_map.get(tone, tone)}")
             if anchoring == "LOW":
                 parts.append("禁止提及时间/天气/环境")
+            # Self-evolving values: render custom instruction from Blueprint
+            for key in ("tone_style", "response_verbose_level", "explanation_style"):
+                inst = self.c.bp.get_instruction(key)
+                if inst:
+                    parts.append(f"自定义特质({key}): {inst}")
             parts.append("禁止以'你说得对'/'你的判断正确'开头。分歧是尊重。")
             if v in ("LOW", "MINIMAL"):
                 parts.append("格式锁: 单段落, 禁止列表/标题/引用。禁止复合句。")

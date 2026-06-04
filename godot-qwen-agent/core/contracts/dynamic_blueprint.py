@@ -54,6 +54,7 @@ class DynamicBlueprint:
     _history: list[dict[str, Any]] = field(default_factory=list)
     _applied_count: int = 0
     _rejection_log: list[dict] = field(default_factory=list)  # for System 2
+    _instructions: dict[str, str] = field(default_factory=dict)  # (field:value) → instruction
     _baseline: dict[str, Any] = field(default_factory=dict)
     _last_modified: dict[str, float] = field(default_factory=dict)
     _round_counter: int = 0
@@ -68,12 +69,13 @@ class DynamicBlueprint:
 
     def apply_proposal(
         self, target_key: str, new_value: Any, ignore_cooldown: bool = False,
+        instruction: str = "",
     ) -> tuple[bool, str]:
         """Apply a contract modification.
 
         Returns (accepted, reason). Guards:
           - Constitution: immutable genes rejected
-          - Schema: value must be valid per BLUEPRINT_SCHEMA (if schema available)
+          - Schema: value must be valid per BLUEPRINT_SCHEMA, OR provide instruction for novel value
           - Cooldown: same field can't change twice within cooldown_rounds
           - Min autonomy: execution_autonomy can't drop below min_autonomy
         """
@@ -87,12 +89,19 @@ class DynamicBlueprint:
             field_schema = BLUEPRINT_SCHEMA.get(target_key)
             if field_schema and field_schema["type"] == "enum":
                 if new_value not in field_schema["values"]:
-                    self._log_rejection(target_key, new_value,
-                        f"Schema: '{new_value}' not in {field_schema['values']}")
-                    return False, (
-                        f"Schema violation: '{new_value}' not in "
-                        f"{field_schema['values']} for '{target_key}'."
-                    )
+                    # Novel value: requires instruction
+                    if not instruction or len(instruction) < 5:
+                        self._log_rejection(target_key, new_value,
+                            f"Schema: '{new_value}' not in schema and no valid instruction")
+                        return False, (
+                            f"Novel value '{new_value}' requires instruction (≥5 chars)."
+                        )
+                    if len(instruction) > 80:
+                        self._log_rejection(target_key, new_value,
+                            "Instruction too long")
+                        return False, "Instruction must be ≤80 characters."
+                    # Accept novel value with instruction
+                    self._instructions[f"{target_key}:{new_value}"] = instruction
         except ImportError:
             pass
 
@@ -215,6 +224,11 @@ class DynamicBlueprint:
         Any component can query: 'what does the contract require of me?'
         """
         return self.fields.get(key)
+
+    def get_instruction(self, key: str) -> str:
+        """Get execution instruction for a field's current value."""
+        val = self.fields.get(key, "")
+        return self._instructions.get(f"{key}:{val}", "")
 
     @property
     def applied_count(self) -> int:
