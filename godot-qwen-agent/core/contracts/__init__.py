@@ -16,7 +16,6 @@ from .composition import (
 )
 from .generation import GenerationResult, GenerationStrategy, StreamItem
 from .identity_chunker import IdentityChunker
-from .kernel_service import KernelService
 from .registry import (
     COMPONENT_REGISTRY,
     ComponentRegistry,

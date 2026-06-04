@@ -17,6 +17,7 @@ from core.adapters.threshold_learner import EMALearner
 from core.adapters.feedback_listener import FeedbackListener
 from core.adapters.relational_patterns import RelationalPatterns
 from core.adapters.narrative_emergence import NarrativeEmergence
+from core.contracts.registry import COMPONENT_REGISTRY
 
 
 class Container:
@@ -40,6 +41,9 @@ class Container:
         self.action_pipeline = ActionPipeline(self.bp, trust=0.30)
         self.fsm = StreamInterceptor()
         self.listener = FeedbackListener(self.learner)
+
+        # ── Seal the registry (invariant #23) ──
+        COMPONENT_REGISTRY.freeze()
 
         # ── LLM clients (lazy, requires API key) ──
         self._cloud_llm = None
