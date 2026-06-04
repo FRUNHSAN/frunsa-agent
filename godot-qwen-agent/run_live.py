@@ -306,8 +306,8 @@ while True:
             full_response = local_llm.generate(full_prompt, grammar=build_gbnf(bp.snapshot))
         else:
             full_response = cloud_llm.generate(full_prompt)
-        if round_count == 1:
-            print(f"  [router] -> {backend}")
+        if backend == "local":
+            print(f"  [router] -> local+GBNF")
     except Exception as e:
         full_response = f"(LLM error: {e})"
         trust = max(0.0, trust - 0.01)

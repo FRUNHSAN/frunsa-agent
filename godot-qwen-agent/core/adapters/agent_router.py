@@ -37,23 +37,16 @@ def decide(
     verbose = bp_fields.get("response_verbose_level", "HIGH")
     initiative = bp_fields.get("conversational_initiative", "BALANCED")
 
-    # ── 1. Contract strictness: must use GBNF ──
+    # ── 1. MINIMAL: must use GBNF (Pipeline can't enforce 2 sentences reliably) ──
     if verbose in ("MINIMAL",):
         return "local"
-    if initiative == "RESPONSIVE_ONLY" and verbose == "LOW":
+
+    # ── 2. Trust emergency: safe mode, local only ──
+    if trust < 0.03:
         return "local"
 
-    # ── 2. Format-critical: System 2 audit ──
-    if is_system2_audit:
-        return "local"
-
-    # ── 3. Trust crisis: safe minimal mode ──
-    if trust < 0.05:
-        return "local"
-
-    # ── 4. High complexity: cloud handles better ──
-    if any(m in user_input for m in HIGH_COMPLEXITY_MARKERS):
-        return "cloud"
-
-    # ── 5. Default: cloud ──
+    # ── 3. Everything else: cloud (Pipeline handles truncation) ──
+    # LOW/MEDIUM/HIGH + RESPONSIVE_ONLY → cloud is fast and Pipeline works
+    # System2 audit → cloud (better reasoning)
+    # Complex questions → cloud (always)
     return "cloud"
