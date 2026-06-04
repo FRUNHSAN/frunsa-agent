@@ -249,6 +249,13 @@ chains:
     tags: [plan6, semantic_trust, embedding, sentence_transformers, cosine_similarity]
     status: active
 
+  - chain_id: plan7_environmental_physics
+    file: chains/plan7_environmental_physics.yaml
+    title: "PLAN7 Environmental Physics: OutputPipeline + constrained decoding paradigm"
+    layer: plan
+    tags: [plan7, output_pipeline, constrained_decoding, environmental_physics, post_processing]
+    status: active
+
   # ── Real LLM Orchestration + Critic Engines ──
   - chain_id: phase_18_real_orch_critic
     file: chains/phase_18_real_orch_critic.yaml
@@ -402,3 +409,8 @@ tag_index:
   embedding: [plan6_semantic_trust]
   sentence_transformers: [plan6_semantic_trust]
   cosine_similarity: [plan6_semantic_trust]
+  plan7: [plan7_environmental_physics]
+  output_pipeline: [plan7_environmental_physics]
+  constrained_decoding: [plan7_environmental_physics]
+  environmental_physics: [plan7_environmental_physics]
+  post_processing: [plan7_environmental_physics]

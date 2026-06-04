@@ -4,7 +4,7 @@
 
 This project is a **contract-driven, three-platform agent system**. Every architectural decision is recorded in `.ai_reasoning/`. Before writing any code, you MUST consult the reasoning chain library. After completing complex work, you MUST archive new decisions.
 
-**Current: PLAN6 — Semantic Empathy.** See [PLAN6.md](PLAN6.md) for the embedding-based trust engine and two-tier architecture.
+**Current: PLAN7 — Environmental Physics.** See [PLAN7.md](PLAN7.md) for OutputPipeline, constrained decoding, and the shift from prompt negotiation to physical law.
 
 **PLAN hierarchy:**
 - [PLAN.md](PLAN.md) — Phase 1-25: contract kernel, pipeline, anti-corruption
@@ -13,6 +13,7 @@ This project is a **contract-driven, three-platform agent system**. Every archit
 - [PLAN4.md](PLAN4.md) — Bayesian EMA + Stage Directions + Smart Decay
 - [PLAN5.md](PLAN5.md) — Living contract: DynamicBlueprint + 3 Loops + Homeostasis
 - [PLAN6.md](PLAN6.md) — Semantic trust: Embedding replaces keyword matching
+- [PLAN7.md](PLAN7.md) — Environmental physics: OutputPipeline + constrained decoding
 
 ## Project Identity: 契约关系体，不是指令执行器
 
