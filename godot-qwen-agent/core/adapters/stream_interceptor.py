@@ -84,6 +84,7 @@ class StreamInterceptor:
         self._buffer: list[str] = []
         self._last_buffer: str = ""  # Preserved for VALIDATING state
         self._depth = 0
+        self._text_window: str = ""  # Rolling window for trigger detection
 
     def feed(self, token: str) -> InterceptResult:
         """Process one token. Returns what the caller should do."""
@@ -134,9 +135,12 @@ class StreamInterceptor:
     # ── State handlers ──
 
     def _handle_text(self, token: str) -> InterceptResult:
-        if self._is_trigger(token):
+        # Accumulate sliding window for trigger detection (handles char-level tokens)
+        self._text_window = (self._text_window + token)[-200:]  # Keep last 200 chars
+        if self._is_trigger(self._text_window):
             self.state = FSMState.BUFFERING
-            self._buffer = [token]
+            self._buffer = [self._text_window[self._text_window.rfind("<"):]]  # From trigger start
+            self._text_window = ""
             return InterceptResult(state=FSMState.BUFFERING)
         return InterceptResult(state=FSMState.TEXT, output_token=token)
 
@@ -238,6 +242,7 @@ class StreamInterceptor:
     def _reset(self) -> None:
         self._buffer = []
         self._last_buffer = ""
+        self._text_window = ""
         self._depth = 0
 
     @property
