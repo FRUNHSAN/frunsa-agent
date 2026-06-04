@@ -36,6 +36,7 @@ def search(
 
     # Get chunker from registry (import ensures registration)
     import core.adapters.keyword_chunker  # noqa: triggers @register_component
+    import core.adapters.semantic_chunker  # noqa: triggers @register_component
     chunker_cls = COMPONENT_REGISTRY.get("chunker", chunker_name)
     if chunker_cls is None:
         from core.adapters.keyword_chunker import KeywordChunker
