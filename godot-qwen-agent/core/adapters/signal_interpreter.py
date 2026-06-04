@@ -79,6 +79,14 @@ def interpret(
 
     # ── Frustration: drop the act, be direct ──
     if dim == "frustration" and score > 0.55:
+        # First: reduce verbosity — the #1 frustration driver
+        if current_bp.get("response_verbose_level") not in ("LOW", "MINIMAL"):
+            proposals.append({
+                "target_blueprint_key": "response_verbose_level",
+                "new_value": "LOW",
+                "trigger_condition": f"frustration_{score:.2f}",
+                "human_reason": f"User frustrated. Reduce verbosity FIRST.",
+            })
         if current_bp.get("tone_style") != "PRAGMATIC":
             proposals.append({
                 "target_blueprint_key": "tone_style",
