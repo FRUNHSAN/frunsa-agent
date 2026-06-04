@@ -1,0 +1,52 @@
+# 推理链: V3 — 自演化契约 + 契约RAG + 完整生命周期
+chain_id: v3_self_evolving_rag
+title: "V3 自演化契约 + 契约约束RAG + 指令GC + 三chunker管线"
+created_at: "2026-06-05T00:00:00Z"
+status: active
+tags: [v3, self_evolving, rag, chunking, instruction_gc, semantic, xray]
+related_chains: [v2_stream_interceptor, plan7_environmental_physics, plan5_contract_lifecycle]
+
+context: |
+  V2完成了流式拦截、在线学习和关系引擎。但契约仍限于8个预定义枚举值。
+  用户问"情绪不够用"、"RAG怎么加"、"涌现有没有边界"——三个问题的根
+  因相同: 契约的执行器不认识新字段、新能力。
+
+decision: |
+  V3引入三大机制:
+  1. 自演化契约值 — 新值自带Instruction, OutputPipeline自动渲染
+  2. 契约约束RAG — knowledge_search作为ToolContract, ActionPipeline治理访问权限
+  3. 完整生命周期 — 指令GC (60轮未激活→清除)、会话冷启动、双轨信任
+
+rationale: |
+  自演化值验证: KAOMOJI_HEAVY + "使用大量颜文字" → OutputPipeline自动渲染。
+  契约RAG验证: Trust=0.05→拦截, Trust=0.30→白名单放行+关键词拦截+语义检索。
+  三chunker: identity/keyword/semantic, COMPONENT_REGISTRY一行切换。
+  语义检索: "微服务"字面不匹配architecture.md, embedding匹配score=0.329。
+  后检索护栏: hr_docs/layoff_plan被替换为"不可访问", LLM从未看到机密内容。
+
+future_guidance:
+  self_evolving_values:
+    summary: "新值必须自带Instruction(5-80字符)。OutputPipeline自动渲染。GC: 60轮未激活→清除"
+    priority: critical
+  contract_rag:
+    summary: "knowledge_search作为ToolContract。Trust门控+白名单+关键词护栏+语义检索。三层防护"
+    priority: critical
+  chunking_pipeline:
+    summary: "COMPONENT_REGISTRY管理3个chunker。search(query, chunker_name='semantic')一行切换。加chunker=实现+装饰器+导入"
+    priority: high
+  dual_track_trust:
+    summary: "Embedding (Track A, ~30ms) → LLM兜底 (Track B, 不确定或不可用时)。消除关键词降级脆断"
+    priority: high
+  session_isolation:
+    summary: "/new重置trust→0.30, tone→WARM。热数据不跨会话。冷数据(SQLite)持久化"
+    priority: high
+  lifecycle_gc:
+    summary: "字段值→Decay风化。提案→Cooldown。涌现值→60轮GC。CBO→28天衰减。全生命周期覆盖"
+    priority: high
+
+anti_patterns:
+  - "不给新值带Instruction → OutputPipeline不认识, 涌现变成死代码"
+  - "RAG不加后检索护栏 → 机密文件内容直接注入LLM, 数据泄漏"
+  - "不归一化路径斜杠 → Windows反斜杠导致白名单误杀"
+  - "不注册chunker就用 → COMPONENT_REGISTRY.get()抛KeyError"
+  - "热数据跨会话 → 昨天的Trust影响今天的对话, 情绪漂移"

@@ -3,15 +3,23 @@
 > **代码钳制，不是 Prompt 建议。**
 > V1 证明了契约引擎可行。V2 让契约在 token 级别拦截 LLM 输出，并学会个人化。
 
-## V2 优先级与完成状态
+## V2-V3 优先级与完成状态
 
 | # | 优先级 | 范围 | 状态 |
 |---|--------|------|------|
-| 1 | 175+ 测试 | PLAN5-8 边界覆盖 + V2 新组件 | ✅ 完成 |
+| 1 | 260 测试 | PLAN5-8 + V2 + V3 全覆盖 | ✅ 完成 |
 | 2 | SQLite 持久化 | 替换 JSON UserProfile，WAL 模式 | ✅ 完成 |
 | 3 | 流式拦截 FSM | 五态状态机，token 级契约拦截 | ✅ 完成 |
-| 4 | 在线阈值学习 | EMA 个人化阈值 + 反馈采集 | ✅ 完成 |
-| 5 | llama-server HTTP | 替换子进程，常驻模型 | ⏸️ 等待稳定版 |
+| 4 | 在线阈值学习 | EMA 个人化阈值 + 双轨信任 | ✅ 完成 |
+| 5 | 叙事涌现 | CBO 模式 → LLM 生成用户画像 | ✅ 完成 |
+| 6 | 关系预判 | PatternRepository 主动提示 | ✅ 完成 |
+| 7 | X-Ray 仪表盘 | Rich 终端架构透视 | ✅ 完成 |
+| 8 | 语义命令分类 | Embedding 替换手写关键词 | ✅ 完成 |
+| 9 | 自演化契约值 | 新值+Instruction, GC 生命周期 | ✅ 完成 |
+| 10 | 契约约束 RAG | knowledge_search + 后检索护栏 | ✅ 完成 |
+| 11 | 三 chunker 管线 | identity/keyword/semantic via COMPONENT_REGISTRY | ✅ 完成 |
+| 12 | 会话冷启动 | /new 重置 trust/tone/initiative | ✅ 完成 |
+| 13 | llama-server HTTP | 替换子进程，常驻模型 | ⏸️ 等待稳定版 |
 
 ---
 

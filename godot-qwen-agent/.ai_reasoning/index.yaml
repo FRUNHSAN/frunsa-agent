@@ -263,6 +263,13 @@ chains:
     tags: [v2, stream_interceptor, fsm, online_learning, ema, tool_contract, sqlite]
     status: active
 
+  - chain_id: v3_self_evolving_rag
+    file: chains/v3_self_evolving_rag.yaml
+    title: "V3 自演化契约 + 契约约束RAG + 指令GC + 三chunker管线"
+    layer: plan
+    tags: [v3, self_evolving, rag, chunking, instruction_gc, semantic, xray]
+    status: active
+
   # ── Real LLM Orchestration + Critic Engines ──
   - chain_id: phase_18_real_orch_critic
     file: chains/phase_18_real_orch_critic.yaml
@@ -426,3 +433,10 @@ tag_index:
   fsm: [v2_stream_interceptor]
   online_learning: [v2_stream_interceptor]
   ema: [v2_stream_interceptor]
+  v3: [v3_self_evolving_rag]
+  self_evolving: [v3_self_evolving_rag]
+  rag: [v3_self_evolving_rag]
+  chunking: [v3_self_evolving_rag]
+  instruction_gc: [v3_self_evolving_rag]
+  semantic: [v3_self_evolving_rag]
+  xray: [v3_self_evolving_rag]
