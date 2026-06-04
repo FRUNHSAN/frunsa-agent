@@ -32,11 +32,11 @@ from core.adapters.contract_auditor import ContractAuditor
 from core.adapters.signal_interpreter import interpret as signal_interpret
 from core.adapters.output_pipeline import OutputPipeline
 from core.adapters.output_grammar import build_grammar as build_gbnf
+from core.adapters.agent_router import decide as route_decide
 
-# ── PLAN7.3: Local LLM backend (with GBNF constrained decoding) ──
-USE_LOCAL_LLM = "--local" in sys.argv
-if USE_LOCAL_LLM:
-    from LLM.native_llm import NativeLLMClient
+# ── PLAN7.4: Dual-backend with active routing ──
+from LLM.native_llm import NativeLLMClient
+HAS_LOCAL = True  # Native llama.cpp always available
 
 # ── PLAN6: Semantic Trust Engine (with keyword fallback) ──
 try:
@@ -58,14 +58,11 @@ print(f"{'='*50}")
 profile = UserProfile.load(uid, storage_path=base)
 bp = DynamicBlueprint(blueprint_defaults())
 engine = ContractEvolutionEngine(trust_threshold=0.10, rollback_window=3)
-if USE_LOCAL_LLM:
-    llm = NativeLLMClient(max_tokens=512, temperature=0.7, n_ctx=2048, n_gpu_layers=0)
-    print(f"  [PLAN7.3] Qwen3.5-4B Q4 CPU (~8s/round)")
-else:
-    llm = DeepSeekClient(model="deepseek-chat", temperature=0.7, max_tokens=512)
-auditor = None if USE_LOCAL_LLM else ContractAuditor(llm, interval=10)
-if USE_LOCAL_LLM:
-    print(f"  [PLAN7.3] Auditor disabled (0.5B insufficient for deep audit)")
+# ── Dual backends ──
+cloud_llm = DeepSeekClient(model="deepseek-chat", temperature=0.7, max_tokens=512)
+local_llm = NativeLLMClient(max_tokens=512, temperature=0.7, n_ctx=2048, n_gpu_layers=0)
+auditor = ContractAuditor(cloud_llm, interval=10)
+print(f"  [PLAN7.4] Dual-backend: DeepSeek + Qwen3.5-4B (router active)")
 pipeline = OutputPipeline(bp)
 
 trust = 0.30
@@ -303,11 +300,14 @@ while True:
     full_response = ""
 
     try:
-        # Collect full response — OutputPipeline needs complete text
-        if USE_LOCAL_LLM:
-            full_response = llm.generate(full_prompt, grammar=build_gbnf(bp.snapshot))
+        # ── PLAN7.4: Router decides backend per-request ──
+        backend = route_decide(bp.snapshot, user, trust)
+        if backend == "local":
+            full_response = local_llm.generate(full_prompt, grammar=build_gbnf(bp.snapshot))
         else:
-            full_response = llm.generate(full_prompt)
+            full_response = cloud_llm.generate(full_prompt)
+        if round_count == 1:
+            print(f"  [router] -> {backend}")
     except Exception as e:
         full_response = f"(LLM error: {e})"
         trust = max(0.0, trust - 0.01)
@@ -337,7 +337,7 @@ while True:
         print(f"  [ROLLBACK] {reason}")
 
     # ── System 2 ──
-    if auditor and auditor.should_audit(round_count):
+    if auditor.should_audit(round_count):
         auditor.audit_async(
             history[-20:], bp.snapshot, datetime.now().strftime("%H:%M"),
             callback=lambda p: pending.append(p) if p else None,
