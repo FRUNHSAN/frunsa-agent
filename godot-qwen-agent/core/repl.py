@@ -27,7 +27,7 @@ def _get_command_model():
             "response_verbose_level:MINIMAL": ["字少点", "别啰嗦", "简单点说", "话少点", "精简", "简洁", "短一点"],
             "response_verbose_level:HIGH": ["详细点", "展开讲讲", "多说点", "再讲讲", "展开来说"],
             "response_verbose_level:MEDIUM": ["字多点", "多一点", "多一点点", "多讲几句"],
-            "conversational_initiative:PROACTIVE": ["你问", "问问题", "反问", "问我", "你问我", "问我几个", "你倒是问"],
+            "conversational_initiative:PROACTIVE": ["你问", "问问题", "反问", "问我", "你问我", "问我几个", "你倒是问", "继续问", "多问点"],
             "conversational_initiative:RESPONSIVE_ONLY": ["别问了", "不要问", "别反问", "别老问我"],
             "tone_style:WARM": ["带点感情", "自然点", "像朋友", "来点人味"],
         }
@@ -140,7 +140,7 @@ class Repl:
             return ("tone_style", "WARM")
         if any(w in t for w in ("别问了", "不要问", "别反问", "别老问")):
             return ("conversational_initiative", "RESPONSIVE_ONLY")
-        if any(w in t for w in ("你问", "问问题", "反问", "问我", "问几个")):
+        if any(w in t for w in ("你问", "问问题", "反问", "问我", "问几个", "继续问", "多问")):
             return ("conversational_initiative", "PROACTIVE")
         return None
 
