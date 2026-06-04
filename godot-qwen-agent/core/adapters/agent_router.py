@@ -37,16 +37,7 @@ def decide(
     verbose = bp_fields.get("response_verbose_level", "HIGH")
     initiative = bp_fields.get("conversational_initiative", "BALANCED")
 
-    # ── 1. MINIMAL: must use GBNF (Pipeline can't enforce 2 sentences reliably) ──
-    if verbose in ("MINIMAL",):
-        return "local"
-
-    # ── 2. Trust emergency: safe mode, local only ──
-    if trust < 0.03:
-        return "local"
-
-    # ── 3. Everything else: cloud (Pipeline handles truncation) ──
-    # LOW/MEDIUM/HIGH + RESPONSIVE_ONLY → cloud is fast and Pipeline works
-    # System2 audit → cloud (better reasoning)
-    # Complex questions → cloud (always)
+    # ── PLAN7.4: Local reserved for future deterministic needs ──
+    # Current: Pipeline truncation on cloud is sufficient for chat.
+    # Local+GBNF enabled when subprocess stability improves.
     return "cloud"
