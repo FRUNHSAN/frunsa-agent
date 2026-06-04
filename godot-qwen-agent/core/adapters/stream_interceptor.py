@@ -198,15 +198,16 @@ class StreamInterceptor:
 
     # ── Helpers ──
 
-    def _is_trigger(self, token: str) -> bool:
+    def _is_trigger(self, window: str) -> bool:
         for t in self.TRIGGERS:
-            if t in token:
+            if t in window:
                 return True
-        # JSON trigger: token starts a line with {"tool"
-        stripped = token.lstrip()
+        # JSON trigger: {"tool" at line start (beginning or after newline)
         for jt in self.JSON_TRIGGERS:
-            if stripped.startswith(jt):
-                return True
+            idx = window.find(jt)
+            if idx >= 0:
+                if idx == 0 or window[idx - 1] == '\n':
+                    return True
         return False
 
     def _is_complete(self, content: str) -> bool:
