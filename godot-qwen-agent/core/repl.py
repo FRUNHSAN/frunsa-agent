@@ -200,6 +200,7 @@ class Repl:
                 self.contract_events.clear()
                 self.c.bp.apply_proposal("tone_style", "WARM", ignore_cooldown=True)
                 self.c.bp.apply_proposal("conversational_initiative", "BALANCED", ignore_cooldown=True)
+                self.trust = 0.30  # 热数据重置
                 self.c.profile.start_session()
                 print(f"  [新对话] Session {self.c.profile.session_count}. 情绪状态已重置。")
                 continue
@@ -216,7 +217,7 @@ class Repl:
                 self.c.profile.start_session()
                 print(f"  [新对话] Session {self.c.profile.session_count}.")
 
-            # ── Evaluate ──
+            # ── Evaluate (dual-track: Embedding + LLM fallback) ──
             trust_before = trust
             dim, score = None, 0.0
             if USE_SEMANTIC and sem:
@@ -225,15 +226,28 @@ class Repl:
                 except Exception:
                     sig = {"dimension": None, "score": 0.0, "all_scores": {}}
                 dim, score = sig["dimension"], sig["score"]
-                if dim == "fatigue":
-                    trust = max(0.0, trust - 0.01 * (1 + score))
-                elif dim == "gratitude":
-                    trust = min(0.85, trust + 0.02 * (1 + score))
-                elif dim == "frustration":
-                    trust = max(0.0, trust - 0.03 * (1 + score))
-                if dim:
-                    print(f"  [sense] {dim}={score:.3f}")
-                    xray.log("语义感知", f"{dim}={score:.3f}")
+            # Track B: LLM fallback when embedding is uncertain or unavailable
+            if dim is None or (0.3 < score < 0.6 and USE_SEMANTIC):
+                try:
+                    llm_judge = self.c.cloud_llm.generate(
+                        f"判断用户这句话的情绪倾向,只输出一个词(fatigue/gratitude/frustration/neutral):\n"
+                        f"用户: {user}\n情绪:"
+                    ).strip().lower()
+                    if "fatigue" in llm_judge: dim, score = "fatigue", 0.55
+                    elif "frustrat" in llm_judge: dim, score = "frustration", 0.55
+                    elif "gratitude" in llm_judge or "grateful" in llm_judge: dim, score = "gratitude", 0.55
+                except Exception:
+                    pass  # Both tracks failed — skip this round
+
+            if dim == "fatigue":
+                trust = max(0.0, trust - 0.01 * (1 + score))
+            elif dim == "gratitude":
+                trust = min(0.85, trust + 0.02 * (1 + score))
+            elif dim == "frustration":
+                trust = max(0.0, trust - 0.03 * (1 + score))
+            if dim:
+                print(f"  [sense] {dim}={score:.3f}")
+                xray.log("语义感知", f"{dim}={score:.3f}")
 
             # ── Pending proposals ──
             for prop in list(self.pending):
