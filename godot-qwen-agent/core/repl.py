@@ -11,6 +11,7 @@ from core.container import Container
 from core.contracts.blueprint_schema import BLUEPRINT_SCHEMA
 from core.adapters.agent_router import decide as route_decide
 from core.adapters.stream_interceptor import FSMState
+from core.xray import XRay
 
 
 class Repl:
@@ -71,12 +72,14 @@ class Repl:
         if hint:
             system = f"{hint}\n\n{system}"
             print(f"  [relation] {hint[:100]}")
+            xray.log("模式记录", hint[:80])
         # ── V3.1: Narrative emergence (first round only) ──
         if self.round_count == 1:
             narrative = self.c.narrative.inject(uid)
             if narrative:
                 system = f"{narrative}\n\n{system}"
                 print(f"  [narrative] injected user profile ({len(narrative)} chars)")
+                xray.log("叙事注入", f"注入用户画像 ({len(narrative)} chars)")
         return system
 
     def _detect_explicit_command(self, text: str) -> tuple[str, str] | None:
@@ -110,6 +113,7 @@ class Repl:
     def run(self) -> None:
         bp, trust = self.c.bp, self.trust
         uid = self.c.cfg.user_id
+        xray = XRay()
 
         print(f"\n{'='*50}")
         print(f"PLAN5 Live — {uid}")
@@ -169,6 +173,7 @@ class Repl:
                     trust = max(0.0, trust - 0.03 * (1 + score))
                 if dim:
                     print(f"  [sense] {dim}={score:.3f}")
+                    xray.log("语义感知", f"{dim}={score:.3f}")
 
             # ── Pending proposals ──
             for prop in list(self.pending):
@@ -187,6 +192,7 @@ class Repl:
                 }
                 if self._apply_proposal(cmd_prop, label="USER COMMAND"):
                     self.contract_events.append(f"[R{self.round_count}] {cmd_prop['target_blueprint_key']} -> {cmd_prop['new_value']}")
+                    xray.log("用户指令", f"{cmd_prop['target_blueprint_key']} → {cmd_prop['new_value']}")
 
             # ── Signal interpreter ──
             if USE_SEMANTIC and dim:
@@ -195,6 +201,7 @@ class Repl:
                 for sp in signal_interpret(dim, score, trust, bp.snapshot, user, thresholds=learned):
                     if self._apply_proposal(sp, label="SIGNAL→CONTRACT"):
                         self.contract_events.append(f"[R{self.round_count}] {sp['target_blueprint_key']} -> {sp['new_value']}")
+                        xray.log("契约演化", f"{sp['target_blueprint_key']} → {sp['new_value']} ({sp.get('human_reason','')[:40]})")
 
             # ── Build prompt + generate ──
             system = self._build_prompt()
@@ -203,10 +210,10 @@ class Repl:
             backend = route_decide(bp.snapshot, user, trust)
             if backend == "local":
                 full_response = self.c.local_llm.generate(full_prompt, grammar=build_gbnf(bp.snapshot))
-                if self.round_count == 1:
-                    print(f"  [router] -> local+GBNF")
+                xray.log("路由决策", "本地 + GBNF 物理约束")
             else:
                 full_response = self.c.cloud_llm.generate(full_prompt)
+            xray.log("内容生成", f"生成 {len(full_response)} 字符")
 
             # ── Output pipeline ──
             orig_len = len(full_response)
@@ -215,6 +222,7 @@ class Repl:
                 trust = max(0.0, trust - penalty)
             if len(full_response) < orig_len * 0.7:
                 print(f"  [pipeline] {orig_len}→{len(full_response)} chars")
+            xray.log("输出管道", f"截断/清洗: {orig_len}→{len(full_response)} 字符 | tone={bp.fields.get('tone_style','?')}")
 
             # ── FSM intercept ──
             self.c.action_pipeline.trust = trust
@@ -275,6 +283,7 @@ class Repl:
 
             self.trust = trust
             print(f"  [trust={trust:.2f} | verbose={bp.fields.get('response_verbose_level', '?')} | round={self.round_count}]")
+            xray.render()  # Show X-Ray dashboard after each round
 
         print(f"\n{'='*50}")
         print(f"结束。{self.round_count} 轮。")
