@@ -10,6 +10,8 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from dotenv import load_dotenv; load_dotenv()
+
 from core.config import Config
 from core.container import Container
 from core.repl import Repl
