@@ -242,7 +242,6 @@ class Repl:
             reason = check["reason"]
             print(f"  [RAG] 🔴 拦截: {reason}")
             self.c.bus.emit("知识网关", f"拦截: {reason}")
-            self._update_live(xray, live)
             return f"[RAG拦截: {reason}]"
 
         # Semantic mode for Chinese (no word boundaries in keyword mode)
@@ -263,7 +262,6 @@ class Repl:
                 blocked_count += 1
             else:
                 self.c.bus.emit("RAG检索", f"命中 {r['file']}")
-                self._update_live(xray, live)
                 context_parts.append(f"[来源: {r['file']}]\n{r['content']}")
 
         if blocked_count > 0:
