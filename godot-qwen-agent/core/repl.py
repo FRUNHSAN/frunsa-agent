@@ -163,51 +163,69 @@ class Repl:
 
     def _track_b_agentic(self, user: str, system: str, trust: float,
                          bp, xray: XRay) -> str:
-        """Track B: Planning → Orchestration → Critic (with global fallback)."""
-        import time
+        """Track B: Planning → Orchestration → Critic (real-time streaming logs)."""
+        import time, sys
 
         try:
-            # ── Step 1: Planning ──
+            # ── Step 1: Planning (live) ──
             t0 = time.time()
             plan_steps = self._plan_task(user, system)
+            msg = f"  [🔀 Track B] Planning → 拆解为 {len(plan_steps)} 步 ({time.time()-t0:.2f}s)"
+            print(msg, flush=True)
             xray.log("🔀 Track B Planning", f"拆解为 {len(plan_steps)} 步 ({time.time()-t0:.2f}s)")
 
-            # ── Step 2: Orchestration ──
+            # ── Step 2: Orchestration (live per step) ──
             results = []
+            total = len(plan_steps)
             for i, step in enumerate(plan_steps):
                 t_step = time.time()
-                # Contract gate: check if this step's tool is allowed
+                # Contract gate
                 if step.get("tool"):
                     check = self.c.action_pipeline.check(step["tool"])
                     if not check["allowed"]:
+                        msg = f"  [🔀 Track B] Step {i+1}/{total}: {step['tool']} 🚫 契约拦截"
+                        print(msg, flush=True)
                         results.append(
                             f"[系统提示：由于契约限制({check['reason']})，无法执行 {step['tool']}。"
                             f"请在回复中委婉地向用户解释此限制。]"
                         )
                         xray.log("🔀 Track B Orch", f"Step {i+1}: {step['tool']} 🚫 契约拦截")
                         continue
+                    print(f"  [🔀 Track B] Step {i+1}/{total}: {step['tool']} ✅ 执行中...", end="", flush=True)
                     xray.log("🔀 Track B Orch", f"Step {i+1}: {step['tool']} ✅")
-                # Execute step
+                else:
+                    print(f"  [🔀 Track B] Step {i+1}/{total}: 思考中...", end="", flush=True)
+                # Execute
                 step_prompt = f"{system}\n\n[当前任务]: {step['prompt']}\n[已有结果]: {results}"
                 step_resp = self.c.cloud_llm.generate(step_prompt)
                 results.append(step_resp)
-                xray.log("🔀 Track B Orch", f"Step {i+1}: 完成 ({time.time()-t_step:.2f}s)")
+                elapsed = time.time() - t_step
+                # Overwrite the "执行中..." with completion
+                sys.stdout.write(f"\r  [🔀 Track B] Step {i+1}/{total}: 完成 ({elapsed:.1f}s)\n")
+                sys.stdout.flush()
+                xray.log("🔀 Track B Orch", f"Step {i+1}: 完成 ({elapsed:.2f}s)")
 
-            # ── Step 3: Critic ──
+            # ── Step 3: Critic (live) ──
             t_critic = time.time()
             critique = self._critique_results(user, results)
+            print(f"  [🔀 Track B] Critic → {critique} ({time.time()-t_critic:.1f}s)", flush=True)
             xray.log("🔀 Track B Critic", f"评估完成 ({time.time()-t_critic:.2f}s): {critique}")
 
-            # ── Step 4: Synthesize final response ──
+            # ── Step 4: Synthesize (live indicator) ──
+            print(f"  [🔀 Track B] 合成中...", end="", flush=True)
             final_prompt = (
                 f"{system}\n\n用户问: {user}\n"
                 f"分析结果: {results}\n"
                 f"Critic建议: {critique}\n"
                 f"请基于以上内容生成最终回复。"
             )
-            return self.c.cloud_llm.generate(final_prompt)
+            final = self.c.cloud_llm.generate(final_prompt)
+            sys.stdout.write(f"\r  [🔀 Track B] 合成完成\n")
+            sys.stdout.flush()
+            return final
 
         except Exception as e:
+            print(f"  [⚠️ Track B] 引擎异常, 降级 Track A: {e}", flush=True)
             xray.log("⚠️ Track B", f"引擎异常降级: {e}")
             return self.c.cloud_llm.generate(f"{system}\n\nUser: {user}")
 
