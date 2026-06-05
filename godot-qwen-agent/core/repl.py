@@ -230,7 +230,7 @@ class Repl:
             return "结果过短，建议补充细节"
         return "满意"
 
-    def _update_live(self, xray: XRay, live) -> None:
+    def _update_live(self, xray: XRay, live=None) -> None:
         if live and xray._events:
             xray.render_live(live)
 
