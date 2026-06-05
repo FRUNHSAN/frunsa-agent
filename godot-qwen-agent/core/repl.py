@@ -12,6 +12,7 @@ from core.contracts.blueprint_schema import BLUEPRINT_SCHEMA
 from core.adapters.agent_router import decide as route_decide
 from core.adapters.stream_interceptor import FSMState
 from core.xray import XRay
+from core.trace_node import TraceNode, TraceStatus
 
 # ── Semantic command classifier (embedding-based, no hardcoded keywords) ──
 _EMBED_MODEL: object | None = None
@@ -168,6 +169,11 @@ class Repl:
             t0 = time.time()
             plan_steps = self._plan_task(user, system)
             self.c.bus.emit("🔀 Track B Planning", f"拆解为 {len(plan_steps)} 步 ({time.time()-t0:.2f}s)")
+            self.c.bus.trace(TraceNode(
+                node_id=f"planning_{self.round_count}", name="Planning",
+                node_type="agent", status=TraceStatus.SUCCESS,
+                metadata={"steps": len(plan_steps), "elapsed_ms": (time.time()-t0)*1000},
+            ))
             self._update_live(xray, live)
 
             results = []
@@ -335,6 +341,14 @@ class Repl:
             if cmd == "/rag off":
                 rag_mode = False
                 print(f"  [RAG] 本地知识库模式已关闭。")
+                continue
+            if cmd == "/trace":
+                nodes = self.c.bus.export_trace()
+                if nodes:
+                    import json as _json
+                    print(_json.dumps(nodes, ensure_ascii=False, indent=2))
+                else:
+                    print("  [trace] 无 Trace 数据。尝试 Track B 任务。")
                 continue
             if cmd == "/rag stats":
                 from core.adapters.knowledge_search import cache_stats

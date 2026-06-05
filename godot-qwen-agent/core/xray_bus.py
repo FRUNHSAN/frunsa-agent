@@ -18,16 +18,23 @@ Usage:
 from __future__ import annotations
 
 from core.xray import XRay
+from core.trace_node import TraceNode
 
 
 class XRayBus:
-    """Event bus for pipeline observability. Decouples emitters from display."""
+    """Event bus for pipeline observability. Decouples emitters from display.
+
+    Two channels:
+      emit(stage, detail)  → X-Ray table (lightweight, per-event)
+      trace(trace_node)    → Execution trace tree (structured, for export)
+    """
 
     def __init__(self) -> None:
         self._observers: list[XRay] = []
+        self._trace_nodes: list[TraceNode] = []
 
     def subscribe(self, xray: XRay) -> None:
-        """Attach an X-Ray observer. Multiple observers allowed."""
+        """Attach an X-Ray observer."""
         self._observers.append(xray)
 
     def unsubscribe(self, xray: XRay) -> None:
@@ -36,9 +43,25 @@ class XRayBus:
             self._observers.remove(xray)
 
     def emit(self, stage: str, detail: str) -> None:
-        """Emit a pipeline event to all observers."""
+        """Emit a pipeline event to all X-Ray observers (table)."""
         for xray in self._observers:
             xray.log(stage, detail)
+
+    def trace(self, node: TraceNode) -> None:
+        """Record a structured trace node (execution tree)."""
+        self._trace_nodes.append(node)
+
+    def export_trace(self) -> list[dict]:
+        """Export all trace nodes as a serializable list of dicts."""
+        return [n.to_dict() for n in self._trace_nodes]
+
+    def clear_trace(self) -> None:
+        """Reset trace for new round."""
+        self._trace_nodes.clear()
+
+    @property
+    def trace_count(self) -> int:
+        return len(self._trace_nodes)
 
     @property
     def has_observers(self) -> bool:
