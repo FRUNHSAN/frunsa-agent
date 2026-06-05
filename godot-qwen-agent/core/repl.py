@@ -189,6 +189,8 @@ class Repl:
                         )
                         self.c.bus.emit("🔀 Track B Orch", f"Step {i+1}: {step['tool']} 🚫 契约拦截")
                         continue
+                self.c.bus.emit("🔀 Track B Orch", f"Step {i+1}/{total}: ⏳ 执行中...")
+                self._update_live(xray, live)
                 step_prompt = f"{system}\n\n[当前任务]: {step['prompt']}\n[已有结果]: {results}"
                 step_resp = self.c.cloud_llm.generate(step_prompt)
                 results.append(step_resp)
@@ -206,6 +208,8 @@ class Repl:
                 f"Critic建议: {critique}\n"
                 f"请基于以上内容生成最终回复。"
             )
+            self.c.bus.emit("🔀 Track B Orch", "⏳ 合成最终回复...")
+            self._update_live(xray, live)
             return self.c.cloud_llm.generate(final_prompt)
 
         except Exception as e:
@@ -452,6 +456,8 @@ class Repl:
             if self._is_complex_task(user):
                 full_response = self._track_b_agentic(user, system, trust, bp, xray, live)
             else:
+                self.c.bus.emit("内容生成", "⏳ 生成中...")
+                self._update_live(xray, live)
                 backend = route_decide(bp.snapshot, user, trust)
                 if backend == "local":
                     full_response = self.c.local_llm.generate(full_prompt, grammar=build_gbnf(bp.snapshot))
