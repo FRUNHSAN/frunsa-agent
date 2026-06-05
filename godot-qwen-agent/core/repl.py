@@ -117,14 +117,12 @@ class Repl:
         hint = self.c.patterns.generate_hint(self.c.cfg.user_id) if self.round_count <= 2 else None
         if hint:
             system = f"{hint}\n\n{system}"
-            print(f"  [relation] {hint[:100]}")
             if xray: xray.log("模式记录", hint[:80])
         # ── V3.1: Narrative emergence (first round only) ──
         if self.round_count == 1:
             narrative = self.c.narrative.inject(uid)
             if narrative:
                 system = f"{narrative}\n\n{system}"
-                print(f"  [narrative] injected user profile ({len(narrative)} chars)")
                 if xray: xray.log("叙事注入", f"注入用户画像 ({len(narrative)} chars)")
         return system
 
@@ -399,7 +397,6 @@ class Repl:
             elif dim == "frustration":
                 trust = max(0.0, trust - 0.03 * (1 + score))
             if dim:
-                print(f"  [sense] {dim}={score:.3f}")
                 xray.log("语义感知", f"{dim}={score:.3f}")
                 self._update_live(xray, live)
 
@@ -461,7 +458,6 @@ class Repl:
             if penalty:
                 trust = max(0.0, trust - penalty)
             if len(full_response) < orig_len * 0.7:
-                print(f"  [pipeline] {orig_len}→{len(full_response)} chars")
             xray.log("输出管道", f"截断/清洗: {orig_len}→{len(full_response)} 字符 | tone={bp.fields.get('tone_style','?')}")
             self._update_live(xray, live)
 
@@ -492,7 +488,6 @@ class Repl:
             if self.prev_signal.get("dimension"):
                 result = self.c.listener.on_user_input(user, self.prev_signal, self.prev_response_len)
                 if result:
-                    print(f"  [learn] {result['dimension']}: {result['old_threshold']:.3f}→{result['new_threshold']:.3f}")
 
             # ── Record patterns ──
             if dim == "fatigue" and score > 0.5:
@@ -506,7 +501,6 @@ class Repl:
             # ── Post-check + audit ──
             rolled, reason = self.c.engine.post_check(bp, trust)
             if rolled:
-                print(f"  [ROLLBACK] {reason}")
             if self.c.auditor.should_audit(self.round_count):
                 self.c.auditor.audit_async(
                     self.history[-20:], bp.snapshot, datetime.now().strftime("%H:%M"),
@@ -520,7 +514,6 @@ class Repl:
                 amendment = self.c.profile.propose_amendment("response_verbose_level", current_v)
                 if amendment and amendment["target_blueprint_key"] not in self._amendments_shown:
                     self._amendments_shown.add(amendment["target_blueprint_key"])
-                    print(f"  [AMENDMENT] {amendment['human_reason'][:120]}")
 
             self.c.profile.save()
             self.history.append(f"User: {user}")
