@@ -432,6 +432,7 @@ class Repl:
 
             # ── Build prompt + generate ──
             system = self._build_prompt(uid, xray)
+            self._update_live(xray, live)  # Flush events from _build_prompt
             full_prompt = f"{system}{rag_context}\n\nUser: {user}"
 
             # ── V4.1 Phase 2: Track A/B Router ──
