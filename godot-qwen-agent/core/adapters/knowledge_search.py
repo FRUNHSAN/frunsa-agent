@@ -15,6 +15,11 @@ from core.contracts.registry import COMPONENT_REGISTRY
 BASE_DIR = Path(__file__).resolve().parent.parent.parent / "knowledge_base"
 SUPPORTED_SUFFIXES = {".txt", ".md", ".py", ".yaml", ".yml", ".json", ".log"}
 
+# ── Cache: chunks + query results ──
+_chunk_cache: dict[str, list[dict]] = {}  # file_path → [{content, file}]
+_query_cache: dict[str, list[dict]] = {}  # query → results
+_CACHE_MAX = 50  # Max cached queries
+
 
 def search(
     query: str, max_results: int = 3,
@@ -48,22 +53,31 @@ def search(
         chunker_cls = KeywordChunker
     chunker = chunker_cls()  # Instantiate the chunker class
 
-    # Phase 1: Load + Chunk all files
+    # ── Cache: check query cache first ──
+    cache_key = f"{query}|{mode}|{chunker_name}"
+    if cache_key in _query_cache:
+        return _query_cache[cache_key]
+
+    # Phase 1: Load + Chunk (from file cache if available)
     all_chunks: list[dict] = []
     for file_path in BASE_DIR.rglob("*"):
         if file_path.suffix not in SUPPORTED_SUFFIXES:
+            continue
+        rel = str(file_path.relative_to(BASE_DIR))
+        if rel in _chunk_cache:
+            all_chunks.extend(_chunk_cache[rel])
             continue
         try:
             raw = file_path.read_text(encoding="utf-8")
         except Exception:
             continue
         block = ContentBlock(text=raw, source=str(file_path))
+        file_chunks = []
         for chunk in chunker.chunk(block):
-            all_chunks.append({
-                "file": str(file_path.relative_to(BASE_DIR)),
-                "content": chunk.text[:800],
-                "query": query,
-            })
+            cd = {"file": rel, "content": chunk.text[:800], "query": query}
+            file_chunks.append(cd)
+            all_chunks.append(cd)
+        _chunk_cache[rel] = file_chunks  # Cache per file
 
     # Phase 2: Score + Rank
     if mode == "semantic":
@@ -88,4 +102,10 @@ def search(
             c["score"] = float(score)
             scored.append(c)
     scored.sort(key=lambda c: c.get("score", 0), reverse=True)
-    return scored[:max_results]
+    result = scored[:max_results]
+
+    # Cache result
+    if len(_query_cache) >= _CACHE_MAX:
+        _query_cache.pop(next(iter(_query_cache)))
+    _query_cache[cache_key] = result
+    return result

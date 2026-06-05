@@ -254,13 +254,12 @@ class Repl:
             blocked = "不可访问" in r.get("content", "")
             if blocked:
                 blocked_count += 1
-                xray.log("知识网关", f"拦截 {r['file']}")
             else:
                 xray.log("RAG检索", f"命中 {r['file']}")
-            context_parts.append(f"[来源: {r['file']}]\n{r['content']}")
+                context_parts.append(f"[来源: {r['file']}]\n{r['content']}")
 
         if blocked_count > 0:
-            print(f"  [RAG] 🔴 {blocked_count} 个文件被拦截, {len(filtered)-blocked_count} 个放行")
+            print(f"  [RAG] {blocked_count} 个拦截, {len(filtered)-blocked_count} 个命中")
 
         rag_context = "\n\n".join(context_parts)
         if not rag_context.strip():
