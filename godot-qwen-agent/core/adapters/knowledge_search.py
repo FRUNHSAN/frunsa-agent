@@ -17,14 +17,45 @@ SUPPORTED_SUFFIXES = {".txt", ".md", ".py", ".yaml", ".yml", ".json", ".log"}
 
 # ── Cache: chunks + query results ──
 _chunk_cache: dict[str, list[dict]] = {}  # file_path → [{content, file}]
+_file_mtimes: dict[str, float] = {}       # file_path → last modified time
 _query_cache: dict[str, list[dict]] = {}  # query → results
-_CACHE_MAX = 50  # Max cached queries
+_CACHE_MAX = 50        # Max cached queries
+_CHUNK_CACHE_MB = 128  # Max chunk cache size in MB
+
+
+def _evict_if_needed() -> None:
+    """LRU eviction: remove oldest files if cache exceeds size limit."""
+    total_bytes = sum(
+        sum(len(c.get("content", "")) for c in chunks)
+        for chunks in _chunk_cache.values()
+    )
+    limit_bytes = _CHUNK_CACHE_MB * 1024 * 1024
+    while total_bytes > limit_bytes and len(_chunk_cache) > 1:
+        oldest = next(iter(_chunk_cache))
+        for c in _chunk_cache[oldest]:
+            total_bytes -= len(c.get("content", ""))
+        del _chunk_cache[oldest]
+        _file_mtimes.pop(oldest, None)
 
 
 def clear_cache() -> None:
     """Clear all caches (for testing)."""
     _chunk_cache.clear()
+    _file_mtimes.clear()
     _query_cache.clear()
+
+
+def cache_stats() -> dict:
+    """Return cache statistics: {files, queries, size_mb}."""
+    total_bytes = sum(
+        sum(len(c.get("content", "")) for c in chunks)
+        for chunks in _chunk_cache.values()
+    )
+    return {
+        "files_cached": len(_chunk_cache),
+        "queries_cached": len(_query_cache),
+        "size_mb": round(total_bytes / (1024 * 1024), 2),
+    }
 
 
 def warm_cache(chunker_name: str = "keyword") -> int:
@@ -102,7 +133,9 @@ def search(
         if file_path.suffix not in SUPPORTED_SUFFIXES:
             continue
         rel = str(file_path.relative_to(BASE_DIR))
-        if rel in _chunk_cache:
+        mtime = file_path.stat().st_mtime
+        # Use cache only if file hasn't changed
+        if rel in _chunk_cache and _file_mtimes.get(rel) == mtime:
             all_chunks.extend(_chunk_cache[rel])
             continue
         try:
@@ -115,7 +148,11 @@ def search(
             cd = {"file": rel, "content": chunk.text[:800], "query": query}
             file_chunks.append(cd)
             all_chunks.append(cd)
-        _chunk_cache[rel] = file_chunks  # Cache per file
+        _chunk_cache[rel] = file_chunks
+        _file_mtimes[rel] = mtime
+
+        # LRU eviction if cache exceeds limit
+        _evict_if_needed()
 
     # Phase 2: Score + Rank
     if mode == "semantic":

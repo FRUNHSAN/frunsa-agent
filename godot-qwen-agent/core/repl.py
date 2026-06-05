@@ -328,11 +328,17 @@ class Repl:
                 continue
             if cmd == "/rag on":
                 rag_mode = True
-                print(f"  [RAG] 本地知识库模式已开启。每次提问将先检索再回答。")
+                print(f"  [RAG] 本地知识库模式已开启。")
                 continue
             if cmd == "/rag off":
                 rag_mode = False
-                print(f"  [RAG] 本地知识库模式已关闭。恢复普通对话。")
+                print(f"  [RAG] 本地知识库模式已关闭。")
+                continue
+            if cmd == "/rag stats":
+                from core.adapters.knowledge_search import cache_stats
+                s = cache_stats()
+                print(f"  [RAG] 缓存: {s['files_cached']} 文件, "
+                      f"{s['queries_cached']} 查询, {s['size_mb']}MB")
                 continue
             if cmd.startswith("/rag"):
                 # Direct RAG query: /rag 微服务
