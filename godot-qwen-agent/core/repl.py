@@ -235,7 +235,7 @@ class Repl:
         return "满意"
 
     def _update_live(self, xray: XRay, live=None) -> None:
-        if live and xray._events:
+        if live and xray._stages:
             xray.render_live(live)
 
     def _do_rag(self, query: str, xray: XRay) -> str:
