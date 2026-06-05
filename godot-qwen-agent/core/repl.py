@@ -476,10 +476,10 @@ class Repl:
                     self.c.fsm.reject(check["reason"])
                     full_response = f"[契约拦截 {tool_name}: {check['reason']}]"
 
-            # Stop Live, show final X-Ray table, then agent response
+            # Stop Live, render final static table, then agent response
             if live:
-                self._update_live(xray, live)
                 live.stop()
+            xray.render()
 
             print(f"\n[agent] {full_response}")
             session_log.append(f"User: {user}\nAgent: {full_response}\n")
