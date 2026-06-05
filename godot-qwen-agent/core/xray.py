@@ -76,12 +76,12 @@ class XRay:
             st = self._stages[key]
             detail = st["detail"][:100]
             if st["done"]:
-                elapsed = st["start"] - self._t0
-                ts = f"[dim]{elapsed:.1f}s[/dim]"
+                ts = f"[dim]{st['start'] - self._t0:.1f}s[/dim]"
             else:
                 elapsed = now - st["start"]
                 ts = f"[yellow]{elapsed:.1f}s[/yellow]"
-                detail = f"[yellow]⏳ {detail}[/yellow]"
+                if "⏳" not in detail:
+                    detail = f"[yellow]{detail}[/yellow]"
 
             icon = icons.get(key, "•")
             stage_display = f"[bold]{icon} {key}[/bold]"

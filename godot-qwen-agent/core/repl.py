@@ -187,14 +187,14 @@ class Repl:
                             f"[系统提示：由于契约限制({check['reason']})，无法执行 {step['tool']}。"
                             f"请在回复中委婉地向用户解释此限制。]"
                         )
-                        self.c.bus.emit("🔀 Track B Orch", f"Step {i+1}: {step['tool']} 🚫 契约拦截")
+                        self.c.bus.emit(f"🔀 Track B Step {i+1}", f"🚫 拦截: {step['tool']}")
                         continue
                 self.c.bus.emit(f"🔀 Track B Step {i+1}", f"⏳ 执行中...")
                 self._update_live(xray, live)
                 step_prompt = f"{system}\n\n[当前任务]: {step['prompt']}\n[已有结果]: {results}"
                 step_resp = self.c.cloud_llm.generate(step_prompt)
                 results.append(step_resp)
-                self.c.bus.emit("🔀 Track B Orch", f"Step {i+1}: 完成 ({time.time()-t_step:.1f}s)")
+                self.c.bus.emit(f"🔀 Track B Step {i+1}", f"完成 ({time.time()-t_step:.1f}s)")
                 self._update_live(xray, live)
 
             t_critic = time.time()
@@ -208,7 +208,7 @@ class Repl:
                 f"Critic建议: {critique}\n"
                 f"请基于以上内容生成最终回复。"
             )
-            self.c.bus.emit("🔀 Track B Orch", "⏳ 合成最终回复...")
+            self.c.bus.emit("🔀 Track B 合成", "⏳ 合成最终回复...")
             self._update_live(xray, live)
             return self.c.cloud_llm.generate(final_prompt)
 
