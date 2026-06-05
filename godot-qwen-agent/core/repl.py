@@ -487,6 +487,7 @@ class Repl:
             if self.prev_signal.get("dimension"):
                 result = self.c.listener.on_user_input(user, self.prev_signal, self.prev_response_len)
                 if result:
+                    pass
 
             # ── Record patterns ──
             if dim == "fatigue" and score > 0.5:
@@ -500,6 +501,7 @@ class Repl:
             # ── Post-check + audit ──
             rolled, reason = self.c.engine.post_check(bp, trust)
             if rolled:
+                pass
             if self.c.auditor.should_audit(self.round_count):
                 self.c.auditor.audit_async(
                     self.history[-20:], bp.snapshot, datetime.now().strftime("%H:%M"),
