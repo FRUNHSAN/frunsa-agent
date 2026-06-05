@@ -457,7 +457,6 @@ class Repl:
             full_response, penalty = self.c.output_pipeline.process(full_response.strip())
             if penalty:
                 trust = max(0.0, trust - penalty)
-            if len(full_response) < orig_len * 0.7:
             xray.log("输出管道", f"截断/清洗: {orig_len}→{len(full_response)} 字符 | tone={bp.fields.get('tone_style','?')}")
             self._update_live(xray, live)
 
