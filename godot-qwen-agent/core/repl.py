@@ -167,7 +167,6 @@ class Repl:
         try:
             t0 = time.time()
             plan_steps = self._plan_task(user, system)
-            print(f"  [🔀 Track B] Planning → {len(plan_steps)} 步 ({time.time()-t0:.1f}s)", flush=True)
             xray.log("🔀 Track B Planning", f"拆解为 {len(plan_steps)} 步 ({time.time()-t0:.2f}s)")
             self._update_live(xray, live)
 
@@ -178,7 +177,6 @@ class Repl:
                 if step.get("tool"):
                     check = self.c.action_pipeline.check(step["tool"])
                     if not check["allowed"]:
-                        print(f"  [🔀 Track B] Step {i+1}/{total}: {step['tool']} 🚫 拦截", flush=True)
                         results.append(
                             f"[系统提示：由于契约限制({check['reason']})，无法执行 {step['tool']}。"
                             f"请在回复中委婉地向用户解释此限制。]"
@@ -188,13 +186,11 @@ class Repl:
                 step_prompt = f"{system}\n\n[当前任务]: {step['prompt']}\n[已有结果]: {results}"
                 step_resp = self.c.cloud_llm.generate(step_prompt)
                 results.append(step_resp)
-                print(f"  [🔀 Track B] Step {i+1}/{total}: 完成 ({time.time()-t_step:.1f}s)", flush=True)
                 xray.log("🔀 Track B Orch", f"Step {i+1}: 完成 ({time.time()-t_step:.1f}s)")
                 self._update_live(xray, live)
 
             t_critic = time.time()
             critique = self._critique_results(user, results)
-            print(f"  [🔀 Track B] Critic → {critique} ({time.time()-t_critic:.1f}s)", flush=True)
             xray.log("🔀 Track B Critic", f"评估: {critique} ({time.time()-t_critic:.1f}s)")
             self._update_live(xray, live)
 
@@ -207,7 +203,6 @@ class Repl:
             return self.c.cloud_llm.generate(final_prompt)
 
         except Exception as e:
-            print(f"  [⚠️ Track B] 异常降级: {e}", flush=True)
             xray.log("⚠️ Track B", f"引擎异常降级: {e}")
             self._update_live(xray, live)
             return self.c.cloud_llm.generate(f"{system}\n\nUser: {user}")
@@ -360,7 +355,7 @@ class Repl:
             self.round_count += 1
             try:
                 from rich.live import Live
-                live = Live(auto_refresh=False, vertical_overflow="visible")
+                live = Live(auto_refresh=True, vertical_overflow="visible")
                 live.start()
             except ImportError:
                 live = None
