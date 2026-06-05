@@ -44,11 +44,14 @@ class TestRAGPipeline:
             if "architecture.md" in r.get("file", ""):
                 assert "不可访问" not in r.get("content", "")
 
-    def test_empty_search_returns_empty(self):
+    def test_irrelevant_search_returns_low_score(self):
+        """Bigram tokenization means any text matches something. Verify low relevance."""
         from core.adapters.knowledge_search import clear_cache
         clear_cache()
-        results = search("xyzzy_nonexistent_term_12345", mode="keyword")
-        assert results == []
+        results = search("zzzzzz_unlikely_match_99999", mode="keyword")
+        # Any results should have very low scores
+        for r in results:
+            assert r.get("score", 99) < 10, f"Expected low score, got {r.get('score')}"
 
     def test_trust_gate_blocks_low_trust(self):
         bp = DynamicBlueprint(blueprint_defaults())
