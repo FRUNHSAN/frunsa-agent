@@ -68,7 +68,7 @@ class Repl:
 
     # ── Prompt construction (delegates to adapters) ──
 
-    def _build_prompt(self, uid: str = "default") -> str:
+    def _build_prompt(self, uid: str = "default", xray: "XRay | None" = None) -> str:
         from core.adapters.output_grammar import build_grammar as build_gbnf
 
         def _build_contract_directive(bp_fields: dict) -> str:
@@ -115,14 +115,14 @@ class Repl:
         if hint:
             system = f"{hint}\n\n{system}"
             print(f"  [relation] {hint[:100]}")
-            xray.log("模式记录", hint[:80])
+            if xray: xray.log("模式记录", hint[:80])
         # ── V3.1: Narrative emergence (first round only) ──
         if self.round_count == 1:
             narrative = self.c.narrative.inject(uid)
             if narrative:
                 system = f"{narrative}\n\n{system}"
                 print(f"  [narrative] injected user profile ({len(narrative)} chars)")
-                xray.log("叙事注入", f"注入用户画像 ({len(narrative)} chars)")
+                if xray: xray.log("叙事注入", f"注入用户画像 ({len(narrative)} chars)")
         return system
 
     def _detect_explicit_command(self, text: str) -> tuple[str, str] | None:
@@ -411,7 +411,7 @@ class Repl:
                     rag_context = f"\n\n[本地知识库检索结果]\n{rag_context}\n[/知识库]"
 
             # ── Build prompt + generate ──
-            system = self._build_prompt(uid)
+            system = self._build_prompt(uid, xray)
             full_prompt = f"{system}{rag_context}\n\nUser: {user}"
 
             # ── V4.1 Phase 2: Track A/B Router ──
