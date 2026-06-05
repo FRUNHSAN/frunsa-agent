@@ -39,6 +39,9 @@ def _get_command_model():
 
 
 def _classify_command(text: str) -> tuple[str, str] | None:
+    # Short farewells/conversation closers should never trigger commands
+    if text.strip() in ("拜拜", "再见", "bye", "晚安", "谢谢", "好的"):
+        return None
     m, st_util, centers = _get_command_model()
     emb = m.encode(text)
     best_label, best_score = None, 0.0
@@ -235,7 +238,11 @@ class Repl:
             xray.log("知识网关", f"拦截: {reason}")
             return f"[RAG拦截: {reason}]"
 
-        results = kb_search(query, max_results=5)
+        # Semantic mode for Chinese (no word boundaries in keyword mode)
+        results = kb_search(query, max_results=5, mode="semantic")
+        if not results:
+            # Fallback to keyword
+            results = kb_search(query, max_results=5, mode="keyword")
         if not results:
             print(f"  [RAG] 未找到匹配: {query}")
             return ""

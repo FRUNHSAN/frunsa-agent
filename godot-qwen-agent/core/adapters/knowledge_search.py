@@ -75,7 +75,12 @@ def search(
             pass  # Fall through to keyword mode
 
     # Keyword mode (default + fallback)
+    # Chinese: split into 2-gram and 3-gram tokens (no spaces between words)
     keywords = set(query.lower().split())
+    if not keywords or len(keywords) == 1:  # Chinese — no spaces
+        bigrams = [query[i:i+2] for i in range(len(query)-1)]
+        trigrams = [query[i:i+3] for i in range(len(query)-2)]
+        keywords = set(bigrams + trigrams)
     scored = []
     for c in all_chunks:
         score = sum(1 for kw in keywords if kw in c["content"].lower())
