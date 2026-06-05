@@ -360,7 +360,8 @@ class Repl:
             # ── Live X-Ray display for this round ──
             try:
                 from rich.live import Live
-                live = Live(auto_refresh=False, vertical_overflow="visible")
+                live = Live(auto_refresh=True, vertical_overflow="visible")
+                live.start()
             except ImportError:
                 live = None
             if self.round_count == 1:
