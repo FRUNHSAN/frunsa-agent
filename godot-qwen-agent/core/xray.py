@@ -72,14 +72,14 @@ class XRay:
         }
 
         now = time.time()
-        for key in self._order:
+        for i, key in enumerate(self._order, 1):
             st = self._stages[key]
             detail = st["detail"][:100]
             if st["done"]:
-                ts = f"[dim]{st['start'] - self._t0:.1f}s[/dim]"
+                ts = f"[dim]#{i}[/dim]"
             else:
                 elapsed = now - st["start"]
-                ts = f"[yellow]{elapsed:.1f}s[/yellow]"
+                ts = f"[yellow]#{i} {elapsed:.1f}s[/yellow]"
                 if "⏳" not in detail:
                     detail = f"[yellow]{detail}[/yellow]"
 
