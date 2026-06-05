@@ -48,7 +48,7 @@ BLUEPRINT_SCHEMA: dict[str, dict] = {
     "contextual_anchoring": {
         "type": "enum",
         "values": ["HIGH", "LOW"],
-        "default": "HIGH",
+        "default": "LOW",
         "description": (
             "Whether to reference time, weather, or environment in responses. "
             "HIGH: '凌晨三点的城市...' LOW: pure content, no external anchors."

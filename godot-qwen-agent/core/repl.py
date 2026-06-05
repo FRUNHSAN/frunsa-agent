@@ -86,7 +86,7 @@ class Repl:
             tone_map = {"ENTHUSIASTIC": "热情", "WARM": "温和", "CALM": "克制", "PRAGMATIC": "务实直白"}
             parts.append(f"语气: {tone_map.get(tone, tone)}")
             if anchoring == "LOW":
-                parts.append("禁止提及时间/天气/环境")
+                parts.append("禁止: 晨光/阳光/月光/夜色/微风等时间天气隐喻。直接说事。")
             # Self-evolving values: render custom instruction from Blueprint
             for key in ("tone_style", "response_verbose_level", "explanation_style"):
                 inst = self.c.bp.get_instruction(key)
