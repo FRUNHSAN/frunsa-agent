@@ -36,11 +36,20 @@ class XRay:
         })
 
     def render(self) -> str | None:
-        """Render the X-Ray dashboard. Returns string or None if rich unavailable."""
+        """Render the X-Ray dashboard once (static mode)."""
         if not HAS_RICH or not self._events:
             return None
-
         console = Console(width=80)
+        console.print(self._build_table())
+
+    def render_live(self, live) -> None:
+        """Update a Rich Live display with current events (dynamic mode)."""
+        if not HAS_RICH:
+            return
+        live.update(self._build_table())
+
+    def _build_table(self):
+        """Build Rich Table from events."""
         table = Table(title="V3 Runtime X-Ray", show_header=False,
                       border_style="cyan", title_style="bold cyan")
         table.add_column("time", style="dim", width=8)
@@ -53,16 +62,13 @@ class XRay:
             "输出管道": "📝", "模式记录": "💾", "在线学习": "🧠",
             "叙事注入": "📖",
         }
-
         for ev in self._events:
             icon = icons.get(ev["stage"], "•")
             ts = f"[dim]{ev['elapsed']:.2f}s[/dim]"
             stage = f"[bold]{icon} {ev['stage']}[/bold]"
             detail = ev["detail"][:100]
             table.add_row(ts, stage, detail)
-
-        console.print(table)
-        return None  # Already printed
+        return table
 
     @staticmethod
     def quick_log(stage: str, detail: str) -> None:
