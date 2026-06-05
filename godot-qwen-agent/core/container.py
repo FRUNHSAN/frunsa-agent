@@ -17,6 +17,7 @@ from core.adapters.threshold_learner import EMALearner
 from core.adapters.feedback_listener import FeedbackListener
 from core.adapters.relational_patterns import RelationalPatterns
 from core.adapters.narrative_emergence import NarrativeEmergence
+from core.adapters.knowledge_search import warm_cache
 from core.contracts.registry import COMPONENT_REGISTRY
 
 
@@ -48,6 +49,15 @@ class Container:
 
         # ── Seal the registry (invariant #23) ──
         COMPONENT_REGISTRY.freeze()
+
+        # ── Pre-warm RAG cache (async-friendly for low-spec laptops) ──
+        try:
+            n = warm_cache()
+            if n > 0:
+                import sys
+                print(f"  [RAG] 预热 {n} 个 chunks 完成", file=sys.stderr)
+        except Exception:
+            pass  # Startup must not fail on cache warming
 
         # ── LLM clients (lazy, requires API key) ──
         self._cloud_llm = None

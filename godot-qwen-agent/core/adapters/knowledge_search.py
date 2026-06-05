@@ -27,6 +27,38 @@ def clear_cache() -> None:
     _query_cache.clear()
 
 
+def warm_cache(chunker_name: str = "keyword") -> int:
+    """Pre-compute chunks for all files. Call once at startup.
+    Returns number of chunks cached. Blocks for ~1s on cold start.
+    """
+    import core.adapters.keyword_chunker  # noqa
+    import core.adapters.semantic_chunker  # noqa
+    chunker_cls = COMPONENT_REGISTRY.get("chunker", chunker_name)
+    if chunker_cls is None:
+        from core.adapters.keyword_chunker import KeywordChunker
+        chunker_cls = KeywordChunker
+    chunker = chunker_cls()
+
+    count = 0
+    for file_path in BASE_DIR.rglob("*"):
+        if file_path.suffix not in SUPPORTED_SUFFIXES:
+            continue
+        rel = str(file_path.relative_to(BASE_DIR))
+        if rel in _chunk_cache:
+            continue
+        try:
+            raw = file_path.read_text(encoding="utf-8")
+        except Exception:
+            continue
+        block = ContentBlock(text=raw, source=str(file_path))
+        file_chunks = []
+        for chunk in chunker.chunk(block):
+            file_chunks.append({"file": rel, "content": chunk.text[:800], "query": ""})
+            count += 1
+        _chunk_cache[rel] = file_chunks
+    return count
+
+
 def search(
     query: str, max_results: int = 3,
     chunker_name: str = "keyword",
