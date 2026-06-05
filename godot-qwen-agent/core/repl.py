@@ -162,15 +162,15 @@ class Repl:
         return any(m in text for m in markers)
 
     def _track_b_agentic(self, user: str, system: str, trust: float,
-                         bp, xray: XRay, live=None) -> str:
-        """Track B: Planning → Orch → Critic. Uses shared Live display."""
-        import time
+                         bp, xray: XRay) -> str:
+        """Track B: Planning → Orch → Critic. Live status to console."""
+        import time, sys
 
         try:
             t0 = time.time()
             plan_steps = self._plan_task(user, system)
+            print(f"  [🔀 Track B] Planning → {len(plan_steps)} 步 ({time.time()-t0:.1f}s)", flush=True)
             xray.log("🔀 Track B Planning", f"拆解为 {len(plan_steps)} 步 ({time.time()-t0:.2f}s)")
-            self._update_live(xray, live)
 
             results = []
             total = len(plan_steps)
@@ -179,24 +179,23 @@ class Repl:
                 if step.get("tool"):
                     check = self.c.action_pipeline.check(step["tool"])
                     if not check["allowed"]:
+                        print(f"  [🔀 Track B] Step {i+1}/{total}: {step['tool']} 🚫 拦截", flush=True)
                         results.append(
                             f"[系统提示：由于契约限制({check['reason']})，无法执行 {step['tool']}。"
                             f"请在回复中委婉地向用户解释此限制。]"
                         )
                         xray.log("🔀 Track B Orch", f"Step {i+1}: {step['tool']} 🚫 契约拦截")
-                        self._update_live(xray, live)
                         continue
-                    xray.log("🔀 Track B Orch", f"Step {i+1}: {step['tool']} ✅")
                 step_prompt = f"{system}\n\n[当前任务]: {step['prompt']}\n[已有结果]: {results}"
                 step_resp = self.c.cloud_llm.generate(step_prompt)
                 results.append(step_resp)
+                print(f"  [🔀 Track B] Step {i+1}/{total}: 完成 ({time.time()-t_step:.1f}s)", flush=True)
                 xray.log("🔀 Track B Orch", f"Step {i+1}: 完成 ({time.time()-t_step:.1f}s)")
-                self._update_live(xray, live)
 
             t_critic = time.time()
             critique = self._critique_results(user, results)
+            print(f"  [🔀 Track B] Critic → {critique} ({time.time()-t_critic:.1f}s)", flush=True)
             xray.log("🔀 Track B Critic", f"评估: {critique} ({time.time()-t_critic:.1f}s)")
-            self._update_live(xray, live)
 
             final_prompt = (
                 f"{system}\n\n用户问: {user}\n"
@@ -207,8 +206,8 @@ class Repl:
             return self.c.cloud_llm.generate(final_prompt)
 
         except Exception as e:
+            print(f"  [⚠️ Track B] 异常降级: {e}", flush=True)
             xray.log("⚠️ Track B", f"引擎异常降级: {e}")
-            self._update_live(xray, live)
             return self.c.cloud_llm.generate(f"{system}\n\nUser: {user}")
 
     @staticmethod
@@ -227,11 +226,6 @@ class Repl:
         if total_chars < 50:
             return "结果过短，建议补充细节"
         return "满意"
-
-    def _update_live(self, xray: XRay, live) -> None:
-        """Update Rich Live display if available."""
-        if live and hasattr(xray, '_events') and xray._events:
-            xray.render_live(live)
 
     def _do_rag(self, query: str, xray: XRay) -> str:
         """Execute RAG pipeline: search → guard → return context or blocked message."""
@@ -356,14 +350,6 @@ class Repl:
 
             xray = XRay()  # Fresh dashboard each round
             self.round_count += 1
-
-            # ── Live X-Ray display for this round ──
-            try:
-                from rich.live import Live
-                live = Live(auto_refresh=True, vertical_overflow="visible")
-                live.start()
-            except ImportError:
-                live = None
             if self.round_count == 1:
                 self.c.profile.start_session()
                 print(f"  [新对话] Session {self.c.profile.session_count}.")
@@ -441,8 +427,7 @@ class Repl:
 
             # ── V4.1 Phase 2: Track A/B Router ──
             if self._is_complex_task(user):
-                full_response = self._track_b_agentic(user, system, trust, bp, xray, live)
-                self._update_live(xray, live)
+                full_response = self._track_b_agentic(user, system, trust, bp, xray)
             else:
                 backend = route_decide(bp.snapshot, user, trust)
                 if backend == "local":
@@ -451,7 +436,6 @@ class Repl:
                 else:
                     full_response = self.c.cloud_llm.generate(full_prompt)
                 xray.log("内容生成", f"生成 {len(full_response)} 字符")
-                self._update_live(xray, live)
 
             # ── Output pipeline ──
             orig_len = len(full_response)
@@ -477,9 +461,6 @@ class Repl:
                     self.c.fsm.reject(check["reason"])
                     full_response = f"[契约拦截 {tool_name}: {check['reason']}]"
 
-            # Stop Live, render final static table, then agent response
-            if live:
-                live.stop()
             xray.render()
 
             print(f"\n[agent] {full_response}")
