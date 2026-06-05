@@ -21,6 +21,12 @@ _query_cache: dict[str, list[dict]] = {}  # query → results
 _CACHE_MAX = 50  # Max cached queries
 
 
+def clear_cache() -> None:
+    """Clear all caches (for testing)."""
+    _chunk_cache.clear()
+    _query_cache.clear()
+
+
 def search(
     query: str, max_results: int = 3,
     chunker_name: str = "keyword",

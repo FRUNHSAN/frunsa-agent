@@ -45,6 +45,8 @@ class TestRAGPipeline:
                 assert "不可访问" not in r.get("content", "")
 
     def test_empty_search_returns_empty(self):
+        from core.adapters.knowledge_search import clear_cache
+        clear_cache()
         results = search("xyzzy_nonexistent_term_12345", mode="keyword")
         assert results == []
 
