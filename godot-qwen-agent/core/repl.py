@@ -189,7 +189,7 @@ class Repl:
                         )
                         self.c.bus.emit("🔀 Track B Orch", f"Step {i+1}: {step['tool']} 🚫 契约拦截")
                         continue
-                self.c.bus.emit("🔀 Track B Orch", f"Step {i+1}/{total}: ⏳ 执行中...")
+                self.c.bus.emit(f"🔀 Track B Step {i+1}", f"⏳ 执行中...")
                 self._update_live(xray, live)
                 step_prompt = f"{system}\n\n[当前任务]: {step['prompt']}\n[已有结果]: {results}"
                 step_resp = self.c.cloud_llm.generate(step_prompt)

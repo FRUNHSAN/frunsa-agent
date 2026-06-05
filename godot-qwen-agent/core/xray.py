@@ -3,53 +3,59 @@
 from __future__ import annotations
 
 import time
-from typing import Any
 
 try:
     from rich.console import Console
-    from rich.panel import Panel
     from rich.table import Table
-    from rich.text import Text
     HAS_RICH = True
 except ImportError:
     HAS_RICH = False
 
 
 class XRay:
-    """旁路观察者 — records pipeline events, renders rich dashboard.
+    """Live-updating pipeline dashboard. Each stage = one row that updates.
 
-    Usage (in main.py or repl.py):
+    Usage:
         xray = XRay()
-        xray.log("语义感知", "fatigue=0.72", 0.05)
-        ...
-        xray.render()  # Print the dashboard
+        xray.log("语义感知", "fatigue=0.72")       # Row appears, timer starts
+        xray.log("内容生成", "⏳ 生成中...")         # New row, timer running
+        # ... 3 seconds pass, Live auto-refreshes showing elapsed ...
+        xray.log("内容生成", "完成 (156 字符)")     # Same row updates, done
     """
 
     def __init__(self) -> None:
-        self._events: list[dict] = []
+        self._stages: dict[str, dict] = {}  # stage_name → {detail, start, done}
+        self._order: list[str] = []         # Insertion order
         self._t0 = time.time()
 
     def log(self, stage: str, detail: str, elapsed: float = 0.0) -> None:
-        self._events.append({
-            "stage": stage, "detail": detail,
-            "elapsed": elapsed or (time.time() - self._t0),
-        })
+        """Start or update a pipeline stage. Same stage = same row."""
+        key = stage  # Full stage name as key — each track B step gets its own row
+        if key in self._stages:
+            # Update existing stage
+            self._stages[key]["detail"] = detail
+            self._stages[key]["done"] = True
+        else:
+            # New stage — timer starts now
+            self._stages[key] = {
+                "detail": detail, "start": time.time(), "done": False,
+            }
+            self._order.append(key)
 
-    def render(self) -> str | None:
-        """Render the X-Ray dashboard once (static mode)."""
-        if not HAS_RICH or not self._events:
-            return None
-        console = Console(width=80)
-        console.print(self._build_table())
+    def render(self) -> None:
+        """Render once (static mode)."""
+        if not HAS_RICH:
+            return
+        Console(width=80).print(self._build_table())
 
     def render_live(self, live) -> None:
-        """Update a Rich Live display with current events (dynamic mode)."""
+        """Update a Rich Live display."""
         if not HAS_RICH:
             return
         live.update(self._build_table())
 
     def _build_table(self):
-        """Build Rich Table from events."""
+        """Build table with live timers for active stages."""
         table = Table(title="V3 Runtime X-Ray", show_header=False,
                       border_style="cyan", title_style="bold cyan")
         table.add_column("time", style="dim", width=8)
@@ -57,29 +63,28 @@ class XRay:
         table.add_column("detail", style="green")
 
         icons = {
-            "上下文组装": "⚙️", "语义感知": "🛡️", "路由决策": "🔀",
-            "用户指令": "👤", "契约演化": "📜", "内容生成": "🤖",
-            "输出管道": "📝", "模式记录": "💾", "在线学习": "🧠",
-            "叙事注入": "📖",
+            "语义感知": "🛡️", "路由决策": "🔀", "用户指令": "👤",
+            "契约演化": "📜", "内容生成": "🤖", "输出管道": "📝",
+            "模式记录": "💾", "在线学习": "🧠", "叙事注入": "📖",
+            "知识网关": "🔐", "RAG检索": "📚", "Track B Planning": "📋",
+            "Track B Orch": "⚙️", "Track B Critic": "🔍",
+            "引擎异常": "⚠️",
         }
-        for ev in self._events:
-            icon = icons.get(ev["stage"], "•")
-            ts = f"[dim]{ev['elapsed']:.2f}s[/dim]"
-            stage = f"[bold]{icon} {ev['stage']}[/bold]"
-            detail = ev["detail"][:100]
-            table.add_row(ts, stage, detail)
-        return table
 
-    @staticmethod
-    def quick_log(stage: str, detail: str) -> None:
-        """Print a single-line X-Ray entry without accumulating events."""
-        if not HAS_RICH:
-            return
-        console = Console(width=80)
-        icons = {
-            "上下文组装": "⚙️", "语义感知": "🛡️", "路由决策": "🔀",
-            "用户指令": "👤", "契约演化": "📜", "内容生成": "🤖",
-            "输出管道": "📝", "模式记录": "💾", "在线学习": "🧠",
-        }
-        icon = icons.get(stage, "•")
-        console.print(f"  [dim][{icon} {stage}][/dim] {detail}")
+        now = time.time()
+        for key in self._order:
+            st = self._stages[key]
+            detail = st["detail"][:100]
+            if st["done"]:
+                elapsed = st["start"] - self._t0
+                ts = f"[dim]{elapsed:.1f}s[/dim]"
+            else:
+                elapsed = now - st["start"]
+                ts = f"[yellow]{elapsed:.1f}s[/yellow]"
+                detail = f"[yellow]⏳ {detail}[/yellow]"
+
+            icon = icons.get(key, "•")
+            stage_display = f"[bold]{icon} {key}[/bold]"
+            table.add_row(ts, stage_display, detail)
+
+        return table
