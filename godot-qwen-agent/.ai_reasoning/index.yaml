@@ -270,6 +270,13 @@ chains:
     tags: [v3, self_evolving, rag, chunking, instruction_gc, semantic, xray]
     status: active
 
+  - chain_id: v4_purge_and_harden
+    file: chains/v4_purge_and_harden.yaml
+    title: "V4 瘦身清剿与测试加固 — 900行死代码删除 + 289全绿"
+    layer: plan
+    tags: [v4, purge, registry_freeze, repl_tests, rag_tests, dead_code]
+    status: active
+
   # ── Real LLM Orchestration + Critic Engines ──
   - chain_id: phase_18_real_orch_critic
     file: chains/phase_18_real_orch_critic.yaml
@@ -440,3 +447,9 @@ tag_index:
   instruction_gc: [v3_self_evolving_rag]
   semantic: [v3_self_evolving_rag]
   xray: [v3_self_evolving_rag]
+  v4: [v4_purge_and_harden]
+  purge: [v4_purge_and_harden]
+  registry_freeze: [v4_purge_and_harden]
+  repl_tests: [v4_purge_and_harden]
+  rag_tests: [v4_purge_and_harden]
+  dead_code: [v4_purge_and_harden]

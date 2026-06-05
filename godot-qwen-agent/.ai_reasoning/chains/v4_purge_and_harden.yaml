@@ -1,0 +1,45 @@
+# 推理链: V4 — 清剿 + 加固 + 测试补全
+chain_id: v4_purge_and_harden
+title: "V4 瘦身清剿与测试加固 — 900行死代码删除 + 289全绿"
+created_at: "2026-06-05T00:00:00Z"
+status: active
+tags: [v4, purge, registry_freeze, repl_tests, rag_tests, dead_code]
+related_chains: [v3_self_evolving_rag, v2_stream_interceptor]
+
+context: |
+  V3审计发现8个0实现/0调用的死文件、11个单实现Protocol、run_live.py克隆、
+  COMPONENT_REGISTRY从未freeze。累计~900行抽象税。
+
+decision: |
+  V4第一阶段: 删除死文件, 冻结注册表, 合并REPL, 补齐测试。
+  第二阶段(待): 引擎点火 — 将Planning/Orchestration/Critic接入主循环。
+
+rationale: |
+  删除: kernel_service.py (0实现), contract_gateway.py (0实现),
+  tool_format.py + tool_formats.py (0调用), grpc/redis transport stubs,
+  run_live.py (repl.py克隆)。~900行。所有测试通过。
+
+  冻结: COMPONENT_REGISTRY.freeze() 在 Container.__init__ 构建完成后调用。
+  预加载 chunker 模块避免懒导入被冻结拦截。
+
+  测试: REPL类从0测试→18, RAG管道→11集成。覆盖命令检测、提案应用、
+  Prompt构建、会话生命周期、检索+护栏+信任门控全链路。
+
+future_guidance:
+  purge_principle:
+    summary: "删除0实现/0调用的Protocol和adapter。YAGNI。需要时再从git历史恢复"
+    priority: high
+  registry_freeze:
+    summary: "COMPONENT_REGISTRY.freeze() 在 Container.__init__ 末尾调用。必须在预加载所有注册模块之后"
+    priority: critical
+  repl_testing:
+    summary: "REPL类通过Config+Container fixture测试。不依赖真实LLM或网络"
+    priority: high
+  engine_ignition_pending:
+    summary: "Planning/Orchestration/Critic引擎已实现但未接入主循环。V4.1接入"
+    priority: medium
+
+anti_patterns:
+  - "在freeze()之后懒导入注册模块 → RuntimeError"
+  - "保留单实现Protocol作为'远期蓝图' → 抽象税超过实用价值"
+  - "main.py直接调用cloud_llm.generate()绕过三引擎 → 架构隔离"

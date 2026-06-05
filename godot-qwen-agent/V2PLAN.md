@@ -20,6 +20,12 @@
 | 11 | 三 chunker 管线 | identity/keyword/semantic via COMPONENT_REGISTRY | ✅ 完成 |
 | 12 | 会话冷启动 | /new 重置 trust/tone/initiative | ✅ 完成 |
 | 13 | llama-server HTTP | 替换子进程，常驻模型 | ⏸️ 等待稳定版 |
+| 14 | 清剿死代码 | 删除 8 个 0 实现/0 调用文件 (~900行) | ✅ V4 |
+| 15 | Registry 冻结 | COMPONENT_REGISTRY.freeze() in Container | ✅ V4 |
+| 16 | REPL 合并 | run_live.py 删除, 唯一入口 core/repl.py | ✅ V4 |
+| 17 | REPL 测试 | 18 个命令/提案/提示/会话测试 | ✅ V4 |
+| 18 | RAG 集成测试 | 11 个检索+护栏+信任全链路测试 | ✅ V4 |
+| 19 | 引擎点火 | Planning/Orch/Critic 接入主循环 | ⏸️ V4.1 |
 
 ---
 
