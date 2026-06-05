@@ -35,6 +35,13 @@ def search(
         return []
 
     # Get chunker from registry (import ensures registration)
+    # Ensure chunker modules are loaded (idempotent after freeze)
+    try:
+        import core.adapters.keyword_chunker  # noqa
+        import core.adapters.semantic_chunker  # noqa
+    except RuntimeError:
+        pass  # Already registered from Container pre-load
+
     chunker_cls = COMPONENT_REGISTRY.get("chunker", chunker_name)
     if chunker_cls is None:
         from core.adapters.keyword_chunker import KeywordChunker
