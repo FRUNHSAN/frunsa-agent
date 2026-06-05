@@ -67,7 +67,7 @@ class TestRAGPipeline:
 
         mock = [{"file": "public_docs/safe.md", "content": "机密：这份文档包含裁员计划..."}]
         filtered = p.guard_post_retrieval("knowledge_search", mock)
-        assert "不可访问" in filtered[0]["content"]
+        assert "SYSTEM" in filtered[0]["content"]  # Replaced with block message
 
     def test_clean_content_passes_guard(self):
         bp = DynamicBlueprint(blueprint_defaults())
