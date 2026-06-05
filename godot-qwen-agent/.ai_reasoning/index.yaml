@@ -277,6 +277,13 @@ chains:
     tags: [v4, purge, registry_freeze, repl_tests, rag_tests, dead_code]
     status: active
 
+  - chain_id: v4_phase2_engine_ignition
+    file: chains/v4_phase2_engine_ignition.yaml
+    title: "V4.1 Phase 2 引擎点火 — Track A/B Router + Planning/Orch/Critic 管线"
+    layer: plan
+    tags: [v4, engine_ignition, track_router, planning, orchestration, critic, rag_cache]
+    status: active
+
   # ── Real LLM Orchestration + Critic Engines ──
   - chain_id: phase_18_real_orch_critic
     file: chains/phase_18_real_orch_critic.yaml
@@ -453,3 +460,9 @@ tag_index:
   repl_tests: [v4_purge_and_harden]
   rag_tests: [v4_purge_and_harden]
   dead_code: [v4_purge_and_harden]
+  engine_ignition: [v4_phase2_engine_ignition]
+  track_router: [v4_phase2_engine_ignition]
+  planning: [v4_phase2_engine_ignition]
+  orchestration: [v4_phase2_engine_ignition]
+  critic: [v4_phase2_engine_ignition]
+  rag_cache: [v4_phase2_engine_ignition]

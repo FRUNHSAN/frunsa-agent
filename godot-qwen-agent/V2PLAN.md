@@ -25,7 +25,10 @@
 | 16 | REPL 合并 | run_live.py 删除, 唯一入口 core/repl.py | ✅ V4 |
 | 17 | REPL 测试 | 18 个命令/提案/提示/会话测试 | ✅ V4 |
 | 18 | RAG 集成测试 | 11 个检索+护栏+信任全链路测试 | ✅ V4 |
-| 19 | 引擎点火 | Planning/Orch/Critic 接入主循环 | ⏸️ V4.1 |
+| 19 | 引擎点火 | Track A/B + Planning/Orch/Critic | ✅ V4.1 |
+| 20 | RAG 缓存 | 预热+mtime+LRU+中文二元组 | ✅ V4.1 |
+| 21 | MCP 集成 | 动态工具发现 | ⏸️ V4.2 |
+| 22 | 引擎深化 | LLM 动态规划 + 上下文窗口 | ⏸️ V4.2 |
 
 ---
 

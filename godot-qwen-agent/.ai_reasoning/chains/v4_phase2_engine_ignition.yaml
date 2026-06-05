@@ -1,0 +1,42 @@
+# 推理链: V4.1 Phase 2 — 引擎点火
+chain_id: v4_phase2_engine_ignition
+title: "V4.1 Phase 2 引擎点火 — Track A/B Router + Planning/Orch/Critic 管线"
+created_at: "2026-06-05T00:00:00Z"
+status: active
+tags: [v4, engine_ignition, track_router, planning, orchestration, critic, rag_cache]
+related_chains: [v4_purge_and_harden, v3_self_evolving_rag]
+
+context: |
+  V4 Phase 1清剿了死代码, Phase 3补齐了测试。但Planning/Orchestration/Critic
+  三个引擎有完整实现和conformance测试,却从未接入主循环。repl.py直接调用
+  cloud_llm.generate(),三引擎被完全绕过。
+
+decision: |
+  Track A/B Router: 简单对话走直连(Track A),复杂任务走三引擎(Track B)。
+  Track B管线: Planning(拆解)→Orchestration(执行+契约门控)→Critic(评估)→合成。
+  全局降落伞: Track B任何异常降级回Track A,系统不崩溃。
+
+rationale: |
+  已验证: "帮我分析量子计算优缺点" → Planning 3步 → Orch 3步(knowledge_search ✅)
+  → Critic 满意。~8秒全程。X-Ray实时打印耗时。
+  引擎管线50行,不改引擎内部实现。只接线。
+
+future_guidance:
+  track_router:
+    summary: "关键词判定(Phase3换embedding)。复杂→Track B,简单→Track A"
+    priority: high
+  engine_pipeline:
+    summary: "Planning→Orch→Critic→合成。每步契约门控。全局try/except降落伞"
+    priority: critical
+  rag_caching:
+    summary: "预热+文件mtime检测+LRU淘汰128MB+查询缓存50条。低配笔记本友好"
+    priority: high
+  chinese_tokenization:
+    summary: "二元组拆分中文无空格查询。RAG自动语义模式,关键词降级"
+    priority: medium
+
+anti_patterns:
+  - "Track B中直接调用cloud_llm.generate()绕过引擎 → 引擎架空"
+  - "不包裹契约拦截话术 → 用户看到系统内部错误信息"
+  - "不加X-Ray计时 → 不知道慢在哪个引擎"
+  - "不给Track B全局降落伞 → 一个引擎异常整个系统崩溃"
