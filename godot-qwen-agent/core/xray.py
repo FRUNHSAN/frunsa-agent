@@ -28,18 +28,22 @@ class XRay:
         self._order: list[str] = []         # Insertion order
         self._t0 = time.time()
 
-    def log(self, stage: str, detail: str, elapsed: float = 0.0) -> None:
-        """Start or update a pipeline stage. Same stage = same row."""
-        key = stage  # Full stage name as key — each track B step gets its own row
-        if key in self._stages:
-            # Update existing stage
-            self._stages[key]["detail"] = detail
-            self._stages[key]["done"] = True
-        else:
-            # New stage — timer starts now
-            self._stages[key] = {
-                "detail": detail, "start": time.time(), "done": False,
-            }
+    def log(self, stage: str, detail: str) -> None:
+        """Log a completed stage (no timer). Appears immediately as done."""
+        key = stage
+        self._stages[key] = {
+            "detail": detail, "start": time.time(), "done": True,
+        }
+        if key not in self._order:
+            self._order.append(key)
+
+    def log_pending(self, stage: str, detail: str) -> None:
+        """Start a pending stage (timer runs). Call log() with same stage to complete."""
+        key = stage
+        self._stages[key] = {
+            "detail": detail, "start": time.time(), "done": False,
+        }
+        if key not in self._order:
             self._order.append(key)
 
     def render(self) -> None:

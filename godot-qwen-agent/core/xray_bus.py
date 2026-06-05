@@ -43,9 +43,14 @@ class XRayBus:
             self._observers.remove(xray)
 
     def emit(self, stage: str, detail: str) -> None:
-        """Emit a pipeline event to all X-Ray observers (table)."""
+        """Emit a completed pipeline event (no timer)."""
         for xray in self._observers:
             xray.log(stage, detail)
+
+    def emit_pending(self, stage: str, detail: str) -> None:
+        """Emit a pending pipeline event (timer starts). Call emit() to complete."""
+        for xray in self._observers:
+            xray.log_pending(stage, detail)
 
     def trace(self, node: TraceNode) -> None:
         """Record a structured trace node (execution tree)."""
