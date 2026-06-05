@@ -149,6 +149,82 @@ class Repl:
             return ("conversational_initiative", "PROACTIVE")
         return None
 
+    # ── V4.1 Phase 2: Track A/B Router ──
+
+    @staticmethod
+    def _is_complex_task(text: str) -> bool:
+        """Keyword heuristic — Phase 3 replaces with embedding classifier."""
+        markers = ["分析", "比较", "评估", "方案", "策略", "面试", "答辩",
+                   "帮我", "怎么做", "怎么准备", "为什么", "优缺点"]
+        return any(m in text for m in markers)
+
+    def _track_b_agentic(self, user: str, system: str, trust: float,
+                         bp, xray: XRay) -> str:
+        """Track B: Planning → Orchestration → Critic (with global fallback)."""
+        import time
+
+        try:
+            # ── Step 1: Planning ──
+            t0 = time.time()
+            plan_steps = self._plan_task(user, system)
+            xray.log("🔀 Track B Planning", f"拆解为 {len(plan_steps)} 步 ({time.time()-t0:.2f}s)")
+
+            # ── Step 2: Orchestration ──
+            results = []
+            for i, step in enumerate(plan_steps):
+                t_step = time.time()
+                # Contract gate: check if this step's tool is allowed
+                if step.get("tool"):
+                    check = self.c.action_pipeline.check(step["tool"])
+                    if not check["allowed"]:
+                        results.append(
+                            f"[系统提示：由于契约限制({check['reason']})，无法执行 {step['tool']}。"
+                            f"请在回复中委婉地向用户解释此限制。]"
+                        )
+                        xray.log("🔀 Track B Orch", f"Step {i+1}: {step['tool']} 🚫 契约拦截")
+                        continue
+                    xray.log("🔀 Track B Orch", f"Step {i+1}: {step['tool']} ✅")
+                # Execute step
+                step_prompt = f"{system}\n\n[当前任务]: {step['prompt']}\n[已有结果]: {results}"
+                step_resp = self.c.cloud_llm.generate(step_prompt)
+                results.append(step_resp)
+                xray.log("🔀 Track B Orch", f"Step {i+1}: 完成 ({time.time()-t_step:.2f}s)")
+
+            # ── Step 3: Critic ──
+            t_critic = time.time()
+            critique = self._critique_results(user, results)
+            xray.log("🔀 Track B Critic", f"评估完成 ({time.time()-t_critic:.2f}s): {critique}")
+
+            # ── Step 4: Synthesize final response ──
+            final_prompt = (
+                f"{system}\n\n用户问: {user}\n"
+                f"分析结果: {results}\n"
+                f"Critic建议: {critique}\n"
+                f"请基于以上内容生成最终回复。"
+            )
+            return self.c.cloud_llm.generate(final_prompt)
+
+        except Exception as e:
+            xray.log("⚠️ Track B", f"引擎异常降级: {e}")
+            return self.c.cloud_llm.generate(f"{system}\n\nUser: {user}")
+
+    @staticmethod
+    def _plan_task(user: str, system: str) -> list[dict]:
+        """Decompose user request into ordered steps."""
+        return [
+            {"prompt": f"分析用户问题的核心要点: {user}", "tool": ""},
+            {"prompt": f"基于分析结果，提供详细回答: {user}", "tool": "knowledge_search"},
+            {"prompt": f"总结并给出最终建议", "tool": ""},
+        ]
+
+    @staticmethod
+    def _critique_results(user: str, results: list[str]) -> str:
+        """Evaluate results completeness. Returns '满意' or suggestion."""
+        total_chars = sum(len(r) for r in results)
+        if total_chars < 50:
+            return "结果过短，建议补充细节"
+        return "满意"
+
     def _do_rag(self, query: str, xray: XRay) -> str:
         """Execute RAG pipeline: search → guard → return context or blocked message."""
         from core.adapters.knowledge_search import search as kb_search
@@ -338,13 +414,17 @@ class Repl:
             system = self._build_prompt(uid)
             full_prompt = f"{system}{rag_context}\n\nUser: {user}"
 
-            backend = route_decide(bp.snapshot, user, trust)
-            if backend == "local":
-                full_response = self.c.local_llm.generate(full_prompt, grammar=build_gbnf(bp.snapshot))
-                xray.log("路由决策", "本地 + GBNF 物理约束")
+            # ── V4.1 Phase 2: Track A/B Router ──
+            if self._is_complex_task(user):
+                full_response = self._track_b_agentic(user, system, trust, bp, xray)
             else:
-                full_response = self.c.cloud_llm.generate(full_prompt)
-            xray.log("内容生成", f"生成 {len(full_response)} 字符")
+                backend = route_decide(bp.snapshot, user, trust)
+                if backend == "local":
+                    full_response = self.c.local_llm.generate(full_prompt, grammar=build_gbnf(bp.snapshot))
+                    xray.log("路由决策", "本地 + GBNF 物理约束")
+                else:
+                    full_response = self.c.cloud_llm.generate(full_prompt)
+                xray.log("内容生成", f"生成 {len(full_response)} 字符")
 
             # ── Output pipeline ──
             orig_len = len(full_response)
