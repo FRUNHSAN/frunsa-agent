@@ -19,6 +19,7 @@ from core.adapters.relational_patterns import RelationalPatterns
 from core.adapters.narrative_emergence import NarrativeEmergence
 from core.adapters.knowledge_search import warm_cache
 from core.contracts.registry import COMPONENT_REGISTRY
+from core.xray_bus import XRayBus
 
 
 class Container:
@@ -36,6 +37,9 @@ class Container:
         # ── Contract engine ──
         self.bp = DynamicBlueprint(blueprint_defaults())
         self.engine = ContractEvolutionEngine(trust_threshold=0.10, rollback_window=3)
+
+        # ── Shared event bus (decouples components from X-Ray display) ──
+        self.bus = XRayBus()
 
         # ── Enforcement ──
         self.output_pipeline = OutputPipeline(self.bp)

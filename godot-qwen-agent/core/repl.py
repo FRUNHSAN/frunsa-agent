@@ -117,13 +117,13 @@ class Repl:
         hint = self.c.patterns.generate_hint(self.c.cfg.user_id) if self.round_count <= 2 else None
         if hint:
             system = f"{hint}\n\n{system}"
-            if xray: xray.log("模式记录", hint[:80])
+            if xray: self.c.bus.emit("模式记录", hint[:80])
         # ── V3.1: Narrative emergence (first round only) ──
         if self.round_count == 1:
             narrative = self.c.narrative.inject(uid)
             if narrative:
                 system = f"{narrative}\n\n{system}"
-                if xray: xray.log("叙事注入", f"注入用户画像 ({len(narrative)} chars)")
+                if xray: self.c.bus.emit("叙事注入", f"注入用户画像 ({len(narrative)} chars)")
         return system
 
     def _detect_explicit_command(self, text: str) -> tuple[str, str] | None:
@@ -167,7 +167,7 @@ class Repl:
         try:
             t0 = time.time()
             plan_steps = self._plan_task(user, system)
-            xray.log("🔀 Track B Planning", f"拆解为 {len(plan_steps)} 步 ({time.time()-t0:.2f}s)")
+            self.c.bus.emit("🔀 Track B Planning", f"拆解为 {len(plan_steps)} 步 ({time.time()-t0:.2f}s)")
             self._update_live(xray, live)
 
             results = []
@@ -181,17 +181,17 @@ class Repl:
                             f"[系统提示：由于契约限制({check['reason']})，无法执行 {step['tool']}。"
                             f"请在回复中委婉地向用户解释此限制。]"
                         )
-                        xray.log("🔀 Track B Orch", f"Step {i+1}: {step['tool']} 🚫 契约拦截")
+                        self.c.bus.emit("🔀 Track B Orch", f"Step {i+1}: {step['tool']} 🚫 契约拦截")
                         continue
                 step_prompt = f"{system}\n\n[当前任务]: {step['prompt']}\n[已有结果]: {results}"
                 step_resp = self.c.cloud_llm.generate(step_prompt)
                 results.append(step_resp)
-                xray.log("🔀 Track B Orch", f"Step {i+1}: 完成 ({time.time()-t_step:.1f}s)")
+                self.c.bus.emit("🔀 Track B Orch", f"Step {i+1}: 完成 ({time.time()-t_step:.1f}s)")
                 self._update_live(xray, live)
 
             t_critic = time.time()
             critique = self._critique_results(user, results)
-            xray.log("🔀 Track B Critic", f"评估: {critique} ({time.time()-t_critic:.1f}s)")
+            self.c.bus.emit("🔀 Track B Critic", f"评估: {critique} ({time.time()-t_critic:.1f}s)")
             self._update_live(xray, live)
 
             final_prompt = (
@@ -203,7 +203,7 @@ class Repl:
             return self.c.cloud_llm.generate(final_prompt)
 
         except Exception as e:
-            xray.log("⚠️ Track B", f"引擎异常降级: {e}")
+            self.c.bus.emit("⚠️ Track B", f"引擎异常降级: {e}")
             self._update_live(xray, live)
             return self.c.cloud_llm.generate(f"{system}\n\nUser: {user}")
 
@@ -235,7 +235,7 @@ class Repl:
         if not check["allowed"]:
             reason = check["reason"]
             print(f"  [RAG] 🔴 拦截: {reason}")
-            xray.log("知识网关", f"拦截: {reason}")
+            self.c.bus.emit("知识网关", f"拦截: {reason}")
             self._update_live(xray, live)
             return f"[RAG拦截: {reason}]"
 
@@ -256,7 +256,7 @@ class Repl:
             if blocked:
                 blocked_count += 1
             else:
-                xray.log("RAG检索", f"命中 {r['file']}")
+                self.c.bus.emit("RAG检索", f"命中 {r['file']}")
                 self._update_live(xray, live)
                 context_parts.append(f"[来源: {r['file']}]\n{r['content']}")
 
@@ -352,6 +352,7 @@ class Repl:
                 continue
 
             xray = XRay()
+            self.c.bus.subscribe(xray)  # X-Ray = observer on the bus
             self.round_count += 1
             try:
                 from rich.live import Live
@@ -392,7 +393,7 @@ class Repl:
             elif dim == "frustration":
                 trust = max(0.0, trust - 0.03 * (1 + score))
             if dim:
-                xray.log("语义感知", f"{dim}={score:.3f}")
+                self.c.bus.emit("语义感知", f"{dim}={score:.3f}")
                 self._update_live(xray, live)
 
             # ── Pending proposals ──
@@ -412,7 +413,7 @@ class Repl:
                 }
                 if self._apply_proposal(cmd_prop, label="USER COMMAND"):
                     self.contract_events.append(f"[R{self.round_count}] {cmd_prop['target_blueprint_key']} -> {cmd_prop['new_value']}")
-                    xray.log("用户指令", f"{cmd_prop['target_blueprint_key']} → {cmd_prop['new_value']}")
+                    self.c.bus.emit("用户指令", f"{cmd_prop['target_blueprint_key']} → {cmd_prop['new_value']}")
 
             # ── Signal interpreter ──
             if USE_SEMANTIC and dim:
@@ -421,7 +422,7 @@ class Repl:
                 for sp in signal_interpret(dim, score, trust, bp.snapshot, user, thresholds=learned):
                     if self._apply_proposal(sp, label="SIGNAL→CONTRACT"):
                         self.contract_events.append(f"[R{self.round_count}] {sp['target_blueprint_key']} -> {sp['new_value']}")
-                        xray.log("契约演化", f"{sp['target_blueprint_key']} → {sp['new_value']} ({sp.get('human_reason','')[:40]})")
+                        self.c.bus.emit("契约演化", f"{sp['target_blueprint_key']} → {sp['new_value']} ({sp.get('human_reason','')[:40]})")
 
             # ── Auto-RAG: inject knowledge context when mode is on ──
             rag_context = ""
@@ -442,10 +443,10 @@ class Repl:
                 backend = route_decide(bp.snapshot, user, trust)
                 if backend == "local":
                     full_response = self.c.local_llm.generate(full_prompt, grammar=build_gbnf(bp.snapshot))
-                    xray.log("路由决策", "本地 + GBNF 物理约束")
+                    self.c.bus.emit("路由决策", "本地 + GBNF 物理约束")
                 else:
                     full_response = self.c.cloud_llm.generate(full_prompt)
-                xray.log("内容生成", f"生成 {len(full_response)} 字符")
+                self.c.bus.emit("内容生成", f"生成 {len(full_response)} 字符")
                 self._update_live(xray, live)
 
             # ── Output pipeline ──
@@ -453,7 +454,7 @@ class Repl:
             full_response, penalty = self.c.output_pipeline.process(full_response.strip())
             if penalty:
                 trust = max(0.0, trust - penalty)
-            xray.log("输出管道", f"截断/清洗: {orig_len}→{len(full_response)} 字符 | tone={bp.fields.get('tone_style','?')}")
+            self.c.bus.emit("输出管道", f"截断/清洗: {orig_len}→{len(full_response)} 字符 | tone={bp.fields.get('tone_style','?')}")
             self._update_live(xray, live)
 
             # ── FSM intercept ──
