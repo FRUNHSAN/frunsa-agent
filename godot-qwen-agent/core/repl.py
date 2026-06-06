@@ -52,13 +52,17 @@ def _classify_command(text: str) -> tuple[str, str] | None:
     try:
         emb = m.encode([text])[0]
     except Exception:
-        return None
+        # Older sentence-transformers accept bare string; fallback gracefully
+        try:
+            emb = m.encode(text)
+        except Exception:
+            return None
     best_label, best_score = None, 0.0
     for label, center in centers.items():
         s = float(st_util.cos_sim(emb, center))
         if s > best_score:
             best_label, best_score = label, s
-    if best_label and best_score > 0.45:
+    if best_label and best_score > 0.70:
         key, val = best_label.split(":", 1)
         return (key, val)
     return None
