@@ -151,14 +151,113 @@ class Repl:
             return ("conversational_initiative", "PROACTIVE")
         return None
 
-    # ── V4.1 Phase 2: Track A/B Router ──
+    # ── V4.1 Phase 3: Track A/B/C Router ──
+
+    # Cached route anchors — computed once at init
+    _route_anchors: dict[str, list[str]] = {}
+    _route_centers: dict | None = None  # {track_label: numpy vector}
+
+    @classmethod
+    def _init_route_classifier(cls) -> None:
+        """Pre-load embedding model and cache route anchors (暗礁 3: cold start)."""
+        if cls._route_centers is not None:
+            return
+        import numpy as np
+        from sentence_transformers import SentenceTransformer
+        m = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+        anchors = {
+            # "C" anchors: complex, multi-step, engine-worthy tasks
+            "C": [
+                "帮我准备面试", "写一份方案", "深度调研", "全面分析并给出策略",
+                "帮我设计架构", "对比多个方案并推荐", "模拟答辩",
+            ],
+            # "B" anchors: moderate complexity, static 3-step sufficient
+            "B": [
+                "分析优缺点", "做个对比", "解释原理", "总结要点",
+            ],
+        }
+        centers = {}
+        for label, sentences in anchors.items():
+            centers[label] = np.mean(m.encode(sentences), axis=0)
+        cls._route_centers = centers
 
     @staticmethod
-    def _is_complex_task(text: str) -> bool:
-        """Keyword heuristic — Phase 3 replaces with embedding classifier."""
-        markers = ["分析", "比较", "评估", "方案", "策略", "面试", "答辩",
-                   "帮我", "怎么做", "怎么准备", "为什么", "优缺点"]
-        return any(m in text for m in markers)
+    def _route_task(text: str) -> str:
+        """Embedding-based router: returns 'A', 'B', or 'C'.
+
+        Thresholds calibrated from natural gaps in anchor similarity distribution.
+        Tier 1 ambiguity → B (safer than falling to A).
+        """
+        try:
+            return Repl._route_task_embedding(text)
+        except Exception:
+            return Repl._route_task_fallback(text)
+
+    @staticmethod
+    def _route_task_embedding(text: str) -> str:
+        import numpy as np
+        m, _, _ = _get_command_model()
+        centers = Repl._route_centers
+        emb = m.encode(text)
+        scores = {}
+        for label, center in centers.items():
+            scores[label] = float(np.dot(emb, center) / (
+                np.linalg.norm(emb) * np.linalg.norm(center) + 1e-8
+            ))
+        # Tier decision: highest score wins, with minimum threshold
+        best = max(scores, key=scores.get)
+        best_score = scores[best]
+
+        if best == "C" and best_score > 0.45:
+            return "C"
+        if best == "B" and best_score > 0.40:
+            return "B"
+        # Fuzzy: close to B/C boundary → B (safer than A)
+        if best_score > 0.30:
+            return "B"
+        return "A"
+
+    @staticmethod
+    def _route_task_fallback(text: str) -> str:
+        """Keyword fallback when embedding model is unavailable."""
+        markers_c = ["面试", "答辩", "方案", "策略", "架构", "深度", "全面"]
+        markers_b = ["分析", "比较", "对比", "原理", "优缺点", "为什么"]
+        if any(m in text for m in markers_c):
+            return "C"
+        if any(m in text for m in markers_b):
+            return "B"
+        return "A"
+
+    def _run_track_c(self, user: str, system: str, xray: XRay, live=None) -> str:
+        """Track C: full engine pipeline with retry."""
+        from core.track_c import TrackCEngine
+        engine = self._get_track_c_engine()
+        return engine.run(user, system, self.round_count)
+
+    def _get_track_c_engine(self):
+        """Lazy-init Track C engine with real CloudLLM backend."""
+        if not hasattr(self, '_track_c_engine'):
+            from core.adapters.cloudllm_backend import CloudLLMBackend
+            from core.adapters.generator_adapter import GenerationAdapter
+            from engines.planning.llm import LLMPlanningEngine
+            from engines.orchestration.llm import LLMOrchestrationEngine
+            from engines.critic.llm import LLMCriticEngine
+            from core.track_c import TrackCEngine
+
+            backend = CloudLLMBackend(self.c.cloud_llm, model="deepseek-chat")
+            adapter = GenerationAdapter(backend)
+
+            planning = LLMPlanningEngine(adapter)
+            orch = LLMOrchestrationEngine(adapter)
+            critic = LLMCriticEngine(adapter)
+
+            self._track_c_engine = TrackCEngine(
+                planning_engine=planning,
+                orch_engine=orch,
+                critic_engine=critic,
+                bus=self.c.bus,
+            )
+        return self._track_c_engine
 
     def _track_b_agentic(self, user: str, system: str, trust: float,
                          bp, xray: XRay, live=None) -> str:
@@ -453,7 +552,12 @@ class Repl:
             full_prompt = f"{system}{rag_context}\n\nUser: {user}"
 
             # ── V4.1 Phase 2: Track A/B Router ──
-            if self._is_complex_task(user):
+            route = self._route_task(user)
+            if route == "C":
+                self.c.bus.emit("路由决策", f"Track C (embedding)")
+                full_response = self._run_track_c(user, system, xray, live)
+            elif route == "B":
+                self.c.bus.emit("路由决策", "Track B")
                 full_response = self._track_b_agentic(user, system, trust, bp, xray, live)
             else:
                 self.c.bus.emit_pending("内容生成", "⏳ 生成中...")
