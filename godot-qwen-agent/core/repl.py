@@ -71,13 +71,7 @@ class Repl:
         self._amendments_shown: set[str] = set()
         self.prev_response_len = 0
         self.prev_signal: dict = {"dimension": None, "score": 0.0}
-
-        # Defer embedding model load to first use (avoids network timeout at init)
-        try:
-            _get_command_model()
-            Repl._init_route_classifier()
-        except Exception:
-            pass  # Will fall back to keyword routing if model unavailable
+        # Embedding model loads lazily on first _route_task() or _classify_command() call
 
     # ── Prompt construction (delegates to adapters) ──
 
@@ -207,7 +201,11 @@ class Repl:
 
     @staticmethod
     def _route_task_embedding(text: str) -> str:
-        import numpy as np
+        import os, numpy as np
+        os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+        # Ensure route centers are computed
+        if Repl._route_centers is None:
+            Repl._init_route_classifier()
         m, _, _ = _get_command_model()
         centers = Repl._route_centers
         emb = m.encode([text])[0]  # encode expects list, return first vector
