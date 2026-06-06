@@ -46,7 +46,13 @@ def _classify_command(text: str) -> tuple[str, str] | None:
     if text.strip() in ("拜拜", "再见", "bye", "晚安", "谢谢", "好的"):
         return None
     m, st_util, centers = _get_command_model()
-    emb = m.encode([text])[0]
+    # Guard: garbled/surrogate text → skip classification
+    if not text or any(0xD800 <= ord(c) <= 0xDFFF for c in text):
+        return None
+    try:
+        emb = m.encode([text])[0]
+    except Exception:
+        return None
     best_label, best_score = None, 0.0
     for label, center in centers.items():
         s = float(st_util.cos_sim(emb, center))
