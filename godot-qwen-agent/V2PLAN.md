@@ -28,7 +28,8 @@
 | 19 | 引擎点火 | Track A/B + Planning/Orch/Critic | ✅ V4.1 |
 | 20 | RAG 缓存 | 预热+mtime+LRU+中文二元组 | ✅ V4.1 |
 | 21 | MCP 集成 | 动态工具发现 | ⏸️ V4.2 |
-| 22 | 引擎深化 | LLM 动态规划 + 上下文窗口 | ⏸️ V4.2 |
+| 22 | 引擎深化 | Track C: Planning/Orch/Critic 全开 + 重试 | ✅ V4.1 |
+| 23 | MCP 集成 | 动态工具发现 | ⏸️ V4.2 |
 
 ---
 

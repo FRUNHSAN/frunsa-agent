@@ -1,0 +1,46 @@
+# 推理链: V4.1 Phase 3 — Track C 引擎深化
+chain_id: v4.1_phase3_track_c
+title: "V4.1 Phase 3 Track C — 三轨分层 + 引擎全开 + 评分重试"
+created_at: "2026-06-07T00:00:00Z"
+status: active
+tags: [v4, track_c, engine_deepening, planning, orchestration, critic, retry]
+related_chains: [v4_phase2_engine_ignition, phase_17_tech_debt_real_engine]
+
+context: |
+  Track B 能跑但静态——Planning 写死 3 步模板, Critic 用字符数判断。
+  engines/ 下 15 个文件有完整的 PlanningEngine / OrchestrationEngine /
+  CriticEngine (async streaming, LLM-backed, conformance 测试 224/224),
+  但一个都没接入 REPL。
+
+decision: |
+  新建 Track C——三轨分层体系的最高层。
+  Track A (Tier 0): 直连 LLM, 零引擎。
+  Track B (Tier 1): 静态 3 步, 关键词路由。
+  Track C (Tier 2): 引擎全开, 动态规划+编排+评分重试。
+
+  路由: embedding 相似度分类器 (预加载模型+缓存锚点向量)。
+  桥接: CloudLLMBackend 适配器把 DeepSeekClient → GenerationBackend。
+  安全: safe_async_run() 防事件循环炸弹, Scratchpad 截断防 Token 爆炸。
+
+rationale: |
+  三个引擎的 conformance 测试 224/224 全绿, 引擎本身不需要改动。
+  只需写适配器桥接 + 管线编排 + 路由升级。
+  三轨分层: 复杂度越高 → 引擎参与越多, 但共享同一套基础设施。
+  Critic 评分 < 0.70 触发重试 (最多 2 次)——"自我反思与纠错"的核心演示点。
+
+anti_patterns:
+  - "Track C 中用裸 asyncio.run() → 未来 REPL 变 async 时炸事件循环"
+  - "Scratchpad 不截断直接喂 Critic → Token 爆炸"
+  - "Embedding 分类器每次请求现场加载模型 → 冷启动延迟 1-2s"
+  - "改 engines/ 下任何文件 → 引擎 224 个测试可能回归, 零改动原则"
+
+future_guidance:
+  embedding_router:
+    summary: "预加载 sentence-transformers + 缓存锚点中心向量。阈值 C>0.45, B>0.40。模糊→B (安全降级)"
+    priority: high
+  track_c_pipeline:
+    summary: "Planning→Orch→Critic→retry loop→Synthesize。safe_async_run 桥接。Critic<0.70 重试最多 2 次"
+    priority: critical
+  cloudllm_backend:
+    summary: "DeepSeekClient.generate(prompt)→str 包装成 GenerationBackend。context 丢弃, tokens 估算"
+    priority: medium
