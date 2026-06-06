@@ -21,6 +21,8 @@ _EMBED_MODEL: object | None = None
 def _get_command_model():
     global _EMBED_MODEL
     if _EMBED_MODEL is None:
+        import os
+        os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
         import numpy as np
         from sentence_transformers import SentenceTransformer, util as st_util
         m = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
@@ -44,7 +46,7 @@ def _classify_command(text: str) -> tuple[str, str] | None:
     if text.strip() in ("拜拜", "再见", "bye", "晚安", "谢谢", "好的"):
         return None
     m, st_util, centers = _get_command_model()
-    emb = m.encode(text)
+    emb = m.encode([text])[0]
     best_label, best_score = None, 0.0
     for label, center in centers.items():
         s = float(st_util.cos_sim(emb, center))
@@ -69,6 +71,13 @@ class Repl:
         self._amendments_shown: set[str] = set()
         self.prev_response_len = 0
         self.prev_signal: dict = {"dimension": None, "score": 0.0}
+
+        # Defer embedding model load to first use (avoids network timeout at init)
+        try:
+            _get_command_model()
+            Repl._init_route_classifier()
+        except Exception:
+            pass  # Will fall back to keyword routing if model unavailable
 
     # ── Prompt construction (delegates to adapters) ──
 
@@ -159,12 +168,15 @@ class Repl:
 
     @classmethod
     def _init_route_classifier(cls) -> None:
-        """Pre-load embedding model and cache route anchors (暗礁 3: cold start)."""
+        """Pre-load embedding model and cache route anchors (暗礁 3: cold start).
+
+        Reuses the same SentenceTransformer instance from _get_command_model()
+        to avoid loading a second copy into memory.
+        """
         if cls._route_centers is not None:
             return
         import numpy as np
-        from sentence_transformers import SentenceTransformer
-        m = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+        m, _, _ = _get_command_model()  # Reuse existing model
         anchors = {
             # "C" anchors: complex, multi-step, engine-worthy tasks
             "C": [
@@ -198,7 +210,7 @@ class Repl:
         import numpy as np
         m, _, _ = _get_command_model()
         centers = Repl._route_centers
-        emb = m.encode(text)
+        emb = m.encode([text])[0]  # encode expects list, return first vector
         scores = {}
         for label, center in centers.items():
             scores[label] = float(np.dot(emb, center) / (
@@ -551,7 +563,7 @@ class Repl:
             self._update_live(xray, live)  # Flush events from _build_prompt
             full_prompt = f"{system}{rag_context}\n\nUser: {user}"
 
-            # ── V4.1 Phase 2: Track A/B Router ──
+            # ── V4.1 Phase 3: Track A/B/C Router ──
             route = self._route_task(user)
             if route == "C":
                 self.c.bus.emit("路由决策", f"Track C (embedding)")
@@ -651,5 +663,6 @@ class Repl:
             log_file = f"session_{uid}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
             with open(log_file, "w", encoding="utf-8") as f:
                 f.write(f"=== Session: {uid} | {datetime.now().isoformat()} | {self.round_count} rounds ===\n\n")
-                f.write("\n".join(session_log))
+                cleaned = "\n".join(session_log).encode("utf-8", errors="surrogateescape").decode("utf-8", errors="replace")
+                f.write(cleaned)
             print(f"日志已保存: {log_file}")

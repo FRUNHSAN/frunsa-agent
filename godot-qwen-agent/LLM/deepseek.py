@@ -49,6 +49,8 @@ class DeepSeekClient(BaseLLMClient):
         self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
 
     def generate(self, prompt: str) -> str:
+        # Strip surrogate characters that break JSON encoding
+        prompt = prompt.encode("utf-8", errors="surrogateescape").decode("utf-8", errors="replace")
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
