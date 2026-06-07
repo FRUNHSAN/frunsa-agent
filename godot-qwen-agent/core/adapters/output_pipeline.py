@@ -20,6 +20,9 @@ import re
 # ── Verbose → max sentences ──
 VERBOSE_SENTENCE_LIMITS = {"HIGH": 8, "MEDIUM": 5, "LOW": 3, "MINIMAL": 2}
 
+# ── Verbose → max characters (semantic: finds last 。！？ before limit) ──
+VERBOSE_CHAR_LIMITS = {"HIGH": 800, "MEDIUM": 400, "LOW": 150, "MINIMAL": 60}
+
 # ── PRAGMATIC tone: filler phrases to strip ──
 PRAGMATIC_FILLERS = [
     "我觉得", "我认为", "可能", "或许", "也许",
@@ -64,6 +67,11 @@ class OutputPipeline:
         # ── 2. Sentence truncation ──
         if max_sent < 999:
             result = self._truncate_sentences(result, max_sent)
+
+        # ── 2b. Character cap (semantic — finds last sentence boundary) ──
+        max_chars = VERBOSE_CHAR_LIMITS.get(verbose, 0)
+        if max_chars > 0:
+            result = self._truncate_chars(result, max_chars)
 
         # ── 3. Tone filter ──
         if tone == "PRAGMATIC":
@@ -111,6 +119,28 @@ class OutputPipeline:
             if count >= max_sentences:
                 return "".join(result).rstrip()
         return "".join(result)
+
+    @staticmethod
+    def _truncate_chars(text: str, max_chars: int) -> str:
+        """Semantic char-level truncation: find last sentence boundary ≤ max_chars.
+
+        Looks for the last 。！？!? or \\n\\n before the limit.
+        Never splits mid-sentence or mid-code-block.
+        """
+        if len(text) <= max_chars:
+            return text
+        # Search backwards from max_chars for sentence boundary
+        window = text[:max_chars]
+        boundaries = ["\n\n", "。", "！", "？", "!", "?", "\n"]
+        best = -1
+        for b in boundaries:
+            pos = window.rfind(b)
+            if pos > best:
+                best = pos
+        if best > max_chars * 0.5:  # At least half the limit
+            return text[:best + len(boundaries[0]) if best == window.rfind("\n\n") else best + 1]
+        # No good boundary — hard cut at max_chars
+        return text[:max_chars]
 
     @staticmethod
     def _strip_fillers(text: str) -> str:

@@ -97,9 +97,11 @@ class Repl:
             tone = bp_fields.get("tone_style", "WARM")
             anchoring = bp_fields.get("contextual_anchoring", "HIGH")
             parts = ["[CURRENT MODE]"]
-            v_map = {"HIGH": "详细解释, 最多 3 段", "MEDIUM": "均衡, ~2 段",
-                     "LOW": "简洁, 2-3 句", "MINIMAL": "一句话"}
-            parts.append(f"字数: {v_map.get(v, v)}")
+            v_map = {"HIGH": "详细解释, 600-800 字, 多用列表",
+                     "MEDIUM": "均衡, 300-400 字",
+                     "LOW": "简洁, 100-150 字, 单段落",
+                     "MINIMAL": "一句话, 不超过 50 字"}
+            parts.append(f"输出规范: {v_map.get(v, v)}")
             init_map = {"PROACTIVE": "主动引导对话", "BALANCED": "自然有来有回",
                         "RESPONSIVE_ONLY": "绝对不反问"}
             parts.append(f"主动性: {init_map.get(initiative, initiative)}")

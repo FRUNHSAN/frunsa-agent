@@ -19,6 +19,10 @@ from typing import Any, Callable
 from core.trace_node import TraceStatus, TraceNode
 
 
+# ── Configurable constants ──────────────────────────────────────────
+MIN_PLAN_STEPS = 3  # Minimum plan steps before retry (configurable via env)
+
+
 # ── Safe async bridge (暗礁 1: event loop bomb) ──────────────────────
 
 def safe_async_run(coro):
@@ -169,28 +173,57 @@ class TrackCEngine:
 
     # ── Async engine wrappers ───────────────────────────────────────
 
-    async def _do_plan(self, user: str, system: str) -> list[dict]:
-        """Call PlanningEngine, extract steps from StreamItems."""
+    async def _do_plan(self, user: str, system: str, retry: bool = False) -> list[dict]:
+        """Call PlanningEngine, group StreamItems by step_index into plan steps.
+
+        Engine emits one StreamItem per reasoning unit with trace_context keys:
+          planning.step_index, planning.reasoning_depth, planning.parent_step_id.
+        We group by step_index → each group = one plan step.
+        """
         from engines.planning.interface import PlanningContext
         from core.contracts.streaming_protocol import PaceConfig
+        import os
 
-        ctx = PlanningContext(
-            goal=user,
-            max_parallel_branches=2,
-        )
+        min_steps = int(os.environ.get("MIN_PLAN_STEPS", MIN_PLAN_STEPS))
+        goal = user
+        if retry:
+            goal = (
+                f"{user}\n\n"
+                f"[约束: 必须拆解为至少 {min_steps} 个独立子任务。"
+                f"每步包含 prompt 和 tool 字段。返回 JSON 数组。]"
+            )
+        else:
+            goal = (
+                f"{user}\n\n"
+                f"[约束: 请拆解为 {min_steps}-5 个可独立执行的子任务。]"
+            )
+
+        ctx = PlanningContext(goal=goal, max_parallel_branches=2)
         items = await _collect(self._planning.plan(
             ctx, deadline=60.0, pace_config=PaceConfig(),
         ))
-        # Extract steps from terminal item's trace_context
-        steps = []
+
+        # Group items by step_index
+        groups: dict[int, list[str]] = {}
         for item in items:
-            if item.trace_context and "planning.steps" in item.trace_context:
-                steps = item.trace_context["planning.steps"]
-        if not steps:
-            # Fallback: synthesize from all deltas
-            full_text = "".join(i.delta for i in items)
-            steps = [{"prompt": full_text[:200], "tool": ""}]
-        return steps
+            idx = 0
+            if item.trace_context:
+                idx = item.trace_context.get("planning.step_index", 0)
+            groups.setdefault(idx, []).append(item.delta)
+
+        # Build steps from grouped deltas
+        steps = []
+        for idx in sorted(groups.keys()):
+            text = "".join(groups[idx]).strip()
+            if text:
+                steps.append({"prompt": text[:300], "tool": ""})
+
+        # Retry if too few steps
+        if len(steps) < min_steps and not retry:
+            self._emit("🔀 Track C Planning", f"仅 {len(steps)} 步 → 重新规划")
+            return await self._do_plan(user, system, retry=True)
+
+        return steps if steps else [{"prompt": f"综合分析: {user}", "tool": ""}]
 
     async def _do_orchestrate(
         self, plan: list[dict], user: str, system: str, prev_context: str,
