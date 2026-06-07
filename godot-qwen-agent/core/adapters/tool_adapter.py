@@ -335,6 +335,12 @@ class ToolAdapter:
         # Check parameter compatibility
         if hasattr(tool_cls, "parameters_schema"):
             schema = tool_cls.parameters_schema
+            # MCPToolWrapper uses @property — instantiate to get value
+            if isinstance(schema, property):
+                try:
+                    schema = schema.fget(tool_cls())
+                except Exception:
+                    schema = {}
             required = schema.get("required", [])
             properties = schema.get("properties", {})
             provided = set(dict(tool_call.parameters).keys())

@@ -267,7 +267,13 @@ class Repl:
             call = ToolCall(tool_name=tool_name, parameters=params)
             result = adapter.execute(call)
             if result.success:
-                return result.data.get("text", str(result.data))
+                # data can be dict or object with .text property
+                data = result.data
+                if isinstance(data, dict):
+                    return data.get("text", str(data))
+                if hasattr(data, "text"):
+                    return data.text
+                return str(data)[:2000]
             return f"[工具执行失败: {result.error}]"
         except Exception as e:
             return f"[工具异常: {e}]"
