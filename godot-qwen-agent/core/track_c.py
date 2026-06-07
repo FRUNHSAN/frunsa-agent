@@ -95,11 +95,13 @@ class TrackCEngine:
         planning_engine,
         orch_engine,
         critic_engine,
+        adapter=None,  # GenerationAdapter for synthesis fallback
         bus=None,  # XRayBus for observability
     ) -> None:
         self._planning = planning_engine
         self._orch = orch_engine
         self._critic = critic_engine
+        self._adapter = adapter
         self._bus = bus
 
     def _emit(self, stage: str, detail: str) -> None:
@@ -199,15 +201,14 @@ class TrackCEngine:
         results = []
         for i, step in enumerate(plan):
             branch = BranchSpec(
-                id=f"step_{i}",
-                prompt=step.get("prompt", str(step)),
-                tool=step.get("tool", ""),
+                name=step.get("prompt", str(step))[:60],
+                pool=step.get("tool", "default"),
+                items=1,
             )
             ctx = OrchestrationContext(
-                goal=user,
                 branches=(branch,),
-                system_prompt=system,
-                previous_context=prev_context,
+                max_retries=1,
+                metadata={"goal": user, "system_prompt": system, "context": prev_context},
             )
             items = await _collect(self._orch.orchestrate(
                 ctx, deadline=60.0, pace_config=PaceConfig(),
@@ -223,8 +224,8 @@ class TrackCEngine:
         from core.contracts.streaming_protocol import PaceConfig
 
         ctx = CriticContext(
-            goal=user,
-            candidate=result_text,
+            plan_output=f"Goal: {user}\n\nResults: {result_text}",
+            metadata={"goal": user},
         )
         items = await _collect(self._critic.evaluate(
             ctx, deadline=30.0, pace_config=PaceConfig(),
@@ -244,7 +245,10 @@ class TrackCEngine:
     # ── Synthesis ───────────────────────────────────────────────────
 
     def _synthesize(self, user: str, system: str, pad: Scratchpad) -> str:
-        """Build final response from all step results + critique."""
+        """Build final response from all step results + critique.
+
+        Uses the injected GenerationAdapter for LLM synthesis.
+        """
         parts = [
             f"用户问题: {user}",
             f"分析结果: {pad.truncated_for_critic()}",
@@ -254,10 +258,11 @@ class TrackCEngine:
             parts.append(f"(经过 {pad.retry_count} 次重试后通过)")
         prompt = f"{system}\n\n" + "\n".join(parts) + "\n请基于以上内容生成最终回复。"
 
-        # Use planning engine's adapter for synthesis (or direct LLM call)
-        # Fallback: use the orchestration engine's backend
-        from core.contracts import GenerationResult
-        result = safe_async_run(self._planning._adapter.generate(prompt, [], {}))
-        if isinstance(result, GenerationResult):
-            return result.text
-        return str(result)
+        if self._adapter:
+            from core.contracts import GenerationResult
+            result = safe_async_run(self._adapter.generate(prompt, [], {}))
+            if isinstance(result, GenerationResult):
+                return result.text
+            return str(result)
+        # Last resort: return concatenated results
+        return "\n\n".join(pad.step_results[-3:])

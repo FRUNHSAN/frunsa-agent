@@ -278,6 +278,7 @@ class Repl:
                 planning_engine=planning,
                 orch_engine=orch,
                 critic_engine=critic,
+                adapter=adapter,
                 bus=self.c.bus,
             )
         return self._track_c_engine
