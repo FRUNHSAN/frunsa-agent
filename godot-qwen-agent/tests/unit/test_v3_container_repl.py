@@ -124,7 +124,7 @@ class TestRepl:
         repl = Repl(ctr)
         prompt = repl._build_prompt()
         assert "CURRENT MODE" in prompt
-        assert "字数" in prompt
+        assert "输出规范" in prompt
 
     def test_explicit_commands_dont_trigger_on_normal_text(self):
         cfg = Config.from_args(["test"])

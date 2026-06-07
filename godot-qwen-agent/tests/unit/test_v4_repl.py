@@ -79,7 +79,7 @@ class TestReplPrompt:
     def test_build_prompt_includes_contract(self, repl):
         prompt = repl._build_prompt("test_user")
         assert "CURRENT MODE" in prompt
-        assert "字数" in prompt
+        assert "输出规范" in prompt
 
     def test_build_prompt_reflects_verbose_change(self, repl):
         repl.c.bp.apply_proposal("response_verbose_level", "MINIMAL")
