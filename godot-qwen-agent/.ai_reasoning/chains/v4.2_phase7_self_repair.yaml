@@ -1,0 +1,42 @@
+# 推理链: V4.2 Phase 7 — 自修复闭环
+chain_id: v4.2_phase7_self_repair
+title: "V4.2 Phase 7 自修复闭环 — evaluate_health→decide_repair→execute_repairs 真实化"
+created_at: "2026-06-07T00:00:00Z"
+status: active
+tags: [v4, phase7, self_repair, health_evaluation, autonomous_repair]
+related_chains: [v4.2_phase6_contract_layer3, v4.2_phase5_engine_decoupling]
+
+context: |
+  Phase 6 闭合了自适应契约第 3 层（修改限界），但 evaluate_health/
+  decide_repair/execute_repairs 都是存根。能感知问题，不能修复。
+  Phase 7 把存根填成真实逻辑——让系统从"可观测"进化到"可自治"。
+
+decision: |
+  三条健康信号驱动自修复:
+  1. 信任崩塌: ActionPipeline backlash (任一工具连续失败 >=3 次)
+  2. 合同震荡: EMALearner 阈值挤出 (触及 guardrail 边界)
+  3. 信任崩溃: trust < 0.10
+
+  unhealthy → lower autonomy to ASK_FIRST (幂等守卫: won't repeat)
+  degraded → lower from FULL/HIGH to ASK_FIRST
+  健康检查触发: 每 5 轮 OR 单轮失败 >=2 (急性危机即时响应)
+  跨会话持久化: /quit 时 blueprint 快照写入 profile
+
+rationale: |
+  不用加新概念——Phase 6 铺好的存根现在有了真实逻辑。
+  三条信号覆盖最关键的恶化模式: 工具失败、阈值挤压、信任崩塌。
+  幂等守卫防止重复 emit 和无效写入。
+  急性危机触发防止"轮询间隔内恶化被掩盖"。
+
+anti_patterns:
+  - "unhealthy 状态不加幂等守卫 → 每轮重复 emit 事件, 日志爆炸"
+  - "只做轮询触发健康检查 → 单轮并行调用导致的危机被漏掉"
+  - "execute_repairs 修改合同但不 emit 事件 → 自修复不可见"
+
+future_guidance:
+  self_repair_loop:
+    summary: "3 信号→health status→decide actions→execute→emit。幂等守卫+急性触发。85 行, 2 文件"
+    priority: critical
+  cross_session_persistence:
+    summary: "/quit 时 bp.snapshot → profile._last_blueprint。下次启动可恢复合同状态"
+    priority: high

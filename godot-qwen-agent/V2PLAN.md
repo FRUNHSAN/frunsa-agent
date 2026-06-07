@@ -37,7 +37,8 @@
 | 28 | 速度优化 | Track C 50s→15s | ⏸️ V4.2 |
 | 29 | 引擎层解耦 | KernelService 扩展 + 契约下沉到 4 引擎 | ✅ V4.2 |
 | 30 | 契约第3层 | ContractAware 复活 + trust 追踪 + 资源清理 | ✅ V4.2 |
-| 31 | 速度优化 | Track C 50s→15s | ⏸️ V4.2 |
+| 31 | 自修复闭环 | evaluate→decide→execute 真实化, 跨会话持久化 | ✅ V4.2 |
+| 32 | 速度优化 | Track C 50s→15s | ⏸️ V4.2 |
 
 ---
 
