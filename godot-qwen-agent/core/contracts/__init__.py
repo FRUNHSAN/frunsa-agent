@@ -44,6 +44,7 @@ from .validation import (
     validate_reranker_output,
     validate_stream_output,
 )
+from .kernel_service import KernelService
 
 __all__ = [
     # Data models

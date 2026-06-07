@@ -19,6 +19,7 @@ from __future__ import annotations
 import time
 from typing import Any, Callable, Dict, Optional
 
+import core.adapters.tool_format_defaults  # noqa: triggers ToolFormatRegistry registration
 from core.contracts import COMPONENT_REGISTRY
 from core.contracts.composition import (
     CompositionBlueprint,
@@ -253,27 +254,8 @@ class ToolAdapter:
                 except KeyError:
                     continue
 
-        converted = []
-        for tool in registry_tools:
-            schema = tool.get("parameters_schema", {})
-            sanitized = ToolAdapter._sanitize_schema(schema)
-
-            if provider == "anthropic":
-                converted.append({
-                    "name": tool["name"],
-                    "description": tool.get("description", ""),
-                    "input_schema": sanitized,
-                })
-            elif provider == "openai":
-                converted.append({
-                    "type": "function",
-                    "function": {
-                        "name": tool["name"],
-                        "description": tool.get("description", ""),
-                        "parameters": sanitized,
-                    },
-                })
-        return converted
+        from core.adapters.tool_format_registry import ToolFormatRegistry
+        return ToolFormatRegistry.format(provider, registry_tools)
 
     @staticmethod
     def _sanitize_schema(schema: dict) -> dict:
