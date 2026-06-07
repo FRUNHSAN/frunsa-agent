@@ -117,6 +117,7 @@ class Repl:
         self.c = ctr
         self.trust = 0.30
         self.round_count = 0
+        self.healthy_rounds = 0  # Phase 8: consecutive healthy rounds counter
         self.pending: list[dict] = []
         self.history: list[str] = []
         self.contract_events: list[str] = []
@@ -829,13 +830,30 @@ class Repl:
             if abs(delta) > 0.001:
                 self.c.profile.record_trust_delta(delta, self.c.profile.session_count)
 
-            # Phase 7: self-repair — health check every 5 rounds or on acute crisis
+            # Phase 7-8: self-repair + recovery — health check every 5 rounds or acute crisis
             failures_this_round = sum(self.c.action_pipeline._failure_counts.values())
             if self.round_count % 5 == 0 or failures_this_round >= 2:
                 report = self.c.kernel_evaluate_health()
+
+                # Track consecutive healthy rounds (Phase 8)
+                if report["overall_status"] == "healthy" and failures_this_round == 0:
+                    self.healthy_rounds += 1
+                    if self.healthy_rounds == 3:
+                        self.c.bus.emit("合同恢复", "提议恢复自主权限 → HIGH")
+                else:
+                    self.healthy_rounds = 0
+                report["healthy_rounds"] = self.healthy_rounds
+
                 if report["overall_status"] != "healthy":
                     actions = self.c.kernel_decide_repair(report)
                     if actions:
+                        self.c.kernel_execute_repairs(actions)
+                elif report["healthy_rounds"] >= 3:
+                    # Phase 8: recovery — try to raise autonomy
+                    actions = self.c.kernel_decide_repair(report)
+                    if actions:
+                        for a in actions:
+                            a["healthy_rounds"] = self.healthy_rounds
                         self.c.kernel_execute_repairs(actions)
 
             print(f"  [trust={trust:.2f} | verbose={bp.fields.get('response_verbose_level', '?')} | round={self.round_count}]")

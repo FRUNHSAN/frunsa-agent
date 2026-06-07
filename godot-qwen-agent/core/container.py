@@ -216,6 +216,14 @@ class Container:
             if report.get("tool_failures", 0) >= 2:
                 actions.append({"action": "suggest_trust_recalibration"})
 
+        elif status == "healthy":
+            # Phase 8: recovery — raise autonomy if sustained healthy
+            healthy_rounds = report.get("healthy_rounds", 0)
+            if healthy_rounds >= 3:
+                current = self.bp.enforce("execution_autonomy") or "ASK_FIRST"
+                if current in ("ASK_FIRST", "DISABLED"):
+                    actions.append({"action": "raise_autonomy", "target": "HIGH"})
+
         return actions
 
     def kernel_execute_repairs(self, actions: list) -> None:
@@ -226,6 +234,10 @@ class Container:
                 self.bus.emit("自修复", f"autonomy → {action['target']} ({action.get('reason','健康恶化')})")
             elif action["action"] == "lock_failed_tools":
                 self.bus.emit("自修复", "failed tools locked by backlash")
+            elif action["action"] == "raise_autonomy":
+                self.bp.apply_proposal("execution_autonomy", action["target"], ignore_cooldown=True)
+                report_info = f"连续健康 {action.get('healthy_rounds', 0)} 轮" if action.get("healthy_rounds") else "恢复"
+                self.bus.emit("自修复", f"autonomy → {action['target']} ({report_info})")
             elif action["action"] == "suggest_trust_recalibration":
                 self.bus.emit("自修复", "建议信任校准")
 
