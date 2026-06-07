@@ -739,11 +739,14 @@ class Repl:
                 if consent == "同意":
                     for a in self.pending_consent:
                         self.c.kernel_execute_repairs([a])
+                        self.c.profile.record_consent_result(a["action"], "同意", a.get("reason",""))
                         direction = "降低" if a["action"] == "lower_autonomy" else "恢复"
                         self.c.bus.emit("合同协商", f"[执行] {direction}自主权限 → {a.get('target','?')}")
                     self.pending_consent.clear()
                     continue
                 elif consent == "拒绝":
+                    for a in self.pending_consent:
+                        self.c.profile.record_consent_result(a["action"], "拒绝", a.get("reason",""))
                     self.c.bus.emit("合同协商", "[取消] 用户拒绝, 保持当前权限")
                     self.pending_consent.clear()
                     continue
@@ -919,6 +922,11 @@ class Repl:
                             self.c.kernel_execute_repairs(auto_actions)
 
                         for a in consent_actions:
+                            # Phase 10: suppress if user has repeatedly rejected this
+                            if self.c.profile.should_suppress_proposal(a["action"]):
+                                self.c.bus.emit("合同协商",
+                                    f"[抑制] {a['action']} — 历史拒绝次数过多, 跳过提案")
+                                continue
                             direction = "降低" if a["action"] == "lower_autonomy" else "恢复"
                             self.c.bus.emit("合同协商",
                                 f"[提议] {direction}自主权限 → {a['target']} ({a.get('reason','健康评估')})")
@@ -937,6 +945,10 @@ class Repl:
                             self.c.kernel_execute_repairs(auto_actions)
 
                         for a in consent_actions:
+                            if self.c.profile.should_suppress_proposal(a["action"]):
+                                self.c.bus.emit("合同协商",
+                                    f"[抑制] {a['action']} — 历史拒绝次数过多, 跳过提案")
+                                continue
                             direction = "恢复" if a["action"] == "raise_autonomy" else "降低"
                             self.c.bus.emit("合同协商",
                                 f"[提议] {direction}自主权限 → {a['target']} (连续健康 {self.healthy_rounds} 轮)")

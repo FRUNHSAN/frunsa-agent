@@ -51,6 +51,7 @@ class UserProfile:
     _session_outlier: set[int] = field(default_factory=set)
     _session_mod_count: dict[int, int] = field(default_factory=dict)
     _session_trust_delta: dict[int, float] = field(default_factory=dict)
+    _consent_history: list[dict] = field(default_factory=list)  # Phase 10
 
     # ── Persistence ───────────────────────────────────────────
 
@@ -68,6 +69,7 @@ class UserProfile:
             "session_mod_count": self._session_mod_count,
             "session_trust_delta": self._session_trust_delta,
             "last_blueprint": getattr(self, "_last_blueprint", None),
+            "consent_history": self._consent_history,
         }
         self.storage_path_obj.write_text(json.dumps(data, indent=2), encoding="utf-8")
         return str(self.storage_path_obj)
@@ -86,6 +88,7 @@ class UserProfile:
             profile._session_outlier = set(data.get("session_outlier", []))
             profile._session_mod_count = data.get("session_mod_count", {})
             profile._session_trust_delta = data.get("session_trust_delta", {})
+            profile._consent_history = data.get("consent_history", [])
         return profile
 
     @property
@@ -174,6 +177,25 @@ class UserProfile:
     @property
     def session_count(self) -> int:
         return self._current_session
+
+    def record_consent_result(self, action: str, response: str, reason: str) -> None:
+        """Phase 10: record user response to a consent proposal."""
+        self._consent_history.append({
+            "action": action, "response": response, "reason": reason,
+            "timestamp": time.time(),
+        })
+        self._consent_history = self._consent_history[-10:]  # Ring buffer
+        self.save()
+
+    def should_suppress_proposal(self, action: str) -> bool:
+        """Phase 10: check if this proposal type should be suppressed.
+        raise_autonomy: 3 recent rejects → suppress (restore, give user more chances)
+        lower_autonomy: 2 recent rejects → suppress (safety, respect user's no)
+        """
+        threshold = 3 if action == "raise_autonomy" else 2
+        recent = [h for h in self._consent_history[-5:]
+                  if h["action"] == action and h["response"] == "拒绝"]
+        return len(recent) >= threshold
 
     def save_blueprint_snapshot(self, bp_snapshot: dict) -> None:
         """Phase 7: persist contract state for cross-session continuity."""
