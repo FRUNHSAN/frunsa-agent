@@ -1,0 +1,32 @@
+# 推理链: V4.2 Phase 6 — 自适应契约第 3 层补全
+chain_id: v4.2_phase6_contract_layer3
+title: "V4.2 Phase 6 自适应契约补全 — ContractAware 幽灵代码复活 + trust 追踪 + 资源清理"
+created_at: "2026-06-07T00:00:00Z"
+status: active
+tags: [v4, phase6, adaptive_contract, contract_aware, trust_tracking, resource_cleanup]
+related_chains: [v4.2_phase5_engine_decoupling, v4.3_decoupling_cleanup]
+
+context: |
+  自适应契约系统有三层: 合同内容(✅) + 修改触发(✅) + 修改限界(⚠️)。
+  第 3 层有骨架但关键连接断着——3 个 ContractAware 包装器定义完整但从未
+  实例化(幽灵代码), Container 缺 3 个 KernelService 方法, trust_delta 追踪
+  从未调用, SQLite 连接泄漏。
+
+decision: |
+  只补第 3 层的断裂连接, 不改动已完整的第 1/2 层。不碰 Phase 25+ 的
+  合同版本化/协商/元契约。范围: Container +3 存根, Track C 包 ContractAware
+  包装器, trust_delta 追踪, /quit 时 close() 资源。
+
+rationale: |
+  合同内容(第 1 层)和修改触发(第 2 层)都正常运作, 不需要动。
+  只需要让第 3 层的防护机制从"骨架"变成"活着的免疫系统"。
+  ContractAware 包装器复活 → 引擎异常开始积累健康数据 → Phase 7 实现
+  真正的自修复时有数据基础。trust_delta 追踪 → 跨会话能看到信任走势。
+
+future_guidance:
+  contract_aware_wrappers:
+    summary: "ContractAware 包装器包在原始引擎外面, 做: 异常记录+健康评估+修复决策。今天存根, Phase 7 实现真实修复"
+    priority: high
+  adaptive_contract_boundary:
+    summary: "自适应契约 = 3 层: 内容(7字段+指令) + 触发(信号/命令/审计) + 限界(健康/回滚/宪法)。Phase 25+ 再加版本化+协商+元契约"
+    priority: critical
