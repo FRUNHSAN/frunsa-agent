@@ -143,10 +143,27 @@ class Container:
 
     # ── KernelService methods (Phase 5: engine decoupling) ──
 
+    def _event_sink(self, event=None, **kwargs):
+        """KernelService.event_sink — accepts CompositionEvent or (stage, detail) pair.
+
+        ContractAware wrappers call kernel.event_sink(CompositionEvent(...)).
+        REPL calls kernel.event_sink(stage="X", detail="Y").
+        Both paths route to XRayBus.
+        """
+        if event is not None:
+            # ContractAware path: single CompositionEvent object
+            self.bus.emit(event.event_type, event.context.get("message", str(event.context)))
+        elif "stage" in kwargs:
+            # REPL path: stage + detail keywords
+            self.bus.emit(kwargs["stage"], kwargs.get("detail", ""))
+        else:
+            # Fallback: log raw
+            self.bus.emit("event_sink", str(kwargs))
+
     @property
     def event_sink(self):
-        """Emit CompositionEvent to bus (KernelService.event_sink)."""
-        return self.bus.emit  # ContractAware wrappers call kernel.event_sink(event)
+        """Property accessor for event_sink as callable."""
+        return self._event_sink
 
     def generate(self, prompt: str, context: Any = None, **params: Any) -> Any:
         """Sync LLM generation (KernelService.generate stub for ContractAware wrappers).
