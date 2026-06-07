@@ -107,7 +107,8 @@ def _classify_command(text: str) -> tuple[str, str] | None:
     if best_label and best_score > 0.70:
         key, val = best_label.split(":", 1)
         return (key, val)
-    return None
+    # Embedding didn't match → fall through to keyword fallback
+    raise ValueError(f"no embedding match (best={best_score:.3f})")
 
 
 class Repl:

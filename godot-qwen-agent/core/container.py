@@ -167,8 +167,9 @@ class Container:
         Both paths route to XRayBus.
         """
         if event is not None:
-            # ContractAware path: single CompositionEvent object
-            self.bus.emit(event.event_type, event.context.get("message", str(event.context)))
+            # ContractAware path: only log significant events, skip diagnostic noise
+            if event.event_type in ("document_failed", "contract_violated"):
+                self.bus.emit("契约事件", event.context.get("message", str(event.context)[:80]))
         elif "stage" in kwargs:
             # REPL path: stage + detail keywords
             self.bus.emit(kwargs["stage"], kwargs.get("detail", ""))
