@@ -495,7 +495,7 @@ class Repl:
             self.round_count += 1
             try:
                 from rich.live import Live
-                live = Live(auto_refresh=True, vertical_overflow="visible")
+                live = Live(auto_refresh=False, vertical_overflow="visible")
                 live.start()
             except ImportError:
                 live = None
@@ -577,6 +577,10 @@ class Repl:
 
             # ── V4.1 Phase 3: Track A/B/C Router ──
             route = self._route_task(user)
+            # Conversation openers/closers → always Track A (no planning needed)
+            t = user.strip()
+            if len(t) <= 3 and any(w in t for w in ("拜拜","再见","bye","你好","晚安","谢谢","好的","嗯","哦","行","ok","hi")):
+                route = "A"
             if route == "C":
                 self.c.bus.emit("路由决策", f"Track C (embedding)")
                 full_response = self._run_track_c(user, system, xray, live)

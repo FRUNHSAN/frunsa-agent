@@ -152,13 +152,14 @@ class TrackCEngine:
             )
             pad.critic_score = score
             pad.critic_detail = detail
-            self._emit("🔀 Track C Critic", f"评分={score:.2f} ({time.time()-t_critic:.1f}s): {detail[:60]}")
+            self._emit(f"🔀 Track C 评分", f"{score:.2f} ({time.time()-t_critic:.1f}s): {detail[:60]}")
 
             if not pad.needs_retry():
+                self._emit("🔀 Track C 评分", f"{score:.2f} ✅ 通过")
                 break
 
             pad.retry_count += 1
-            self._emit("🔀 Track C Critic", f"不满意 → 重试 ({pad.retry_count}/{pad.max_retries})")
+            self._emit("🔀 Track C 评分", f"{score:.2f} ❌ 重试 ({pad.retry_count}/{pad.max_retries})")
 
         # ── Phase 4: Synthesize final response ──
         self._emit("🔀 Track C 合成", "⏳ 合成最终回复...")
