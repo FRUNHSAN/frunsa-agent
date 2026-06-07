@@ -1,0 +1,30 @@
+# 推理链: V4.2 Phase 10 — 协商反馈学习
+chain_id: v4.2_phase10_consent_learning
+title: "V4.2 Phase 10 协商反馈学习 — 记录+抑制, 被拒绝就不重复问"
+created_at: "2026-06-07T00:00:00Z"
+status: active
+tags: [v4, phase10, consent_learning, feedback_loop, suppression]
+related_chains: [v4.2_phase9_negotiation]
+
+context: |
+  Phase 9 实现了协商 (小修静默/大修协商), 但协商数据没有被学习。
+  用户连续拒绝 raise_autonomy 3 次, 系统下次仍然在 healthy×3 后提议。
+  协商历史只存在于 X-Ray 日志中, 不反哺决策。
+
+decision: |
+  两层抑制:
+  - record_consent_result(action, response, reason): 记录每次用户响应到 profile
+  - should_suppress_proposal(action): 检查是否应该抑制此类型提案
+    raise_autonomy: 3 次拒绝 → suppress (给更多机会)
+    lower_autonomy: 2 次拒绝 → suppress (尊重安全否决)
+  - Ring buffer: 10 条历史, 检查窗口 5 条
+  - 持久化: consent_history 写入 profile JSON, 跨会话恢复
+
+rationale: |
+  "先学会不打扰, 再学会更主动"。
+  刻意把"接受→加速"留给 Phase 11, 保证系统在变得聪明之前首先是安全的。
+  34 行, 2 文件。513 测试全绿。
+
+anti_patterns:
+  - "所有提案用同一抑制阈值 → raise_autonomy 2 次就被封, 太敏感"
+  - "只存内存不持久化 → 重启后丢失学习, 又开始骚扰"
