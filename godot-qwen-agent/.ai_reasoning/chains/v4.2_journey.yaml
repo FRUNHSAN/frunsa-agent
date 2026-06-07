@@ -1,62 +1,69 @@
-# 推理链: V4.2 完整旅程 — 7 个 Phase 的演化轨迹
+# 推理链: V4.2 完整旅程 — 10 个 Phase 的演化轨迹
 chain_id: v4.2_journey
-title: "V4.2 旅程 — MCP 集成 → ToolEngine → 解耦 → 契约补全 → 自修复"
+title: "V4.2 旅程 — MCP→ToolEngine→解耦→契约补全→自修复→恢复→记忆→协商→学习"
 created_at: "2026-06-07T00:00:00Z"
 status: active
-tags: [v4, v4.2, journey, architecture_evolution, self_repair]
-related_chains: [v4.2_phase5_engine_decoupling, v4.2_phase6_contract_layer3, v4.2_phase7_self_repair]
+tags: [v4, v4.2, journey, complete, architecture_evolution]
+related_chains: [v4.2_phase7_self_repair, v4.2_phase8_recovery, v4.2_phase9_negotiation, v4.2_phase10_consent_learning]
 
 context: |
-  V4.2 从"MCP 集成"开始, 到"自修复闭环"结束, 7 个 Phase 连续演化。
-  不是"先设计再实现", 而是"每一 Phase 的产出自然引出下一 Phase 的需求"。
+  V4.2 从"MCP 集成"开始, 到"协商反馈学习"结束, 10 个 Phase 连续演化。
+  每个 Phase 的产出自然引出下一 Phase 的需求。
 
 evolution:
 
-  Phase 2-4 (V4.1): Track A/B/C 三轨分层
-    产出: 三轨路由 + 引擎管线 + 评分重试
-    引出: 工具调用只是硬编码的 knowledge_search
-
-  Phase 25 (V4.2): MCP 集成
-    产出: 真实 MCP 服务器连接, 17 个工具, Agent 自动调用
+  Phase 25 (MCP 集成): 真实 MCP 服务器连接, 17 个工具, Agent 自动调用
     引出: 工具是二等公民, 没有引擎身份
 
-  Phase 26 (V4.3): ToolEngine
-    产出: 工具晋升为第四引擎, StreamItem + trace_context
+  Phase 26 (ToolEngine): 工具晋升为第四引擎, StreamItem + trace_context
     引出: 审计发现 7 个耦合点
 
-  Phase 27 (V4.3): 解耦清理
-    产出: KernelService Protocol 填补 + ToolFormatRegistry
+  Phase 27 (解耦清理): KernelService Protocol 填补 + ToolFormatRegistry
     引出: 引擎层仍然直接 import 具体类
 
-  Phase 29 (V4.2): Phase 5 — 引擎层解耦
-    产出: KernelService 扩展, 契约下沉到 4 引擎
+  Phase 29 (引擎层解耦): KernelService 扩展, 契约下沉到 4 引擎
     引出: ContractAware 包装器是幽灵代码
 
-  Phase 30 (V4.2): Phase 6 — 自适应契约第 3 层补全
-    产出: ContractAware 复活, trust_delta 追踪, 资源清理
+  Phase 30 (契约第 3 层补全): ContractAware 复活, trust_delta 追踪, 资源清理
     引出: 能感知问题, 但不能修复
 
-  Phase 31 (V4.2): Phase 7 — 自修复闭环
-    产出: evaluate_health→decide_repair→execute_repairs 真实化
-    引出: 只病不愈 —→ Phase 8: 合同恢复与协商
+  Phase 31 (自修复闭环): evaluate_health→decide_repair→execute_repairs 真实化
+    引出: 只病不愈 — 系统学会降级, 但不会恢复
+
+  Phase 32 (合同恢复): healthy×3 → raise_autonomy, 降级/恢复对称闭环
+    引出: 静默执行 — 用户不知道权限被改了
+
+  Phase 8b (跨会话持久化): 启动时恢复合同状态, Schema Guard + Guardrail Clamp
+    引出: 记忆让协商有了上下文
+
+  Phase 33 (协商式契约演化): 小修静默/大修协商/提案保留
+    引出: 协商数据没有被学习
+
+  Phase 34 (协商反馈学习): 记录+抑制, 被拒绝就不重复问
+    引出: 接受→加速留作 Phase 11
 
 current_state:
   engines: 4 (Planning + Orchestration + Critic + Tool)
-  contracts: DynamicBlueprint 7 字段, 自修复闭环
+  contract_layers: 3 layers fully closed
+    Layer 1 (What): 7 fields + BlueprintInstruction
+    Layer 2 (When): signal/command/auditor triggers
+    Layer 3 (How Far): health evaluation + self-repair + trust tracking
+  autonomy_loop: degrade↔recover symmetric
+  negotiation: consent-gated major changes, minor auto-executed
+  learning: suppression based on consent history
   kernel: KernelService Protocol, Container duck-typing
-  mcp: 真实文件系统服务器, 17 工具, Agent 自动调用
+  mcp: real filesystem server, 17 tools, agent auto-calling
   tests: 513 (289 unit + 224 conformance)
-  chains: 22 reasoning chains
-  plan_items: 32 (30✅ + 2⏸️)
+  chains: 28 reasoning chains
+  plan_items: 35 (34✅ + 1⏸️)
+  commits: 291
 
-next_phase:
-  Phase 8: 合同恢复与协商
-    - 连续 N 轮 healthy + trust_delta > 0 → 提议恢复 autonomy
-    - Agent 主动协商: "我感觉最近表现稳定了, 是否可以恢复自主执行权限?"
-    - 合同版本化: Draft→Active→Renegotiating→Deprecated 生命周期
+six_layer_loop:
+  "感知(Phase 6) → 降级(Phase 7) → 恢复(Phase 8) → 记忆(持久化) → 协商(Phase 9) → 学习(Phase 10)"
 
-remaining_gaps:
-  - 速度优化: Track C 50s→15s
-  - 合同版本化: 生命周期状态机
-  - 合同协商: Agent 主动重谈条款
-  - 元契约: "如何修改合同"的合同
+next_phases:
+  Phase 11: consent acceptance → shorten trigger interval (加速)
+  Phase 25+: contract versioning, renegotiation, meta-contract
+
+remaining_gap:
+  - 速度优化: Track C 50s→15s (Phase 35)
