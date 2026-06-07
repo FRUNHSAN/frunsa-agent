@@ -143,6 +143,22 @@ class Container:
 
     # ── KernelService methods (Phase 5: engine decoupling) ──
 
+    # ── KernelService Protocol alias methods (ContractAware wrappers call these names) ──
+    def evaluate_health(self) -> dict:
+        return self.kernel_evaluate_health()
+
+    def decide_repair(self, report: dict) -> list:
+        return self.kernel_decide_repair(report)
+
+    def execute_repairs(self, actions: list) -> None:
+        return self.kernel_execute_repairs(actions)
+
+    def enforce(self, key: str):
+        return self.kernel_enforce(key)
+
+    def check_tool(self, tool_name: str) -> dict:
+        return self.kernel_check_tool(tool_name)
+
     def _event_sink(self, event=None, **kwargs):
         """KernelService.event_sink — accepts CompositionEvent or (stage, detail) pair.
 
