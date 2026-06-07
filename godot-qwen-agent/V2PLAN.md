@@ -35,7 +35,8 @@
 | 26 | ToolEngine | 工具晋升为第四引擎, StreamItem 管道 | ✅ V4.3 |
 | 27 | 解耦清理 | KernelService + ToolFormatRegistry 消除硬分支 | ✅ V4.3 |
 | 28 | 速度优化 | Track C 50s→15s | ⏸️ V4.2 |
-| 29 | 引擎层解耦 | 引擎走 KernelService, 消除引擎间耦合 | ⏸️ V4.2 |
+| 29 | 引擎层解耦 | KernelService 扩展 + 契约下沉到 4 引擎 | ✅ V4.2 |
+| 30 | 速度优化 | Track C 50s→15s | ⏸️ V4.2 |
 
 ---
 

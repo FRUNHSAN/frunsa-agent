@@ -1,0 +1,49 @@
+# 推理链: V4.2 Phase 5 — 引擎层解耦 + 契约下沉
+chain_id: v4.2_phase5_engine_decoupling
+title: "V4.2 Phase 5 引擎层解耦 — KernelService 统一内核出口 + 契约自适应引擎"
+created_at: "2026-06-07T00:00:00Z"
+status: active
+tags: [v4, phase5, engine_decoupling, contract_sinking, kernel_service]
+related_chains: [v4.3_decoupling_cleanup, v4.3_tool_engine]
+
+context: |
+  V4.3 审计发现引擎层有 3 个耦合点 + 1 个根本性架构缺陷:
+  引擎直接 import GenerationAdapter 具体类 (违反 Invariant #32),
+  Planning 引擎 import + 实例化 StubOrchestrationEngine,
+  且所有 4 个引擎对 DynamicBlueprint 零感知——自适应契约的所有逻辑
+  困在 REPL 层。
+
+decision: |
+  两步合一: 解耦 + 契约下沉走同一条路径——KernelService。
+
+  1. 扩展 KernelService Protocol: 加 generate() / enforce() / check_tool()
+  2. Container 通过 Duck Typing 满足 KernelService (不显式继承)
+  3. 引擎构造函数加 kernel 参数 (可选, 默认 None, 向后兼容)
+  4. PlanningEngine: enforce("execution_autonomy") → 硬约束分支上限
+     (FULL=4, HIGH=2, ASK_FIRST=1, DISABLED=0)
+  5. CriticEngine: enforce("response_verbose_level") → 自适应评分阈值
+     (HIGH=0.70, MEDIUM=0.75, LOW/MINIMAL=0.85)
+  6. 删除 _default_orch_factory 的硬编码 import, 改为 None (Plan-Only)
+  7. 2 个 conformance 测试补 orch_factory 注入
+
+rationale: |
+  硬约束, 不靠 prompt: enforce() 返回的值在代码层拦截 LLM 输出。
+  kernel=None fallback: 引擎没收到 kernel 时走原始 adapter 路径。
+  向后兼容: 9 个文件改动, 513 测试全绿 (289 unit + 224 conformance)。
+  Duck Typing: Container 满足 Protocol 不靠继承, 测试 mock KernelService 即可。
+
+anti_patterns:
+  - "在引擎 Prompt 里注入 max_parallel_branches=4 → LLM 可能忽略, 不是真约束"
+  - "引擎直接 import DynamicBlueprint → 违反不变量"
+  - "硬编码 _default_orch_factory → 换 Orchestration 实现需改 Planning"
+
+future_guidance:
+  kernel_service_contract:
+    summary: "KernelService = 内核唯一出口。所有引擎只和这个 Protocol 对话。新增能力→扩展 Protocol, 不引入新 import"
+    priority: critical
+  contract_sinking:
+    summary: "enforce(key) → 代码级硬约束。Prompt 只是告知 LLM 策略, 代码才是真正裁决"
+    priority: high
+  duck_typing_container:
+    summary: "Container 不显式继承 KernelService。Python Protocol 的 Duck Typing 就是依赖反转。测试 mock KernelService 即可"
+    priority: high
