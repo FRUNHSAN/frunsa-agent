@@ -254,12 +254,17 @@ class Repl:
         return "A"
 
     def _execute_tool(self, tool_name: str, params: dict, xray: XRay) -> str:
-        """Execute a tool through ToolAdapter + ActionPipeline gate. Returns result text."""
+        """Execute a tool through ToolAdapter with ActionPipeline gate. Returns result text."""
+        # Contract gate (backlash, trust, autonomy)
+        check = self.c.action_pipeline.check(tool_name)
+        if not check["allowed"]:
+            return f"[契约拦截: {check['reason']}]"
+
         try:
             from core.adapters.tool_adapter import ToolAdapter
             from core.contracts.tool import ToolCall
-            adapter = ToolAdapter(self.c.bp, self.c.action_pipeline)
-            call = ToolCall(tool_name=tool_name, params=params)
+            adapter = ToolAdapter(self.c.bp, event_sink=None)
+            call = ToolCall(tool_name=tool_name, parameters=params)
             result = adapter.execute(call)
             if result.success:
                 return result.data.get("text", str(result.data))

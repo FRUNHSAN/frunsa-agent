@@ -11,6 +11,7 @@ The Agent MUST respect the verdict — no bypass possible.
 
 from __future__ import annotations
 
+from core.contracts.registry import COMPONENT_REGISTRY
 from core.contracts.tool_contract import (
     RiskLevel, ToolContract, TOOLS, CONSTITUTIONAL_BAN,
 )
@@ -124,7 +125,22 @@ class ActionPipeline:
 
     @staticmethod
     def _get_contract(tool_name: str) -> ToolContract | None:
+        """Get tool contract from TOOLS dict, falling back to COMPONENT_REGISTRY.
+
+        MCP tools and mock tools are registered in COMPONENT_REGISTRY but not
+        in the static TOOLS dict. Fallback gives them a default low-risk contract.
+        """
         data = TOOLS.get(tool_name)
         if data is None:
-            return None
+            # Fallback: check USB registry for MCP/mock tools
+            try:
+                COMPONENT_REGISTRY.get("tool", tool_name)
+                # Found in registry — give a permissive default contract
+                return ToolContract(
+                    name=tool_name, risk_level=RiskLevel.READ,
+                    min_trust=0.20, require_hitl=False, category="mcp",
+                    description=f"MCP tool: {tool_name}",
+                )
+            except (KeyError, Exception):
+                return None
         return ToolContract(**{k: v for k, v in data.items() if k in ToolContract.__dataclass_fields__})

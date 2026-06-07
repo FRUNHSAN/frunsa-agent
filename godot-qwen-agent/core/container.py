@@ -51,6 +51,15 @@ class Container:
         import core.adapters.keyword_chunker  # noqa: triggers @register_component
         import core.adapters.semantic_chunker  # noqa: triggers @register_component
 
+        # ── Mock MCP tools (always available for demo) ──
+        try:
+            from core.adapters.mock_mcp_tools import register_mock_mcp_tools
+            n = len(register_mock_mcp_tools())
+            import sys
+            print(f"  [🔧 工具] 注册 {n} 个 mock 工具 (mcp__*)", file=sys.stderr)
+        except Exception:
+            pass  # Non-critical
+
         # ── MCP tool discovery (graceful degradation) ──
         if cfg.mcp_servers:
             self._boot_mcp_servers(cfg.mcp_servers)
@@ -98,29 +107,35 @@ class Container:
             self._narrative = NarrativeEmergence(self.patterns, self.cloud_llm)
         return self._narrative
 
-    def _boot_mcp_servers(self, server_names: list[str]) -> None:
+    def _boot_mcp_servers(self, server_specs: list[str]) -> None:
         """Start MCP servers and register their tools into COMPONENT_REGISTRY.
 
+        Each spec is a comma-separated command string.
+        Example: --mcp "npx,@anthropic/mcp-server-filesystem,/path/to/dir"
         Graceful degradation: if a server fails to start, log and skip.
-        Does NOT crash the REPL — MCP is additive, not critical.
         """
-        import sys
+        import sys, shlex
         try:
             from core.adapters.mcp_adapter import register_mcp_server
         except ImportError:
-            print("  [🔌 MCP] mcp 包未安装。跳过 MCP 工具注册。", file=sys.stderr)
+            print("  [🔌 MCP] mcp 包未安装。pip install mcp", file=sys.stderr)
             return
         except Exception:
             print("  [🔌 MCP] mcp_adapter 导入失败。跳过。", file=sys.stderr)
             return
 
-        for name in server_names:
-            print(f"  [🔌 MCP] 正在连接 {name} 服务器...", file=sys.stderr)
+        for spec in server_specs:
+            # Split by space into command argv (like: "npx -y @anthropic/mcp-server-filesystem .")
+            cmd = spec.strip().split()
+            if not cmd:
+                continue
+            label = cmd[0]
+            print(f"  [🔌 MCP] 正在连接 {label}...", file=sys.stderr)
             try:
-                count = register_mcp_server(name)
-                print(f"  [🔌 MCP] {name} → 注册 {count} 个工具", file=sys.stderr)
+                registered = register_mcp_server(cmd)
+                print(f"  [🔌 MCP] {label} → 注册 {len(registered)} 个工具", file=sys.stderr)
             except Exception as e:
-                print(f"  [🔌 MCP] {name} 启动失败: {e}", file=sys.stderr)
+                print(f"  [🔌 MCP] {label} 启动失败: {e}", file=sys.stderr)
 
     @property
     def auditor(self) -> ContractAuditor | None:
