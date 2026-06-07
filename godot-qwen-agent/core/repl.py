@@ -501,6 +501,27 @@ class Repl:
                 rag_mode = False
                 print(f"  [RAG] 本地知识库模式已关闭。")
                 continue
+            if cmd == "/mcp" or cmd.startswith("/mcp "):
+                # /mcp <tool_name> <json_params>
+                parts = user.strip().split(None, 2)
+                if len(parts) < 3:
+                    print("  用法: /mcp <工具名> <JSON参数>")
+                    print("  例如: /mcp read_text_file {\"path\":\"CLAUDE.md\"}")
+                    continue
+                import json as _json
+                try:
+                    params = _json.loads(parts[2])
+                except _json.JSONDecodeError as e:
+                    print(f"  JSON 解析失败: {e}")
+                    continue
+                xray = XRay()
+                result = self._execute_tool(parts[1], params, xray)
+                # Truncate long results
+                if len(result) > 800:
+                    result = result[:800] + f"\n... (截断, 共 {len(result)} 字符)"
+                print(f"  [MCP] {parts[1]} →")
+                print(result)
+                continue
             if cmd == "/tools":
                 from core.contracts.registry import COMPONENT_REGISTRY
                 tools = COMPONENT_REGISTRY.list_strategies("tool")
