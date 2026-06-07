@@ -208,8 +208,9 @@ class Container:
         failures = sum(self.action_pipeline._failure_counts.values())
         backlash = any(v >= 3 for v in self.action_pipeline._failure_counts.values())
         thresholds = self.learner.get_all_thresholds()
+        from core.adapters.threshold_learner import GUARDRAILS
         at_guardrail = [
-            dim for dim, (lo, hi) in self.learner.GUARDRAILS.items()
+            dim for dim, (lo, hi) in GUARDRAILS.items()
             if thresholds.get(dim, 0) <= lo or thresholds.get(dim, 0) >= hi
         ]
         trust = self.action_pipeline.trust

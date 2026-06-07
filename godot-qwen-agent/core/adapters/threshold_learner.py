@@ -137,7 +137,7 @@ class EMALearner:
     def restore_thresholds(self, saved: dict[str, float]) -> None:
         """Phase 8b: restore thresholds from a previous session snapshot."""
         for dim, val in saved.items():
-            lo, hi = self.GUARDRAILS.get(dim, (0.20, 0.90))
+            lo, hi = GUARDRAILS.get(dim, (0.20, 0.90))
             val = max(lo, min(hi, float(val)))
             self._conn.execute(
                 "INSERT OR REPLACE INTO personalized_thresholds "
