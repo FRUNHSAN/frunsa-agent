@@ -1,0 +1,37 @@
+# 推理链: V4.1 Phase 4 — 规划粒度 + 输出截断打磨
+chain_id: v4.1_phase4_polish
+title: "V4.1 Phase 4 打磨 — 规划 step_index 分组 + 语义字符截断 + 系统提示字数约束"
+created_at: "2026-06-07T00:00:00Z"
+status: active
+tags: [v4, phase4, plan_granularity, output_truncation, semantic_char_cap]
+related_chains: [v4.1_phase3_track_c]
+
+context: |
+  Track C 真跑后暴露两个问题: (1) Planning 只拆 1 步, 原因是 _do_plan()
+  查找不存在的 trace_context["planning.steps"] key; (2) HIGH 模式响应偏长,
+  800+ 字符, 硬截断危险。
+
+decision: |
+  1. _do_plan() 改为按 planning.step_index 分组 StreamItem delta 文本。
+     不足 MIN_PLAN_STEPS(3, 可通过环境变量覆盖) 时, 自动用更严格 prompt 重试一次。
+  2. OutputPipeline 加 VERBOSE_CHAR_LIMITS {HIGH:800, MEDIUM:400, LOW:150, MINIMAL:60}。
+     _truncate_chars() 语义截断: 找上限前最后一个 。！？ 处截, 不劈句子。
+  3. System prompt 注入具体字数: "输出规范: 详细解释, 600-800 字, 多用列表"。
+     软约束 (prompt 引导) + 硬约束 (pipeline 强制执行)。
+
+rationale: |
+  不碰 engines/ 下任何文件 (零改动原则)。
+  规划粒度修复只需改 _do_plan() 提取逻辑 + retry。
+  输出截断用句子边界查找保证"体面"——绝不从中间劈开代码块或句子。
+  系统提示注入字数让 LLM 主动收敛, 管道兜底。
+
+future_guidance:
+  plan_granularity:
+    summary: "StreamItem 分组按 step_index, 不足 MIN_PLAN_STEPS 自动 retry。环境变量可配置"
+    priority: high
+  semantic_truncation:
+    summary: "VERBOSE_CHAR_LIMITS dict + _truncate_chars() 找最后句子边界。双管: 提示+管道"
+    priority: medium
+  speed_optimization:
+    summary: "Track C 50s+ 太慢。瓶颈: 10+ 次 DeepSeek 请求。Phase 5 考虑: 切换更快模型/减少 LLM 调用/流式响应"
+    priority: high
