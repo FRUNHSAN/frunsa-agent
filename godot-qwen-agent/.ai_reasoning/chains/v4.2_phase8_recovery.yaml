@@ -1,0 +1,37 @@
+# 推理链: V4.2 Phase 8 — 合同恢复与协商
+chain_id: v4.2_phase8_recovery
+title: "V4.2 Phase 8 — 合同恢复 (degradation 对称补齐)"
+created_at: "2026-06-07T00:00:00Z"
+status: active
+tags: [v4, phase8, recovery, autonomy_restore, symmetry]
+related_chains: [v4.2_phase7_self_repair]
+
+context: |
+  Phase 7 实现了自修复闭环的"降级方向"——系统感知恶化→降低自主权。
+  但降级后永远无法恢复——一旦 ASK_FIRST, 除非手动干预否则终身锁定。
+  Phase 8 补齐对称性: 连续健康 → 提议恢复自主权。
+
+decision: |
+  与 degradation 完全对称的设计:
+  - lower_autonomy (Phase 7) ↔ raise_autonomy (Phase 8)
+  - 幂等守卫镜像: don't lower if already low ↔ don't raise if already high
+  - ignore_cooldown: 恢复是紧急纠正, 不适用冷却期
+  - 恶化优先: unhealthy/degraded 分支在 healthy 之前
+
+  healthy_rounds 计数在 REPL 层, 每轮 health check 后更新。
+  连续 3 轮 healthy + 无工具失败 → 触发恢复。
+
+rationale: |
+  不做全套协商 (Phase 25+ 的事)。只做最自然的对称补齐:
+  系统学会了"生病时降级", 现在学会"康复后升级"。
+  35 行, 2 文件。513 测试全绿。
+
+anti_patterns:
+  - "恢复后不重置 healthy_rounds → 每次 health check 都再提恢复"
+  - "raise_autonomy 不 ignore_cooldown → 刚降级就被冷却期挡住, 永远无法恢复"
+  - "healthy 分支在 unhealthy 之前 → 恶化信号被忽略"
+
+future_guidance:
+  recovery_symmetry:
+    summary: "degradation 和 recovery 完全对称。新恢复路径 = 新降级路径的镜像。add healthy_rounds 计数即可"
+    priority: high
