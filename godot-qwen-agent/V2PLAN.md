@@ -39,7 +39,9 @@
 | 30 | 契约第3层 | ContractAware 复活 + trust 追踪 + 资源清理 | ✅ V4.2 |
 | 31 | 自修复闭环 | evaluate→decide→execute 真实化, 跨会话持久化 | ✅ V4.2 |
 | 32 | 合同恢复 | healthy 连续→raise_autonomy 对称补齐 | ✅ V4.2 |
-| 33 | 速度优化 | Track C 50s→15s | ⏸️ V4.2 |
+| 33 | 协商演化 | 小修静默/大修协商/提案保留 (Phase 9) | ✅ V4.2 |
+| 34 | 协商学习 | 提案响应反哺触发条件 (Phase 10) | ⏸️ V4.2 |
+| 35 | 速度优化 | Track C 50s→15s | ⏸️ V4.2 |
 
 ---
 
