@@ -4,16 +4,13 @@
 
 This project is a **contract-driven, three-platform agent system**. Every architectural decision is recorded in `.ai_reasoning/`. Before writing any code, you MUST consult the reasoning chain library. After completing complex work, you MUST archive new decisions.
 
-**Current: PLAN7 — Environmental Physics.** See [PLAN7.md](PLAN7.md) for OutputPipeline, constrained decoding, and the shift from prompt negotiation to physical law.
+**Current: PLAN8 — Mathematical Adaptive Contract.** See [PLAN8.md](PLAN8.md) for the V5 Wasserstein-Schrödinger framework, structure-preserving model reduction, and the transition from "if fatigue > 0.55" to tracking-error-driven adaptation.
 
-**PLAN hierarchy:**
-- [PLAN.md](PLAN.md) — Phase 1-25: contract kernel, pipeline, anti-corruption
-- [PLAN2.md](PLAN2.md) — Phase 26+: relational OS paradigm
-- [PLAN3.md](PLAN3.md) — Dynamic prompting + Vibe Test
-- [PLAN4.md](PLAN4.md) — Bayesian EMA + Stage Directions + Smart Decay
-- [PLAN5.md](PLAN5.md) — Living contract: DynamicBlueprint + 3 Loops + Homeostasis
-- [PLAN6.md](PLAN6.md) — Semantic trust: Embedding replaces keyword matching
-- [PLAN7.md](PLAN7.md) — Environmental physics: OutputPipeline + constrained decoding
+**Active PLAN:**
+- [PLAN8.md](PLAN8.md) — **V5 Mathematical Adaptive Contract**: Wasserstein-Schrödinger gradient flow + meta-adapt trigger
+
+**Archived PLANS** (DEPRECATED_BY_V5, see `.ai_reasoning/archive/`):
+- PLAN1-7 — Historical phases from contract kernel through environmental physics. Superseded by the variation-selection-retention Darwinian triad. Retained for reference; do not use as implementation guide.
 
 ## Project Identity: 契约关系体，不是指令执行器
 
@@ -23,12 +20,12 @@ This is NOT an Agent framework. This is the first implementation of a **Contract
 
 | 维度 | 指令范式 (LangChain/CrewAI/Coze) | 契约关系范式 (This Project) |
 |------|--------------------------------|---------------------------|
-| **交互本质** | 单向触发：输入 → 处理 → 输出 | 双向协商：提议 → 反馈 → 共同确认 |
+| **交互本质** | 单向触发：输入 → 处理 → 输出 | **变异-选择-保留**：LLM 变异 → 用户行为选择 → 契约保留 |
 | **状态管理** | Context Window / 被动记忆 | 主动维护 Shared Contract State |
 | **错误处理** | 报错 / 幻觉 / 拒绝回答 | 澄清 / renegotiate / 优雅降级 |
 | **信任基础** | 依赖模型对齐（RLHF） | 依赖可验证的契约合规性 |
-| **演化方式** | 等待微调 / 版本更新 | 交互中实时学习和适应契约边界 |
-| **人的角色** | 提示词工程师 / 监督者 | 契约共建者 / 关系参与者 |
+| **演化方式** | 等待微调 / 版本更新 | 用户行为反馈构成的**选择压力**驱动演化 |
+| **人的角色** | 提示词工程师 / 监督者 | **环境本身**——人不在谈判桌上，人是选择压力的来源 |
 
 The entire architecture — from `ContentBlock` to `CompositionBlueprint` to `PipelineComposer` — exists to make contracts **traceable, transparent, and auditable**. Without these three properties, the system cannot be trusted. Without trust, there is no relationship. Without relationship, it's just another tool.
 

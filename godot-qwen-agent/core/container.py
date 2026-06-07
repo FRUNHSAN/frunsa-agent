@@ -8,7 +8,6 @@ from core.contracts.user_profile import UserProfile
 from core.contracts.blueprint_schema import blueprint_defaults
 from core.adapters.contract_evolution_engine import ContractEvolutionEngine
 from core.adapters.contract_auditor import ContractAuditor
-from core.adapters.signal_interpreter import interpret as signal_interpret
 from core.adapters.output_pipeline import OutputPipeline
 from core.adapters.output_grammar import build_grammar as build_gbnf
 from core.adapters.action_pipeline import ActionPipeline
@@ -50,6 +49,12 @@ class Container:
         self.action_pipeline = ActionPipeline(self.bp, trust=0.30)
         self.fsm = StreamInterceptor()
         self.listener = FeedbackListener(self.learner)
+
+        # ── Adaptive tracking (V5: Wasserstein model reduction) ──
+        from core.adapters.tracking_error import TrackingErrorEstimator
+        from core.adapters.meta_adapt_trigger import MetaAdaptTrigger
+        self.tracking_error = TrackingErrorEstimator(tau=300.0)
+        self.meta_adapt = MetaAdaptTrigger()
 
         # ── Pre-load all registered components before sealing ──
         import core.adapters.keyword_chunker  # noqa: triggers @register_component

@@ -328,6 +328,14 @@ chains:
     tags: [v4, consent_learning, feedback_loop]
     status: active
 
+  # ── V5: Mathematical Adaptive Contract ──
+  - chain_id: v5_math_adaptive_contract
+    file: chains/v5_math_adaptive_contract.yaml
+    title: "V5 数学自适应契约 — 从伪自适应到 Grothendieck 纤维化"
+    layer: plan
+    tags: [v5, adaptive_contract, wasserstein, information_geometry, lyapunov, schrödinger_bridge, structure_preserving_reduction]
+    status: active
+
   # ── Real LLM Orchestration + Critic Engines ──
   - chain_id: phase_18_real_orch_critic
     file: chains/phase_18_real_orch_critic.yaml
@@ -510,3 +518,9 @@ tag_index:
   orchestration: [v4_phase2_engine_ignition]
   critic: [v4_phase2_engine_ignition]
   rag_cache: [v4_phase2_engine_ignition]
+  v5: [v5_math_adaptive_contract]
+  adaptive_contract: [v5_math_adaptive_contract]
+  wasserstein: [v5_math_adaptive_contract]
+  information_geometry: [v5_math_adaptive_contract]
+  schrödinger_bridge: [v5_math_adaptive_contract]
+  structure_preserving_reduction: [v5_math_adaptive_contract]

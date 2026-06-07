@@ -16,3 +16,12 @@ gh.zip
 *_telemetry.jsonl
 data/stress_test_telemetry.jsonl
 !data/judge_results.json
+
+# Runtime artifacts (produced during agent operation)
+session_*.txt
+*.db
+.user_profiles/
+.coverage
+
+# Local LLM (optional, not core project)
+llama/

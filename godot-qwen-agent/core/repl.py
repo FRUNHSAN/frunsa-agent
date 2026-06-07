@@ -127,6 +127,7 @@ class Repl:
         self._amendments_shown: set[str] = set()
         self.prev_response_len = 0
         self.prev_signal: dict = {"dimension": None, "score": 0.0}
+        self._last_interaction_time: float | None = None  # V5: tracking error
         # Embedding model loads lazily on first _route_task() or _classify_command() call
 
     # ── Prompt construction (delegates to adapters) ──
@@ -772,7 +773,7 @@ class Repl:
                     self.contract_events.append(f"[R{self.round_count}] {cmd_prop['target_blueprint_key']} -> {cmd_prop['new_value']}")
                     self.c.bus.emit("用户指令", f"{cmd_prop['target_blueprint_key']} → {cmd_prop['new_value']}")
 
-            # ── Signal interpreter ──
+            # ── Signal interpreter (legacy, kept for backward compat) ──
             if USE_SEMANTIC and dim:
                 from core.adapters.signal_interpreter import interpret as signal_interpret
                 learned = self.c.learner.get_all_thresholds()
@@ -780,6 +781,34 @@ class Repl:
                     if self._apply_proposal(sp, label="SIGNAL→CONTRACT"):
                         self.contract_events.append(f"[R{self.round_count}] {sp['target_blueprint_key']} -> {sp['new_value']}")
                         self.c.bus.emit("契约演化", f"{sp['target_blueprint_key']} → {sp['new_value']} ({sp.get('human_reason','')[:40]})")
+
+            # ── V5: Tracking Error + Meta-Adapt Trigger ──
+            from core.adapters.tracking_error import compute_error_signal
+            import time as _time
+            now = _time.time()
+            interval = (now - self._last_interaction_time) if self._last_interaction_time else 300.0
+            self._last_interaction_time = now
+
+            # Compute error signal from user behavior (not dim/score — actual behavior)
+            error_raw, sig_type = compute_error_signal(
+                user, response_delay_sec=interval,
+                previous_error=self.c.tracking_error.value,
+            )
+            e_t = self.c.tracking_error.update(error_raw, interval)
+
+            # Meta-adapt: check if tracking error persists
+            current_sel = self.c.meta_adapt.default_threshold
+            new_sel, action = self.c.meta_adapt.maybe_relax(e_t, current_sel)
+            if action != "hold":
+                self.c.bus.emit(
+                    "元适应",
+                    f"e(t)={e_t:.2f} → {action} (thresh={new_sel:.2f})",
+                )
+            if sig_type != "neutral":
+                self.c.bus.emit(
+                    "追踪误差",
+                    f"e(t)={e_t:.2f} [{sig_type}] interval={interval:.0f}s",
+                )
 
             # ── Auto-RAG: inject knowledge context when mode is on ──
             rag_context = ""

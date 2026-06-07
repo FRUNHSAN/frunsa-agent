@@ -1,0 +1,96 @@
+chain_id: v5_math_adaptive_contract
+title: "V5 数学自适应契约 — 从伪自适应到 Grothendieck 纤维化"
+created_at: "2026-06-07"
+status: active
+context: |
+  用户指出 300 个 commit 构建的"自适应契约"本质是伪自适应——
+  所有适应都是 `if score > threshold: field = new_value` 的确定性状态机。
+  触发了一个 4.5 小时、5 次深度数学研究，将"人机自适应契约"从工程 heuristic
+  提升到了严密的数学框架。
+
+decision: |
+  采用"保结构模型降阶"策略：
+  数学上完整的自适应契约 = Grothendieck 纤维化范畴上的 Wasserstein-Schrödinger 梯度流。
+  工程上可落地的近似 = 3 个模块（wasserstein_proxy / tracking_error / meta_adapt_trigger），
+  每个模块都有严格的数学上界证明。
+
+rationale: |
+  5 次研究逐步建立的数学骨架：
+
+  研究 1（纯数学骨架）：
+    - 桥（几何↔概率）：I-投影 / Gibbs 测度的大偏差极限 / 条件测度
+    - 非嵌套：横截相交 + 切换系统 Lyapunov + 层论粘合
+    - 元适应：伴随函子 + 持续同调 + 随机矩阵离群特征值
+
+  研究 2（三个奇点）：
+    - Sanov 定理：μ(C)→0 时指数级样本惩罚 → Schrödinger Bridge 多项式化
+    - Lie 代数可解性：对抗性切换下充要条件 → 公共 Lyapunov 函数
+    - Hodge 分解：给出新约束函数的几何形状，但语义需 LLM Oracle
+
+  研究 3（Wasserstein 稳定性传递）：
+    - 离散 token 空间上的图距离 + KR 对偶 → W_1 定义
+    - 扰动界 ‖Δ(x,t)‖ ≤ L_f · W_2(ν_t, ν*) → Lyapunov 传递
+    - 联合收缩矩阵 M 正定性条件：2αc₃λ_SB > (c₄L_f)²/4
+
+  研究 4（移动目标追踪）：
+    - 追踪误差稳态界 e_∞ ≤ ω_max / λ_SB
+    - 拓扑跳变累积：e(t) ≤ ω_max/λ_SB + μ_jump·⟨ΔW*⟩/λ_SB
+    - 元适应 Type I（追踪误差持久超标→防御性升维）+ Type II（TDA+Hodge→精确升维）
+    - 系统稳定充要条件：ω_max + μ_jump·⟨ΔW*⟩ ≤ λ_SB · e_crit
+
+  研究 5（工程保结构降阶 + 三个数学补丁）：
+    - 补丁 1：对比校准——W_1 代理的全局 Lipschitz 归一化
+    - 补丁 2：自适应增益调度——EMA α 随交互频率动态调整
+    - 补丁 3：退火保护——MIN_THRESHOLD + COOLDOWN 防脑死亡
+
+alternatives:
+  - "继续用 if-else 规则迭代"——被否，因为规则数量线性增长，正确性无法保证
+  - "让 LLM 做完整的自适应决策"——被否，LLM 的自我说服会在长链中固化错误
+  - "等待更强大的模型"——被否，这混淆了计算能力和适应智能两个维度
+
+evidence:
+  - BRAINSTORM_TRUE_ADAPTIVE.md: 完整 5 次研究推导，含所有数学公式
+  - tests/unit/test_v5_adaptive_tracking.py: 25 个单元测试，全部通过
+  - core/adapters/wasserstein_proxy.py: 108 行，含 KR 对偶校准
+  - core/adapters/tracking_error.py: 177 行，含自适应增益调度
+  - core/adapters/meta_adapt_trigger.py: 113 行，含退火保护
+  - 全量测试：510 通过（3 个预存失败），零新回归
+
+future_guidance: |
+  1. 选择阈值 current_sel 当前在 REPL 中使用 meta_adapt.default_threshold，
+     尚未与实际的工具选择/内容过滤逻辑耦合。下一步应该在 response selection
+     时实际使用这个动态阈值。
+  2. WassersteinProxy 的对比校准在启动时跑基准测试（完美 QA vs 脱靶 QA），
+     当前未校准。需要设计基准测试集的构建策略。
+  3. 三层需求模型（工具/关系/成长）的嵌套结构被证明可能是切换结构——
+     当前工程代码用选择阈值代理，没有建模层级切换。Phase 2 需要引入
+     显式的层级识别（LLM 输出 P(tool|input) 等概率分布）。
+  4. 这个数学框架可以作为未来"自适应 Agent"方向的学术基础。
+     特别是 Wasserstein-Schrödinger Bridge + 联合 Lyapunov 收缩、
+     TDA 触发的 Grothendieck 纤维化元适应——这些概念在现有 AI 文献中
+     几乎未被整合进同一个框架。
+
+anti_patterns:
+  - 严禁用 LLM 解析"好的""谢谢""嗯"等弱信号做适应决策
+  - 严禁跨会话累积选择阈值（中国法规第 9 条）
+  - 严禁"可成长型武器""AI自主进化"等军事化/拟人化表述
+  - 严禁在无 MIN_THRESHOLD 的条件下无限降阈值
+
+tags:
+  - v5
+  - adaptive_contract
+  - wasserstein
+  - information_geometry
+  - schrödinger_bridge
+  - lyapunov
+  - topos
+  - tda
+  - persistent_homology
+  - grothendieck_fibration
+  - structure_preserving_reduction
+  - natural_gradient
+  - fisher_information
+  - sanov_theorem
+  - hodge_theory
+  - categorical_logic
+  - model_reduction
