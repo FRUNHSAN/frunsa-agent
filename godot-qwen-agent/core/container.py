@@ -143,6 +143,19 @@ class Container:
 
     # ── KernelService methods (Phase 5: engine decoupling) ──
 
+    @property
+    def event_sink(self):
+        """Emit CompositionEvent to bus (KernelService.event_sink)."""
+        return self.bus.emit  # ContractAware wrappers call kernel.event_sink(event)
+
+    def generate(self, prompt: str, context: Any = None, **params: Any) -> Any:
+        """Sync LLM generation (KernelService.generate stub for ContractAware wrappers).
+
+        Note: engines use kernel_generate for async. This provides a sync version
+        for ContractAware wrappers that need a simple generate() call.
+        """
+        return self.cloud_llm.generate(prompt)
+
     async def kernel_generate(self, prompt: str, context: Any = None, **params):
         """Async LLM generation — KernelService.generate() implementation."""
         import asyncio
@@ -156,6 +169,18 @@ class Container:
     def kernel_check_tool(self, tool_name: str) -> dict:
         """ActionPipeline gate — KernelService.check_tool() implementation."""
         return self.action_pipeline.check(tool_name)
+
+    def kernel_evaluate_health(self) -> dict:
+        """Contract health evaluation — Phase 6 stub, Phase 7 real logic."""
+        return {"overall_status": "healthy", "compliance_rate": 1.0, "violations": []}
+
+    def kernel_decide_repair(self, report: dict) -> list:
+        """Repair decision — Phase 6 stub, Phase 7 real logic."""
+        return []
+
+    def kernel_execute_repairs(self, actions: list) -> None:
+        """Repair execution — Phase 6 stub, Phase 7 real logic."""
+        pass
 
     @property
     def auditor(self) -> ContractAuditor | None:

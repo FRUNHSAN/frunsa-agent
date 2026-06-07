@@ -342,9 +342,19 @@ class Repl:
             backend = CloudLLMBackend(self.c.cloud_llm, model="deepseek-chat")
             adapter = GenerationAdapter(backend)
 
-            planning = LLMPlanningEngine(adapter, kernel=self.c)
-            orch = LLMOrchestrationEngine(adapter, kernel=self.c)
-            critic = LLMCriticEngine(adapter, kernel=self.c)
+            from engines.planning.contract_aware import ContractAwarePlanningEngine
+            from engines.orchestration.contract_aware import ContractAwareOrchestrationEngine
+            from engines.critic.contract_aware import ContractAwareCriticEngine
+
+            planning = ContractAwarePlanningEngine(
+                LLMPlanningEngine(adapter, kernel=self.c), kernel=self.c,
+            )
+            orch = ContractAwareOrchestrationEngine(
+                LLMOrchestrationEngine(adapter, kernel=self.c), kernel=self.c,
+            )
+            critic = ContractAwareCriticEngine(
+                LLMCriticEngine(adapter, kernel=self.c), kernel=self.c,
+            )
 
             self._track_c_engine = TrackCEngine(
                 planning_engine=planning,
@@ -812,7 +822,12 @@ class Repl:
             if len(self.history) > 40:
                 self.history = self.history[-40:]
 
+            # Track trust delta across rounds
+            old_trust = self.trust
             self.trust = trust
+            delta = trust - old_trust
+            if abs(delta) > 0.001:
+                self.c.profile.record_trust_delta(delta, self.c.profile.session_count)
             print(f"  [trust={trust:.2f} | verbose={bp.fields.get('response_verbose_level', '?')} | round={self.round_count}]")
 
         print(f"\n{'='*50}")
@@ -825,3 +840,13 @@ class Repl:
                 cleaned = "\n".join(session_log).encode("utf-8", errors="surrogateescape").decode("utf-8", errors="replace")
                 f.write(cleaned)
             print(f"日志已保存: {log_file}")
+
+        # Cleanup: close SQLite connections
+        try:
+            self.c.learner.close()
+        except Exception:
+            pass
+        try:
+            self.c.patterns.close()
+        except Exception:
+            pass
