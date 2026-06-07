@@ -41,6 +41,10 @@ class Container:
         # ── Shared event bus (decouples components from X-Ray display) ──
         self.bus = XRayBus()
 
+        # ── Engine layer (V4.3: ToolEngine as 4th engine) ──
+        from engines.tool import RegistryToolEngine
+        self.tool_engine = RegistryToolEngine()
+
         # ── Enforcement ──
         self.output_pipeline = OutputPipeline(self.bp)
         self.action_pipeline = ActionPipeline(self.bp, trust=0.30)

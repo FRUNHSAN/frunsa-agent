@@ -15,6 +15,14 @@ from core.xray import XRay
 from core.trace_node import TraceNode, TraceStatus
 
 
+async def _collect_stream(agen):
+    """Drain an AsyncIterator into a list."""
+    items = []
+    async for item in agen:
+        items.append(item)
+    return items
+
+
 def _get_registered_tools() -> list[dict]:
     """Return list of {name, description, required_params} for all registered tools."""
     from core.contracts.registry import COMPONENT_REGISTRY
@@ -285,27 +293,33 @@ class Repl:
         return "A"
 
     def _execute_tool(self, tool_name: str, params: dict, xray: XRay) -> str:
-        """Execute a tool through ToolAdapter with ActionPipeline gate. Returns result text."""
+        """Execute a tool through ToolEngine (4th engine) with ActionPipeline gate."""
         # Contract gate (backlash, trust, autonomy)
         check = self.c.action_pipeline.check(tool_name)
         if not check["allowed"]:
             return f"[契约拦截: {check['reason']}]"
 
         try:
-            from core.adapters.tool_adapter import ToolAdapter
-            from core.contracts.tool import ToolCall
-            adapter = ToolAdapter(self.c.bp, event_sink=None)
-            call = ToolCall(tool_name=tool_name, parameters=params)
-            result = adapter.execute(call)
-            if result.success:
-                # data can be dict or object with .text property
-                data = result.data
-                if isinstance(data, dict):
-                    return data.get("text", str(data))
-                if hasattr(data, "text"):
-                    return data.text
-                return str(data)[:2000]
-            return f"[工具执行失败: {result.error}]"
+            from engines.tool import ToolContext
+            from core.contracts.streaming_protocol import PaceConfig
+            from core.track_c import safe_async_run
+
+            ctx = ToolContext(tool_name=tool_name, parameters=params)
+            items = safe_async_run(_collect_stream(
+                self.c.tool_engine.execute(ctx, deadline=30.0, pace_config=PaceConfig())
+            ))
+            # Extract delta from StreamItems
+            full = "".join(item.delta for item in items)
+            if full:
+                return full
+            # Check for error in trace_context
+            for item in items:
+                if not item.trace_context:
+                    continue
+                if not item.trace_context.get("tool.success", True):
+                    err = item.trace_context.get("tool.error", "unknown")
+                    return f"[工具执行失败: {err}]"
+            return "[工具返回空结果]"
         except Exception as e:
             return f"[工具异常: {e}]"
 
