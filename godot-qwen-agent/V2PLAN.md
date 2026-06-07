@@ -31,7 +31,9 @@
 | 22 | 引擎深化 | Track C: Planning/Orch/Critic 全开 + 重试 | ✅ V4.1 |
 | 23 | 打磨 | 规划粒度 + 语义截断 + 告别路由 | ✅ V4.1 |
 | 24 | 速度优化 | Track C 50s→15s | ⏸️ V4.2 |
-| 25 | MCP 集成 | 动态工具发现 | ⏸️ V4.2 |
+| 25 | MCP 集成 | 动态工具发现 + /mcp + Agent 自动调用 | ✅ V4.2 |
+| 26 | ToolEngine | 工具晋升为第四引擎, StreamItem 管道 | ✅ V4.3 |
+| 27 | 速度优化 | Track C 50s→15s | ⏸️ V4.2 |
 
 ---
 

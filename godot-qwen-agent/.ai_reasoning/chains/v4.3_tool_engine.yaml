@@ -1,0 +1,40 @@
+# 推理链: V4.3 — ToolEngine: 工具晋升为第四引擎
+chain_id: v4.3_tool_engine
+title: "V4.3 ToolEngine — 工具从二等公民晋升为第四引擎"
+created_at: "2026-06-07T00:00:00Z"
+status: active
+tags: [v4, tool_engine, engine_pattern, stream_item, async_generator]
+related_chains: [v4.1_phase3_track_c, phase_17_tech_debt_real_engine]
+
+context: |
+  审计发现: 工具是二等公民。Planning/Orchestration/Critic 都有完整的
+  async generator + StreamItem + trace_context 引擎模式, 但工具只有
+  ToolProtocol.execute() — sync 单次返回, 无 deadline, 无 trace_context。
+  REPL 用 _execute_tool() 手动调用, X-Ray/Critic 完全看不到工具执行。
+
+decision: |
+  不必重写, 不必打补丁。用模式复制(Pattern Replication):
+  精确复制 Planning/Orch/Critic 的引擎模式到 Tool。
+  - identity.py: ToolIdentity (复制 AgentIdentity)
+  - interface.py: ToolContext + ToolEngine Protocol (复制 PlanningEngine 签名)
+  - registry_based.py: RegistryToolEngine (从 COMPONENT_REGISTRY 发现+派发)
+  - ToolResult → StreamItem 转换器(带 tool.* trace_context)
+  - asyncio.to_thread() 做 sync→async 桥接(Tech Lead 建议)
+  - 异常 → error StreamItem, 不炸管道(Tech Lead 建议)
+
+rationale: |
+  4 个文件, ~120 行。零已有引擎改动。
+  同步工具(MCP/mock)通过 asyncio.to_thread() 无缝接入 async 管道。
+  StreamItem 的 tool.* trace_context 让 X-Ray 原生可见工具调用耗时/成败。
+  Critic 可以直接对工具 StreamItem 打分("工具调用是否成功?""参数是否合理?")。
+
+future_guidance:
+  tool_engine_pattern:
+    summary: "所有新能力类型都走引擎模式: identity + Context + Protocol + implementation。不手写 ad-hoc 管道"
+    priority: critical
+  sync_to_async:
+    summary: "同步工具用 asyncio.to_thread() 包装。不用 asyncio.run()。防止阻塞事件循环"
+    priority: high
+  tool_trace_context:
+    summary: "tool.name, tool.call_id, tool.success, tool.error, tool.data_preview, tool.elapsed_ms — 6 个标准 key"
+    priority: high
