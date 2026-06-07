@@ -196,6 +196,7 @@ class TrackCEngine:
     ) -> list[str]:
         """Execute each plan step via OrchestrationEngine."""
         from engines.orchestration.interface import OrchestrationContext, BranchSpec
+        from engines.orchestration.identity import OrchestratorIdentity
         from core.contracts.streaming_protocol import PaceConfig
 
         results = []
@@ -207,6 +208,7 @@ class TrackCEngine:
             )
             ctx = OrchestrationContext(
                 branches=(branch,),
+                agent_identity=OrchestratorIdentity(id="orch-v1", role="orchestration", version="1.0.0"),
                 max_retries=1,
                 metadata={"goal": user, "system_prompt": system, "context": prev_context},
             )
