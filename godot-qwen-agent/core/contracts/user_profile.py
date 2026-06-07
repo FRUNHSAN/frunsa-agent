@@ -187,6 +187,20 @@ class UserProfile:
         self._consent_history = self._consent_history[-10:]  # Ring buffer
         self.save()
 
+    def get_acceleration(self, action: str) -> int:
+        """Phase 11: return rounds to shorten healthy_rounds trigger.
+        Recent 3 of same type ALL accepted → shorten 2 (need only 1 round)
+        Recent 2 of same type ALL accepted → shorten 1 (need only 2 rounds)
+        Otherwise → 0 (default 3 rounds)
+        """
+        recent = [h for h in self._consent_history[-3:]
+                  if h["action"] == action]
+        if len(recent) >= 3 and all(h["response"] == "同意" for h in recent):
+            return 2
+        if len(recent) >= 2 and all(h["response"] == "同意" for h in recent):
+            return 1
+        return 0
+
     def should_suppress_proposal(self, action: str) -> bool:
         """Phase 10: check if this proposal type should be suppressed.
         raise_autonomy: 3 recent rejects → suppress (restore, give user more chances)

@@ -931,7 +931,7 @@ class Repl:
                             self.c.bus.emit("合同协商",
                                 f"[提议] {direction}自主权限 → {a['target']} ({a.get('reason','健康评估')})")
                             self.pending_consent.append(a)
-                elif report["healthy_rounds"] >= 3:
+                elif report["healthy_rounds"] >= max(1, 3 - self.c.profile.get_acceleration("raise_autonomy")):
                     # Phase 8: recovery — try to raise autonomy
                     actions = self.c.kernel_decide_repair(report)
                     if actions:
