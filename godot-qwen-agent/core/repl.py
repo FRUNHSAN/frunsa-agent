@@ -14,6 +14,37 @@ from core.adapters.stream_interceptor import FSMState
 from core.xray import XRay
 from core.trace_node import TraceNode, TraceStatus
 
+
+def _get_registered_tools() -> list[dict]:
+    """Return list of {name, description, required_params} for all registered tools."""
+    from core.contracts.registry import COMPONENT_REGISTRY
+    result = []
+    for name in COMPONENT_REGISTRY.list_strategies("tool"):
+        try:
+            cls = COMPONENT_REGISTRY.get("tool", name)
+            schema = getattr(cls, "parameters_schema", {})
+            if isinstance(schema, property):
+                try:
+                    schema = schema.fget(cls())
+                except Exception:
+                    schema = {}
+            desc = getattr(cls, "description", "")
+            if isinstance(desc, property):
+                try:
+                    desc = desc.fget(cls())
+                except Exception:
+                    desc = name
+            if not desc and hasattr(cls, "_mcp_description"):
+                desc = cls._mcp_description
+            result.append({
+                "name": name,
+                "description": str(desc)[:100],
+                "required_params": schema.get("required", []) if isinstance(schema, dict) else [],
+            })
+        except Exception:
+            pass
+    return result
+
 # ── Semantic command classifier (embedding-based, no hardcoded keywords) ──
 _EMBED_MODEL: object | None = None
 
@@ -350,6 +381,20 @@ class Repl:
                     self._update_live(xray, live)
                     step_prompt = f"{system}\n\n[当前任务]: {step['prompt']}\n[已有结果]: {results}"
                     step_resp = self.c.cloud_llm.generate(step_prompt)
+
+                    # Auto-parse [TOOL:xxx] {...} from LLM response
+                    import re as _re
+                    tool_match = _re.search(r'\[TOOL:(\w+)\]\s*(\{[^}]+\})', step_resp)
+                    if tool_match:
+                        tool_name = tool_match.group(1)
+                        try:
+                            params = __import__('json').loads(tool_match.group(2))
+                            tool_result = self._execute_tool(tool_name, params, xray)
+                            step_resp += f"\n\n[工具结果: {tool_name}]\n{tool_result[:1500]}"
+                            self.c.bus.emit(f"🔀 Track B Step {i+1}", f"{tool_name} 完成")
+                        except Exception:
+                            pass  # Parse failed — use LLM response as-is
+
                     results.append(step_resp)
                     self.c.bus.emit(f"🔀 Track B Step {i+1}", f"完成 ({time.time()-t_step:.1f}s)")
                 self._update_live(xray, live)
@@ -373,6 +418,22 @@ class Repl:
             self.c.bus.emit("⚠️ Track B", f"引擎异常降级: {e}")
             self._update_live(xray, live)
             return self.c.cloud_llm.generate(f"{system}\n\nUser: {user}")
+
+    def _build_tools_section(self) -> str:
+        """Build an [可用工具] section listing all registered tools."""
+        try:
+            tools = _get_registered_tools()
+        except Exception:
+            return ""
+        if not tools:
+            return ""
+        lines = ["[可用工具 — 你可以自主选择调用以下工具来完成任务]"]
+        for t in tools:
+            desc = t.get("description", "")[:80]
+            params = ", ".join(t.get("required_params", []))
+            lines.append(f"  - {t['name']}: {desc} (参数: {params})")
+        lines.append("调用格式: 在回复中写 [TOOL:工具名] {\"参数\":\"值\"}")
+        return "\n".join(lines)
 
     @staticmethod
     def _plan_task(user: str, system: str) -> list[dict]:
@@ -637,6 +698,9 @@ class Repl:
 
             # ── Build prompt + generate ──
             system = self._build_prompt(uid, xray)
+            # Inject available tools so LLM can autonomously choose
+            tools_section = self._build_tools_section()
+            system = f"{system}\n\n{tools_section}" if tools_section else system
             self._update_live(xray, live)  # Flush events from _build_prompt
             full_prompt = f"{system}{rag_context}\n\nUser: {user}"
 
