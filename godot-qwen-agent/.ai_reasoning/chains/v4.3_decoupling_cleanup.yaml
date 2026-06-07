@@ -1,0 +1,48 @@
+# 推理链: V4.3 — 核心层耦合修复与缺口填补
+chain_id: v4.3_decoupling_cleanup
+title: "V4.3 解耦清理 — KernelService Protocol + ToolFormatRegistry"
+created_at: "2026-06-07T00:00:00Z"
+status: active
+tags: [v4, decoupling, kernel_service, tool_format_registry, invariant_fix]
+related_chains: [v4.3_tool_engine]
+
+context: |
+  全面解耦审计发现 7 个违反 CLAUDE.md 不变量的耦合点。按严重程度:
+  1 个 CRITICAL (KernelService 不存在), 5 个 HIGH, 3 个 MEDIUM。
+  Tech Lead 批准: 先修 CRITICAL + HIGH 中不需要引擎层改动的那两个,
+  其余打包进 Phase 5。
+
+decision: |
+  1. KernelService Protocol — 填补架构缺口。
+     3 个 contract_aware.py 引用它但文件从未创建。core/contracts/__init__.py
+     在 __all__ 中列出但无 import。建空 Protocol 文件, ~50 行, 战略性占位。
+
+  2. ToolFormatRegistry — 消除 tool_adapter.py 中的 if/elif 硬分支。
+     用 USB 注册表模式: 每个 LLM provider 注册一个 ToolFormatAdapter,
+     包含 format_tools() + parse_tool_call()。默认提供 Anthropic + OpenAI。
+     加 Gemini = register("gemini", GeminiToolFormat), 0 行改动。
+
+  3. 引擎直接 import GenerationAdapter, 引擎间耦合, composer.py 直接
+     import ChunkerAdapter — 延后到 Phase 5 和速度优化一起做。
+
+rationale: |
+  "抓大放小, 步步为营" — Tech Lead 批准的节奏。
+  KernelService 是战略占位, Phase 5 引擎层解耦时会用到。
+  ToolFormatRegistry 是 USB 模式的自然延伸, 消除最后一个硬分支。
+  引擎层解耦是大手术, 今天不动——避免连锁反应导致 289 测试大面积飘红。
+
+anti_patterns:
+  - "在 tool_adapter.py 中加 if provider == 'gemini' — 违反 Invariant #37"
+  - "在 __all__ 中列出但从未导入的符号 — 架构幽灵"
+  - "绕过 KernelService Protocol 直接 import 适配器 — 引擎耦合"
+
+future_guidance:
+  kernel_service:
+    summary: "Phase 23a Protocol 占位。Phase 5 实现 KernelServiceImpl, 注入到引擎"
+    priority: high
+  tool_format_registry:
+    summary: "USB 注册表: ToolFormatRegistry.register(provider, adapter)。加入 Gemini 只需注册 + 1 个适配器类"
+    priority: high
+  engine_decoupling:
+    summary: "Phase 5: 引擎层统一走 KernelService, 消除引擎间直接 import, 消除 composer.py 直接 import ChunkerAdapter"
+    priority: medium
