@@ -51,6 +51,10 @@ class Container:
         import core.adapters.keyword_chunker  # noqa: triggers @register_component
         import core.adapters.semantic_chunker  # noqa: triggers @register_component
 
+        # ── MCP tool discovery (graceful degradation) ──
+        if cfg.mcp_servers:
+            self._boot_mcp_servers(cfg.mcp_servers)
+
         # ── Seal the registry (invariant #23) ──
         COMPONENT_REGISTRY.freeze()
 
@@ -93,6 +97,30 @@ class Container:
         if self._narrative is None:
             self._narrative = NarrativeEmergence(self.patterns, self.cloud_llm)
         return self._narrative
+
+    def _boot_mcp_servers(self, server_names: list[str]) -> None:
+        """Start MCP servers and register their tools into COMPONENT_REGISTRY.
+
+        Graceful degradation: if a server fails to start, log and skip.
+        Does NOT crash the REPL — MCP is additive, not critical.
+        """
+        import sys
+        try:
+            from core.adapters.mcp_adapter import register_mcp_server
+        except ImportError:
+            print("  [🔌 MCP] mcp 包未安装。跳过 MCP 工具注册。", file=sys.stderr)
+            return
+        except Exception:
+            print("  [🔌 MCP] mcp_adapter 导入失败。跳过。", file=sys.stderr)
+            return
+
+        for name in server_names:
+            print(f"  [🔌 MCP] 正在连接 {name} 服务器...", file=sys.stderr)
+            try:
+                count = register_mcp_server(name)
+                print(f"  [🔌 MCP] {name} → 注册 {count} 个工具", file=sys.stderr)
+            except Exception as e:
+                print(f"  [🔌 MCP] {name} 启动失败: {e}", file=sys.stderr)
 
     @property
     def auditor(self) -> ContractAuditor | None:

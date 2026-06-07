@@ -253,6 +253,20 @@ class Repl:
             return "B"
         return "A"
 
+    def _execute_tool(self, tool_name: str, params: dict, xray: XRay) -> str:
+        """Execute a tool through ToolAdapter + ActionPipeline gate. Returns result text."""
+        try:
+            from core.adapters.tool_adapter import ToolAdapter
+            from core.contracts.tool import ToolCall
+            adapter = ToolAdapter(self.c.bp, self.c.action_pipeline)
+            call = ToolCall(tool_name=tool_name, params=params)
+            result = adapter.execute(call)
+            if result.success:
+                return result.data.get("text", str(result.data))
+            return f"[工具执行失败: {result.error}]"
+        except Exception as e:
+            return f"[工具异常: {e}]"
+
     def _run_track_c(self, user: str, system: str, xray: XRay, live=None) -> str:
         """Track C: full engine pipeline with retry."""
         from core.track_c import TrackCEngine
@@ -314,12 +328,19 @@ class Repl:
                         )
                         self.c.bus.emit(f"🔀 Track B Step {i+1}", f"🚫 拦截: {step['tool']}")
                         continue
-                self.c.bus.emit_pending(f"🔀 Track B Step {i+1}", "⏳ 执行中...")
-                self._update_live(xray, live)
-                step_prompt = f"{system}\n\n[当前任务]: {step['prompt']}\n[已有结果]: {results}"
-                step_resp = self.c.cloud_llm.generate(step_prompt)
-                results.append(step_resp)
-                self.c.bus.emit(f"🔀 Track B Step {i+1}", f"完成 ({time.time()-t_step:.1f}s)")
+                    # Execute tool via ToolAdapter (MCP or local)
+                    self.c.bus.emit_pending(f"🔀 Track B Step {i+1}", f"⏳ {step['tool']}...")
+                    self._update_live(xray, live)
+                    tool_result = self._execute_tool(step["tool"], {"query": step["prompt"]}, xray)
+                    results.append(f"[工具结果: {step['tool']}]\n{tool_result}")
+                    self.c.bus.emit(f"🔀 Track B Step {i+1}", f"{step['tool']} 完成 ({time.time()-t_step:.1f}s)")
+                else:
+                    self.c.bus.emit_pending(f"🔀 Track B Step {i+1}", "⏳ 执行中...")
+                    self._update_live(xray, live)
+                    step_prompt = f"{system}\n\n[当前任务]: {step['prompt']}\n[已有结果]: {results}"
+                    step_resp = self.c.cloud_llm.generate(step_prompt)
+                    results.append(step_resp)
+                    self.c.bus.emit(f"🔀 Track B Step {i+1}", f"完成 ({time.time()-t_step:.1f}s)")
                 self._update_live(xray, live)
 
             t_critic = time.time()
@@ -468,6 +489,16 @@ class Repl:
             if cmd == "/rag off":
                 rag_mode = False
                 print(f"  [RAG] 本地知识库模式已关闭。")
+                continue
+            if cmd == "/tools":
+                from core.contracts.registry import COMPONENT_REGISTRY
+                tools = COMPONENT_REGISTRY.list_strategies("tool")
+                if tools:
+                    print(f"  [🔧 工具] 已注册 {len(tools)} 个:")
+                    for t in tools:
+                        print(f"    - {t}")
+                else:
+                    print("  [🔧 工具] 无已注册工具。用 --mcp <server> 启动 MCP 服务器。")
                 continue
             if cmd == "/trace":
                 nodes = self.c.bus.export_trace()
