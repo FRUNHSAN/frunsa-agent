@@ -30,8 +30,9 @@ def _make_context(goal: str = "Validate Phase 14 orchestration contract") -> Pla
 async def _collect_items(goal: str = "Validate Phase 14 orchestration contract"):
     """Collect all StreamItems from the enhanced planning stub."""
     from engines.planning.stub import StubPlanningEngine
+    from engines.orchestration.stub import StubOrchestrationEngine
 
-    engine = StubPlanningEngine()
+    engine = StubPlanningEngine(orch_factory=lambda: StubOrchestrationEngine())
     ctx = _make_context(goal)
     items = []
     async for item in engine.plan(ctx, deadline=999.0, pace_config=None):

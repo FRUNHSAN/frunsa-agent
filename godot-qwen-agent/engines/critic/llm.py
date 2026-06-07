@@ -229,9 +229,11 @@ class LLMCriticEngine:
         self,
         adapter: GenerationAdapter,
         evaluation_temperature: float = 0.3,
+        kernel: Any | None = None,  # KernelService Protocol (Phase 5 decoupling)
     ) -> None:
         self._adapter = adapter
         self._eval_temp = evaluation_temperature
+        self._kernel = kernel  # None → fallback to adapter (backward compat)
 
     async def evaluate(
         self,
@@ -297,6 +299,13 @@ class LLMCriticEngine:
                 f"reasoning={eval_data.get('reasoning', '')}"
             )
 
+            # Phase 5: contract-adaptive acceptance threshold
+            acceptance_threshold = 0.75  # default
+            if self._kernel:
+                verbose = self._kernel.enforce("response_verbose_level") or "MEDIUM"
+                thresholds = {"HIGH": 0.70, "MEDIUM": 0.75, "LOW": 0.85, "MINIMAL": 0.85}
+                acceptance_threshold = thresholds.get(verbose, 0.75)
+
             yield StreamItem(
                 delta=delta,
                 index=idx,
@@ -306,6 +315,7 @@ class LLMCriticEngine:
                 trace_context={
                     "critic.score": float(eval_data["score"]),
                     "critic.verdict": eval_data["verdict"],
+                    "critic.acceptance_threshold": acceptance_threshold,
                     "agent.identity": identity_value,
                 },
             )

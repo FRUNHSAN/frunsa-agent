@@ -13,7 +13,7 @@ interface shape so contract_aware wrappers have a valid import target.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Protocol, runtime_checkable
+from typing import Any, AsyncIterator, Dict, List, Protocol, runtime_checkable
 
 from core.contracts.composition import CompositionEvent
 
@@ -24,35 +24,54 @@ class KernelService(Protocol):
 
     All engine code talks to this Protocol — never to concrete adapters.
     This keeps engines testable (mock the Protocol) and the kernel replaceable.
+
+    V4.3 Phase 5: extended with engine-facing methods (generate, enforce, check_tool).
+    Container duck-types this Protocol — no explicit inheritance needed.
     """
 
-    @property
-    def event_sink(self) -> Any:  # Callable[[CompositionEvent], None] in practice
-        """Emit an observability event into the kernel's event bus.
+    # ── Phase 23a (V4.3 original) ──
 
-        Shape: Callable[[CompositionEvent], None].
-        Engine wrappers use this to record contract compliance events.
-        """
+    @property
+    def event_sink(self) -> Any:
+        """Emit an observability event into the kernel's event bus."""
         ...
 
     def evaluate_health(self) -> Dict[str, Any]:
-        """Run the HealthEvaluator against the current contract state.
-
-        Returns dict with keys: overall_status, compliance_rate, violations, ...
-        Contract-aware engine wrappers call this after each plan/orch/critic cycle.
-        """
+        """Run the HealthEvaluator against the current contract state."""
         ...
 
     def decide_repair(self, report: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Given a health report, decide what repairs (if any) to execute.
-
-        Returns list of action dicts, each with 'action' and 'target' keys.
-        """
+        """Given a health report, decide what repairs to execute."""
         ...
 
     def execute_repairs(self, actions: List[Dict[str, Any]]) -> None:
-        """Execute repair actions decided by decide_repair().
+        """Execute repair actions. Idempotent."""
+        ...
 
-        Idempotent — executing the same repair twice has no additional effect.
+    # ── Phase 5 (engine decoupling) ──
+
+    async def generate(
+        self, prompt: str, context: Any = None, **params: Any
+    ) -> Any:  # Returns GenerationResult in practice
+        """Async LLM generation. Replaces direct GenerationAdapter import.
+
+        Engines call this instead of importing GenerationAdapter from adapters.
+        Container delegates to cloud_llm.generate() wrapped in async executor.
+        """
+        ...
+
+    def enforce(self, key: str) -> Any | None:
+        """Hard-read a contract field from the DynamicBlueprint.
+
+        Replaces engine direct import of DynamicBlueprint.
+        Engines query: "what does the contract require of me?"
+        """
+        ...
+
+    def check_tool(self, tool_name: str) -> Dict[str, Any]:
+        """Run the ActionPipeline gate check on a tool.
+
+        Returns {"allowed": bool, "reason": str, "requires_hitl": bool}.
+        Replaces REPL manually calling action_pipeline.check().
         """
         ...

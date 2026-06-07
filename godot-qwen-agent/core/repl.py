@@ -342,9 +342,9 @@ class Repl:
             backend = CloudLLMBackend(self.c.cloud_llm, model="deepseek-chat")
             adapter = GenerationAdapter(backend)
 
-            planning = LLMPlanningEngine(adapter)
-            orch = LLMOrchestrationEngine(adapter)
-            critic = LLMCriticEngine(adapter)
+            planning = LLMPlanningEngine(adapter, kernel=self.c)
+            orch = LLMOrchestrationEngine(adapter, kernel=self.c)
+            critic = LLMCriticEngine(adapter, kernel=self.c)
 
             self._track_c_engine = TrackCEngine(
                 planning_engine=planning,

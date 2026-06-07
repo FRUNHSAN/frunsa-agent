@@ -141,6 +141,22 @@ class Container:
             except Exception as e:
                 print(f"  [🔌 MCP] {label} 启动失败: {e}", file=sys.stderr)
 
+    # ── KernelService methods (Phase 5: engine decoupling) ──
+
+    async def kernel_generate(self, prompt: str, context: Any = None, **params):
+        """Async LLM generation — KernelService.generate() implementation."""
+        import asyncio
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self.cloud_llm.generate, prompt)
+
+    def kernel_enforce(self, key: str):
+        """Hard-read contract field — KernelService.enforce() implementation."""
+        return self.bp.enforce(key)
+
+    def kernel_check_tool(self, tool_name: str) -> dict:
+        """ActionPipeline gate — KernelService.check_tool() implementation."""
+        return self.action_pipeline.check(tool_name)
+
     @property
     def auditor(self) -> ContractAuditor | None:
         if self._auditor is None:

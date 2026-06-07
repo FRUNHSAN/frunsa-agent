@@ -29,11 +29,9 @@ from engines.planning.identity import AgentIdentity
 from engines.planning.interface import PlanningContext, PlanningStep
 
 
-def _default_orch_factory() -> OrchestrationEngine:
-    """Default factory: StubOrchestrationEngine with no config."""
-    from engines.orchestration.stub import StubOrchestrationEngine
-
-    return StubOrchestrationEngine()
+def _default_orch_factory() -> OrchestrationEngine | None:
+    """Phase 5: No hardcoded default. Plan-Only when no factory injected."""
+    return None  # Plan-Only — caller must inject orch_factory for full pipeline
 
 
 class StubPlanningEngine:

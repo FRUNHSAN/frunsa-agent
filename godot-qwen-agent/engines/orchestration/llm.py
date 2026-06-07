@@ -256,8 +256,10 @@ class LLMOrchestrationEngine:
         route_temperature: float = 0.3,
         merge_temperature: float = 0.3,
         retry_temperature: float = 0.2,
+        kernel: Any | None = None,  # KernelService Protocol (Phase 5 decoupling)
     ) -> None:
         self._adapter = adapter
+        self._kernel = kernel
         self._route_temp = route_temperature
         self._merge_temp = merge_temperature
         self._retry_temp = retry_temperature

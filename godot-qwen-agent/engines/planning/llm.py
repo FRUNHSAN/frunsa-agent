@@ -211,11 +211,14 @@ def _parse_synthesis(raw_text: str) -> str:
 # ── LLM Planning Engine ────────────────────────────────────────────────
 
 
-def _default_orch_factory() -> OrchestrationEngine:
-    """Default factory: StubOrchestrationEngine with no config."""
-    from engines.orchestration.stub import StubOrchestrationEngine
+def _default_orch_factory() -> OrchestrationEngine | None:
+    """Phase 5: No hardcoded default. Plan-Only when no factory injected.
 
-    return StubOrchestrationEngine()
+    Container is responsible for injecting the real orch_factory.
+    If None, the planning engine works in Plan-Only mode (no branch dispatch).
+    This breaks the hard coupling to engines.orchestration.stub.
+    """
+    return None  # Plan-Only — caller must inject orch_factory for full pipeline
 
 
 class LLMPlanningEngine:
@@ -253,8 +256,10 @@ class LLMPlanningEngine:
         decompose_temperature: float = 0.3,
         synthesize_temperature: float = 0.5,
         orch_factory: Callable[[], OrchestrationEngine] | None = None,
+        kernel: Any | None = None,  # KernelService Protocol (Phase 5)
     ) -> None:
         self._adapter = adapter
+        self._kernel = kernel
         self._max_tokens = max_tokens
         self._decompose_temp = decompose_temperature
         self._synthesize_temp = synthesize_temperature
@@ -278,11 +283,18 @@ class LLMPlanningEngine:
         cumulative_tokens = 0
 
         # ── Step 0-1: LLM decomposition ────────────────────────
+        # Phase 5: contract-adaptive branch cap (hard constraint, not prompt)
+        autonomy = "ASK_FIRST"
+        if self._kernel:
+            autonomy = self._kernel.enforce("execution_autonomy") or "ASK_FIRST"
+        branch_caps = {"FULL": 4, "HIGH": 2, "ASK_FIRST": 1, "DISABLED": 0}
+        max_branches = min(context.max_parallel_branches, branch_caps.get(autonomy, 1))
+
         sub_tasks_str = ", ".join(context.sub_tasks) if context.sub_tasks else "none"
         decompose_prompt = PLAN_DECOMPOSE_TEMPLATE.format(
             goal=context.goal,
             sub_tasks=sub_tasks_str,
-            max_branches=context.max_parallel_branches,
+            max_branches=max_branches,
         )
 
         if time.perf_counter() - start > deadline:
@@ -384,12 +396,14 @@ class LLMPlanningEngine:
             metadata={"source": "planning_llm"},
         )
         orch_items: list[StreamItem] = []
-        async for orch_item in self._orch.orchestrate(
-            context=orch_context,
-            deadline=deadline,
-            pace_config=pace_config,
-        ):
-            orch_items.append(orch_item)
+        if self._orch is not None:
+            async for orch_item in self._orch.orchestrate(
+                context=orch_context,
+                deadline=deadline,
+                pace_config=pace_config,
+            ):
+                orch_items.append(orch_item)
+        # else: Plan-Only — no orchestration factory injected
 
         if time.perf_counter() - start > deadline:
             raise asyncio.TimeoutError(

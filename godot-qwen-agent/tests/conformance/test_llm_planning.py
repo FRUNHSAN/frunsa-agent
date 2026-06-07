@@ -52,10 +52,14 @@ def _make_context(**kwargs) -> PlanningContext:
 
 
 def _make_engine():
+    from engines.orchestration.stub import StubOrchestrationEngine
     backend = MockLLMBackend(
         responses=(DEFAULT_DECOMPOSE_RESPONSE, DEFAULT_SYNTHESIZE_RESPONSE),
     )
-    return LLMPlanningEngine(_MockAdapter(backend))
+    return LLMPlanningEngine(
+        _MockAdapter(backend),
+        orch_factory=lambda: StubOrchestrationEngine(),
+    )
 
 
 # ── TestMockLLMBackend ────────────────────────────────────────────────
