@@ -119,6 +119,7 @@ class Repl:
         self.round_count = 0
         self.healthy_rounds = 0  # Phase 8: consecutive healthy rounds counter
         self.pending: list[dict] = []
+        self.pending_consent: list[dict] = []  # Phase 9: proposals awaiting user consent
         self._restore_contract_state()  # Phase 8b: cross-session persistence
         self.history: list[str] = []
         self.contract_events: list[str] = []
@@ -324,6 +325,19 @@ class Repl:
             return "[工具返回空结果]"
         except Exception as e:
             return f"[工具异常: {e}]"
+
+    @staticmethod
+    def _detect_user_consent(text: str) -> str | None:
+        """Phase 9: detect user consent/refusal for pending contract proposals.
+
+        Returns '同意', '拒绝', or None (unrelated input).
+        """
+        t = text.strip()
+        if any(w in t for w in ("可以", "好", "行", "同意", "没问题", "嗯行", "好的", "ok", "yes")):
+            return "同意"
+        if any(w in t for w in ("不用", "不行", "别", "不了", "不要", "拒绝", "no")):
+            return "拒绝"
+        return None
 
     def _restore_contract_state(self) -> None:
         """Phase 8b: restore contract state from previous session on startup."""
@@ -719,6 +733,22 @@ class Repl:
                 self.c.bus.emit("语义感知", f"{dim}={score:.3f}")
                 self._update_live(xray, live)
 
+            # ── Phase 9: pending consent proposals ──
+            if self.pending_consent:
+                consent = self._detect_user_consent(user)
+                if consent == "同意":
+                    for a in self.pending_consent:
+                        self.c.kernel_execute_repairs([a])
+                        direction = "降低" if a["action"] == "lower_autonomy" else "恢复"
+                        self.c.bus.emit("合同协商", f"[执行] {direction}自主权限 → {a.get('target','?')}")
+                    self.pending_consent.clear()
+                    continue
+                elif consent == "拒绝":
+                    self.c.bus.emit("合同协商", "[取消] 用户拒绝, 保持当前权限")
+                    self.pending_consent.clear()
+                    continue
+                # else: unrelated input, keep proposals pending and fall through to normal processing
+
             # ── Pending proposals ──
             for prop in list(self.pending):
                 if self._apply_proposal(prop, label="SYSTEM2"):
@@ -880,14 +910,37 @@ class Repl:
                 if report["overall_status"] != "healthy":
                     actions = self.c.kernel_decide_repair(report)
                     if actions:
-                        self.c.kernel_execute_repairs(actions)
+                        # Phase 9: split auto vs negotiated
+                        consent_actions = [a for a in actions
+                                          if a["action"] in ("lower_autonomy", "raise_autonomy")]
+                        auto_actions = [a for a in actions if a not in consent_actions]
+
+                        if auto_actions:
+                            self.c.kernel_execute_repairs(auto_actions)
+
+                        for a in consent_actions:
+                            direction = "降低" if a["action"] == "lower_autonomy" else "恢复"
+                            self.c.bus.emit("合同协商",
+                                f"[提议] {direction}自主权限 → {a['target']} ({a.get('reason','健康评估')})")
+                            self.pending_consent.append(a)
                 elif report["healthy_rounds"] >= 3:
                     # Phase 8: recovery — try to raise autonomy
                     actions = self.c.kernel_decide_repair(report)
                     if actions:
                         for a in actions:
                             a["healthy_rounds"] = self.healthy_rounds
-                        self.c.kernel_execute_repairs(actions)
+                        consent_actions = [a for a in actions
+                                          if a["action"] in ("lower_autonomy", "raise_autonomy")]
+                        auto_actions = [a for a in actions if a not in consent_actions]
+
+                        if auto_actions:
+                            self.c.kernel_execute_repairs(auto_actions)
+
+                        for a in consent_actions:
+                            direction = "恢复" if a["action"] == "raise_autonomy" else "降低"
+                            self.c.bus.emit("合同协商",
+                                f"[提议] {direction}自主权限 → {a['target']} (连续健康 {self.healthy_rounds} 轮)")
+                            self.pending_consent.append(a)
 
             print(f"  [trust={trust:.2f} | verbose={bp.fields.get('response_verbose_level', '?')} | round={self.round_count}]")
 
