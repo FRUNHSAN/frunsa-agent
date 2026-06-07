@@ -35,8 +35,8 @@ class CloudLLMBackend:
         """Generate text from the wrapped DeepSeekClient.
 
         Context is dropped — engines build their own prompts.
-        Extra params (temperature, max_tokens) are ignored; the client
-        was configured at construction time.
+        Client is configured at construction time; params passed at runtime
+        are noted but not forwarded (DeepSeekClient.generate() has fixed signature).
         """
         text = self._client.generate(prompt)
         return GenerationResult(

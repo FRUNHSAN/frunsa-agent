@@ -195,7 +195,9 @@ class TrackCEngine:
         else:
             goal = (
                 f"{user}\n\n"
-                f"[约束: 请拆解为 {min_steps}-5 个可独立执行的子任务。]"
+                f"[约束: 直接输出 {min_steps}-5 个 JSON 步骤。"
+                f"在 JSON 之前用 <!-- reasoning --> 注释简要说明分解逻辑,"
+                f"但最终输出只需 JSON。不需要先分析再合成, 一步完成。]"
             )
 
         ctx = PlanningContext(goal=goal, max_parallel_branches=2)
@@ -228,31 +230,36 @@ class TrackCEngine:
     async def _do_orchestrate(
         self, plan: list[dict], user: str, system: str, prev_context: str,
     ) -> list[str]:
-        """Execute each plan step via OrchestrationEngine."""
+        """Execute plan steps via OrchestrationEngine — parallelized (V4.3 speed)."""
+        import asyncio as _asyncio
+        tasks = [self._orchestrate_one(step, user, system, prev_context) for step in plan]
+        raw = await _asyncio.gather(*tasks, return_exceptions=True)
+        # Safety clamp: explicit error marking for downstream Critic/Synth
+        return [r if isinstance(r, str) else f"[STEP_FAILED: {type(r).__name__}: {r}]" for r in raw]
+
+    async def _orchestrate_one(
+        self, step: dict, user: str, system: str, prev_context: str,
+    ) -> str:
+        """Execute a single orchestration branch."""
         from engines.orchestration.interface import OrchestrationContext, BranchSpec
         from engines.orchestration.identity import OrchestratorIdentity
         from core.contracts.streaming_protocol import PaceConfig
 
-        results = []
-        for i, step in enumerate(plan):
-            branch = BranchSpec(
-                name=step.get("prompt", str(step))[:60],
-                pool=step.get("tool", "default"),
-                items=1,
-            )
-            ctx = OrchestrationContext(
-                branches=(branch,),
-                agent_identity=OrchestratorIdentity(id="orch-v1", role="orchestration", version="1.0.0"),
-                max_retries=1,
-                metadata={"goal": user, "system_prompt": system, "context": prev_context},
-            )
-            items = await _collect(self._orch.orchestrate(
-                ctx, deadline=60.0, pace_config=PaceConfig(),
-            ))
-            full = "".join(item.delta for item in items)
-            if full:
-                results.append(full)
-        return results
+        branch = BranchSpec(
+            name=step.get("prompt", str(step))[:60],
+            pool=step.get("tool", "default"),
+            items=1,
+        )
+        ctx = OrchestrationContext(
+            branches=(branch,),
+            agent_identity=OrchestratorIdentity(id="orch-v1", role="orchestration", version="1.0.0"),
+            max_retries=1,
+            metadata={"goal": user, "system_prompt": system, "context": prev_context},
+        )
+        items = await _collect(self._orch.orchestrate(
+            ctx, deadline=60.0, pace_config=PaceConfig(),
+        ))
+        return "".join(item.delta for item in items)
 
     async def _do_critique(self, user: str, result_text: str) -> tuple[float, str]:
         """Evaluate results via CriticEngine."""
