@@ -42,8 +42,11 @@ def _get_command_model():
 
 
 def _classify_command(text: str) -> tuple[str, str] | None:
-    # Short farewells/conversation closers should never trigger commands
-    if text.strip() in ("拜拜", "再见", "bye", "晚安", "谢谢", "好的"):
+    # Short greetings/closers + very short text should never trigger commands
+    t = text.strip()
+    if len(t) < 3 or t in ("拜拜", "再见", "bye", "晚安", "谢谢", "好的", "你好", "可以", "嗯", "哦"):
+        return None
+    if t.startswith("好的"):
         return None
     m, st_util, centers = _get_command_model()
     # Guard: garbled/surrogate text → skip classification
