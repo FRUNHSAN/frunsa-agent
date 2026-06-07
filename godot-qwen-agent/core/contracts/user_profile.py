@@ -178,7 +178,14 @@ class UserProfile:
     def save_blueprint_snapshot(self, bp_snapshot: dict) -> None:
         """Phase 7: persist contract state for cross-session continuity."""
         self._last_blueprint = bp_snapshot
-        self.save()  # Re-use existing save which now includes _last_blueprint
+        self.save()
+
+    def load_blueprint_snapshot(self) -> dict | None:
+        """Phase 8b: load persisted contract state from previous session."""
+        if not self.storage_path_obj.exists():
+            return None
+        data = json.loads(self.storage_path_obj.read_text(encoding="utf-8"))
+        return data.get("last_blueprint")
 
     def snapshot(self) -> dict[str, Any]:
         return {

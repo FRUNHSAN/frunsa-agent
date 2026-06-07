@@ -119,6 +119,7 @@ class Repl:
         self.round_count = 0
         self.healthy_rounds = 0  # Phase 8: consecutive healthy rounds counter
         self.pending: list[dict] = []
+        self._restore_contract_state()  # Phase 8b: cross-session persistence
         self.history: list[str] = []
         self.contract_events: list[str] = []
         self._amendments_shown: set[str] = set()
@@ -323,6 +324,38 @@ class Repl:
             return "[工具返回空结果]"
         except Exception as e:
             return f"[工具异常: {e}]"
+
+    def _restore_contract_state(self) -> None:
+        """Phase 8b: restore contract state from previous session on startup."""
+        snapshot = self.c.profile.load_blueprint_snapshot()
+        if not snapshot:
+            return
+        # Schema guard: only restore fields that exist in current schema
+        valid_keys = set(self.c.bp.fields.keys())
+        restored = 0
+        for key, val in snapshot.items():
+            if key in valid_keys and val is not None:
+                try:
+                    self.c.bp.apply_proposal(key, val, ignore_cooldown=True)
+                    restored += 1
+                except Exception:
+                    pass  # Skip invalid field values gracefully
+        if restored > 0:
+            print(f"  [系统] 已从上次会话恢复 {restored} 个合同字段", flush=True)
+
+        # Restore trust baseline if available
+        trust_snap = snapshot.get("_trust_baseline")
+        if trust_snap is not None and 0.0 <= float(trust_snap) <= 1.0:
+            self.trust = float(trust_snap)
+            self.c.action_pipeline.trust = self.trust
+
+        # Restore learner thresholds if available
+        thresholds = snapshot.get("_thresholds")
+        if isinstance(thresholds, dict):
+            try:
+                self.c.learner.restore_thresholds(thresholds)
+            except Exception:
+                pass
 
     def _run_track_c(self, user: str, system: str, xray: XRay, live=None) -> str:
         """Track C: full engine pipeline with retry."""
@@ -869,9 +902,12 @@ class Repl:
                 f.write(cleaned)
             print(f"日志已保存: {log_file}")
 
-        # Phase 7: save contract snapshot for cross-session persistence
+        # Phase 7-8b: save full contract state for cross-session persistence
         try:
-            self.c.profile.save_blueprint_snapshot(dict(self.c.bp.snapshot))
+            snap = dict(self.c.bp.snapshot)
+            snap["_trust_baseline"] = self.trust
+            snap["_thresholds"] = self.c.learner.get_all_thresholds()
+            self.c.profile.save_blueprint_snapshot(snap)
         except Exception:
             pass
 
