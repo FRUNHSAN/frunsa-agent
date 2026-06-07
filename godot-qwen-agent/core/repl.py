@@ -828,6 +828,16 @@ class Repl:
             delta = trust - old_trust
             if abs(delta) > 0.001:
                 self.c.profile.record_trust_delta(delta, self.c.profile.session_count)
+
+            # Phase 7: self-repair — health check every 5 rounds or on acute crisis
+            failures_this_round = sum(self.c.action_pipeline._failure_counts.values())
+            if self.round_count % 5 == 0 or failures_this_round >= 2:
+                report = self.c.kernel_evaluate_health()
+                if report["overall_status"] != "healthy":
+                    actions = self.c.kernel_decide_repair(report)
+                    if actions:
+                        self.c.kernel_execute_repairs(actions)
+
             print(f"  [trust={trust:.2f} | verbose={bp.fields.get('response_verbose_level', '?')} | round={self.round_count}]")
 
         print(f"\n{'='*50}")
@@ -840,6 +850,12 @@ class Repl:
                 cleaned = "\n".join(session_log).encode("utf-8", errors="surrogateescape").decode("utf-8", errors="replace")
                 f.write(cleaned)
             print(f"日志已保存: {log_file}")
+
+        # Phase 7: save contract snapshot for cross-session persistence
+        try:
+            self.c.profile.save_blueprint_snapshot(dict(self.c.bp.snapshot))
+        except Exception:
+            pass
 
         # Cleanup: close SQLite connections
         try:

@@ -171,16 +171,63 @@ class Container:
         return self.action_pipeline.check(tool_name)
 
     def kernel_evaluate_health(self) -> dict:
-        """Contract health evaluation — Phase 6 stub, Phase 7 real logic."""
-        return {"overall_status": "healthy", "compliance_rate": 1.0, "violations": []}
+        """Contract health evaluation — 3 signals: backlash, guardrail squeeze, trust collapse."""
+        failures = sum(self.action_pipeline._failure_counts.values())
+        backlash = any(v >= 3 for v in self.action_pipeline._failure_counts.values())
+        thresholds = self.learner.get_all_thresholds()
+        at_guardrail = [
+            dim for dim, (lo, hi) in self.learner.GUARDRAILS.items()
+            if thresholds.get(dim, 0) <= lo or thresholds.get(dim, 0) >= hi
+        ]
+        trust = self.action_pipeline.trust
+
+        if backlash or len(at_guardrail) >= 2 or trust < 0.10:
+            status = "unhealthy"
+        elif failures >= 2 or trust < 0.20 or len(at_guardrail) >= 1:
+            status = "degraded"
+        else:
+            status = "healthy"
+
+        return {
+            "overall_status": status,
+            "trust": trust,
+            "tool_failures": failures,
+            "backlash_detected": backlash,
+            "thresholds_at_guardrail": at_guardrail,
+            "compliance_rate": 1.0 - failures / max(failures + 1, 1),
+        }
 
     def kernel_decide_repair(self, report: dict) -> list:
-        """Repair decision — Phase 6 stub, Phase 7 real logic."""
-        return []
+        """Decide repair actions from health report. Idempotent — won't repeat."""
+        actions = []
+        status = report.get("overall_status", "healthy")
+
+        if status == "unhealthy":
+            current = self.bp.enforce("execution_autonomy") or "ASK_FIRST"
+            if report.get("backlash_detected") and current != "DISABLED":
+                actions.append({"action": "lock_failed_tools", "reason": "backlash"})
+            if current not in ("ASK_FIRST", "DISABLED"):
+                actions.append({"action": "lower_autonomy", "target": "ASK_FIRST"})
+
+        elif status == "degraded":
+            current = self.bp.enforce("execution_autonomy") or "ASK_FIRST"
+            if current in ("FULL", "HIGH"):
+                actions.append({"action": "lower_autonomy", "target": "ASK_FIRST"})
+            if report.get("tool_failures", 0) >= 2:
+                actions.append({"action": "suggest_trust_recalibration"})
+
+        return actions
 
     def kernel_execute_repairs(self, actions: list) -> None:
-        """Repair execution — Phase 6 stub, Phase 7 real logic."""
-        pass
+        """Execute repair actions — modify DynamicBlueprint in-place."""
+        for action in actions:
+            if action["action"] == "lower_autonomy":
+                self.bp.apply_proposal("execution_autonomy", action["target"])
+                self.bus.emit("自修复", f"autonomy → {action['target']} ({action.get('reason','健康恶化')})")
+            elif action["action"] == "lock_failed_tools":
+                self.bus.emit("自修复", "failed tools locked by backlash")
+            elif action["action"] == "suggest_trust_recalibration":
+                self.bus.emit("自修复", "建议信任校准")
 
     @property
     def auditor(self) -> ContractAuditor | None:

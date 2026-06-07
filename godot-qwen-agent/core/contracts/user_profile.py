@@ -67,6 +67,7 @@ class UserProfile:
             "session_outlier": sorted(self._session_outlier),
             "session_mod_count": self._session_mod_count,
             "session_trust_delta": self._session_trust_delta,
+            "last_blueprint": getattr(self, "_last_blueprint", None),
         }
         self.storage_path_obj.write_text(json.dumps(data, indent=2), encoding="utf-8")
         return str(self.storage_path_obj)
@@ -173,6 +174,11 @@ class UserProfile:
     @property
     def session_count(self) -> int:
         return self._current_session
+
+    def save_blueprint_snapshot(self, bp_snapshot: dict) -> None:
+        """Phase 7: persist contract state for cross-session continuity."""
+        self._last_blueprint = bp_snapshot
+        self.save()  # Re-use existing save which now includes _last_blueprint
 
     def snapshot(self) -> dict[str, Any]:
         return {
