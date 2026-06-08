@@ -205,6 +205,25 @@ These are non-negotiable mathematical and architectural contracts derived from 5
 | 44 | **Trust EMA asymmetric by design**: negative trust signals (observed < current) use alpha=0.30; positive signals use alpha=0.08. Trust erodes faster than it builds — matching human psychology (negativity bias). | 500-round test: Trust hit floor, needs slow rebuild path |
 | 45 | **Vibe Test gate before time-dimension work**: PromptGenerator seeds MUST be validated via LLM-as-Judge before adding inertia, momentum, or decay on top. Building temporal smoothing on broken spatial semantics = persistent error. | PLAN3 Vibe Test: 4/4 passed before RelationalInertia |
 
+## V5/V6 Mathematical Control-Surface Invariants (Phase 26-29+)
+
+These invariants govern the four control surfaces that drive the adaptive contract engine. Each has a mathematical formula backing it — no heuristic, no keyword list.
+
+| # | Invariant | Source |
+|---|----------|--------|
+| 46 | **Multiplicative Gating, Never Additive**: penalty from two independent risk sources MUST be multiplied. `penalty = α·f(σ²)·g(e_t)`. Either factor at 0 → entire penalty 0. Additive coupling causes single-factor leakage — high σ² alone lowers Critic standards even when output quality is fine. | V6 Critic Design (Session 66-70) |
+| 47 | **HardTanh, Never Sigmoid**: all control signals MUST use deadzone+ramp+saturation. `g(e_t) = clamp((e_t - 0.55)/0.15, 0, 1)`. Deadzone must be trully "dead" — sigmoid's asymptotic residual (~0.01) leaks noise into the control loop, causing limit-cycle oscillation and integrator windup. | V6 Activation Function Debate |
+| 48 | **Critic Uses Drift-Only f, Not Fused f**: `θ = θ₀ - α·f_drift(d)·g(e)`. Critic MUST NOT use the dual-sensor fused factor `Φ(d,c)`. Lucid suppression (clarity>0.80→min) would blind Critic to semantic-space instability during topic switches. Critic's sensitivity to drift is a feature — the quality bar from round N-1 may not apply to round N's new topic. | V5.3 Planning/Critic Signal Split |
+| 49 | **Planning Uses Dual-Sensor Fused f**: `n = branch_count(Φ(d,c))`. Planning branch count MUST use fused drift⊕clarity. Search width is determined by intent uncertainty — a lucid user (high clarity) doesn't need exploration even during topic switches. | V5.3 Scene 4 Calibration |
+| 50 | **Signal over Schedule**: static heuristics (time-of-day, round count, session length) MUST NOT drive control decisions. All control signals must derive from behavioral data (drift, clarity, e(t), trust). Principle #4. | V5.2 Observer Downgrade |
+| 51 | **Observe, Don't Inject**: semantic observers (SemanticTrustEngine) MUST NOT write to Blueprint. FEEDFORWARD_GAIN=0.0. Observers emit X-Ray only — they inform developers, not control loops. An uncalibrated sensor (false-positive rate unknown) injected into a control loop amplifies noise, not signal. Principle #5. | V5.2 Observer Downgrade |
+| 52 | **Self-Calibrating, Never Hardcoded**: μ and σ for σ² normalization MUST be computed from live pressure history. Absolute thresholds (e.g. `σ² > 0.22`) are architectural debt — they require manual retuning per user. Z-score `(σ² - μ)/σ` auto-drifts with the user's baseline. | V6 Critic Design |
+| 53 | **Saturation Floor = 0.50**: Critic threshold θ MUST never drop below 0.50. Coin-flip-quality decisions have no place in an engine output. θ∈[0.50, 0.75]. Below 0.50 = brain death — the system has abandoned quality entirely. | V6 Critic Design |
+| 54 | **Zero Keywords in Control Loops**: no string matching (`if "算了" in user_text`), no keyword lists (`_SIMPLIFY_CANCEL`), no regex gates in control decisions. All gating must be mathematical signal flow. Keywords are infinite regression — every edge case demands a new keyword. | V5.3 Keyword Gate Excision |
+| 55 | **Engine Must Not Import Observer**: `track_c.py` MUST NOT import from `semantic_trust.py`. `semantic_trust.py` MUST NOT import from `track_c.py`. Only `repl.py` (the orchestrator) may import both. Sensor-actuator decoupling: the sensor doesn't know what it controls, the actuator doesn't know where the signal comes from. | V5.3 Coupling Audit |
+| 56 | **clarity Is a Primitive Float Across Module Boundaries**: inter-module communication of clarity uses `float` only — no dict wrappers, no typed objects, no structural coupling. The only module that interprets clarity's meaning is `compute_dual_sensor_f`. | V5.3 Coupling Audit |
+| 57 | **ThreadPoolExecutor with `with` Statement**: the clarity LLM call's thread pool lifecycle MUST be protected by `with concurrent.futures.ThreadPoolExecutor(...)`. Resource leaks from unclosed thread pools are unacceptable in a long-running REPL. | V5.3 Coupling Fix |
+
 ## Machine Enforcement (Phase 8.0)
 
 Architectural invariants are **machine-enforced**, not just documented. Before every commit, `python -m guardrails check` runs AST-based rules. Violations of severity ERROR block the commit.
@@ -239,4 +258,4 @@ tests/e2e/                            ← End-to-end + negative scenario tests
 - All new code must pass `pytest tests/ -q`
 - New component types need: conformance tests + integration tests + ≥4 negative scenarios
 - If you fix a bug, add a test that would have caught it
-- Current baseline: **107 tests, 0 failures** — do not regress
+- Current baseline: **V5.3 — all unit tests green, zero regressions**
