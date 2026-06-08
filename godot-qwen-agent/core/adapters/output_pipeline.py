@@ -48,6 +48,13 @@ class OutputPipeline:
 
     def __init__(self, bp: object) -> None:
         self._bp = bp  # DynamicBlueprint — read via enforce()
+        # ── V5 Path 3: Execution Constraint Reflex ──
+        # 脊髓反射直接调节输出上限，不经 meta-adapt（皮层）。
+        # 连续截断触发 → 倍率提升 → 截断缓解 → 自动恢复 1.0。
+        self.char_limit_multiplier: float = 1.0
+        self.sentence_limit_multiplier: float = 1.0
+        self._base_char_multiplier: float = 1.0   # 快照基线，用于恢复
+        self._base_sentence_multiplier: float = 1.0
 
     def process(self, raw: str) -> tuple[str, float]:
         """Process raw LLM output through contract-enforced pipeline.
@@ -57,7 +64,9 @@ class OutputPipeline:
         """
         verbose = self._bp.enforce("response_verbose_level") or "HIGH"
         tone = self._bp.enforce("tone_style") or "WARM"
-        max_sent = VERBOSE_SENTENCE_LIMITS.get(verbose, 999)
+        base_sent = VERBOSE_SENTENCE_LIMITS.get(verbose, 999)
+        max_sent = (int(base_sent * self.sentence_limit_multiplier)
+                    if base_sent < 999 else 999)
 
         result = raw
 
@@ -69,7 +78,8 @@ class OutputPipeline:
             result = self._truncate_sentences(result, max_sent)
 
         # ── 2b. Character cap (semantic — finds last sentence boundary) ──
-        max_chars = VERBOSE_CHAR_LIMITS.get(verbose, 0)
+        base_chars = VERBOSE_CHAR_LIMITS.get(verbose, 0)
+        max_chars = int(base_chars * self.char_limit_multiplier) if base_chars > 0 else 0
         if max_chars > 0:
             result = self._truncate_chars(result, max_chars)
 

@@ -1,0 +1,101 @@
+chain_id: v5_path3_execution_reflex
+title: "V5 Path 3 执行约束脊髓反射 — 感知-行动-执行三层闭合"
+created_at: "2026-06-08"
+status: active
+context: |
+  Session 51 暴露了 V5 感知-行动闭环的致命缺口：用户反复要求"越长越好""全部一次性给我"，
+  但输出管道每轮截断 60-65%（961→215, 872→163, 978→234 字符）。V5 的 tracking_error
+  正确感知了用户需求（路由到 Track B 复杂任务），meta_adapt 正常运转（阈值稳定），
+  但输出管道在 V5 不知情的情况下阉割了所有回复。
+
+  尸检发现三层断裂：
+  1. 命令分类器把"全部一次性给我"映射到 MEDIUM（400 字符上限）
+  2. 挫折检测通过 cooldown guard 被阻止覆盖显式指令（正确但不够）
+  3. 输出管道截断后，V5 完全不知道——tracking_error 只度量用户输入行为，不度量系统输出行为
+
+  三个手术切口修复后（Session 52），截断问题依然存在：
+  tracking_err 从 0.500 升至 0.566，但 Path 1（e(t) > 0.70 × 5 轮）从未触发。
+  根因：Path 1 是为"环境不确定性持续升高"设计的慢性疼痛检测器，
+  但执行截断是每轮独立发生的急性疼痛——用慢性阈值卡急性信号，系统一直在痛但永远不够痛。
+
+decision: |
+  引入 Path 3：Execution Constraint Reflex（脊髓反射）。
+
+  三条控制面完整分层：
+  - Path 1（皮层）: e(t) 持续 >0.70 ×5 轮 → 策略选择 — 慢（会话级），换思考方式
+  - Path 2（边缘）: σ² > μ+2σ ×3 轮 → 搜索宽度 — 中（任务级），扩大感知范围
+  - Path 3（脊髓）: 截断率 >50% ×2 轮 → 输出容量 — 快（轮次级），松开物理束缚
+
+  核心设计原则：
+  - Path 3 不经 meta_adapt（皮层），直接调节 OutputPipeline 的 char/sentence 倍率
+  - 2 轮连续截断 >50% → limits ×1.5；持续 → 最高 ×2.0（硬上限防雪崩）
+  - 截断率回落 → 立即恢复默认倍率（不快照持久化）
+  - 与 Path 1/2 完全正交——三条路径分别控制策略选择、搜索宽度、输出容量
+
+rationale: |
+  为什么必须是独立路径而不是增强 Path 1：
+
+  1. 响应时间尺度不同：Path 1 需要 5 轮才能触发，但截断是即时物理约束——
+     等 5 轮意味着用户已经忍受了 5 轮阉割回复。脊髓反射不需要意识决策。
+
+  2. 控制面不同：Path 1 降低 selection threshold（放宽路由门禁），
+     但路由门禁不影响输出管道的字符/句子上限。松绑管道需要直接修改管道参数。
+
+  3. 信号性质不同：e(t) 是合成信号（用户行为 → 语义分类 → EMA），
+     截断率是物理事实（orig_len → out_len 的比率）。后者更可靠、更低延迟。
+
+  4. 恢复逻辑不同：Path 1 的恢复走 EMA（α=0.05），缓慢回到默认阈值；
+     Path 3 的恢复是瞬时的——截断率一低于阈值就立即恢复默认倍率。
+     因为管道扩容是"临时松绑"，不应产生滞后效应。
+
+  安全约束：
+  - MAX_EXEC_REFLEX_MULT = 2.0：防止截断-扩容-再截断的死循环
+  - 倍率 >2.0 说明问题不在管道容量而在生成逻辑——此时应由 Path 1 接管
+  - /new 命令重置所有脊髓反射状态
+
+alternatives:
+  - "降低 Path 1 的 persistence 从 5 到 2"——被否，因为 Path 1 控制的是策略选择而非输出容量，
+    降低 persistence 会导致策略层面过度敏感
+  - "在 frustration 检测中直接提升 verbose 到 HIGH"——被否，因为挫折检测和内容需求是正交维度，
+    用户可能沮丧但不需要更多文字
+  - "让 LLM 自己决定输出长度"——被否，PLAN7 的 Environmental Physics 原则要求
+    输出约束是代码级的，不属于 LLM 决策域
+  - "不做 Path 3，等 Path 1 自然积累"——被 Session 52 数据否决，
+    6 轮中 tracking_err 从 0.500→0.566，从未触发 Path 1，用户持续承受 61-66% 截断
+
+evidence:
+  - Session 51: 7 轮对话，每轮截断 60-78%，用户 3 次显式要求更多内容，系统无响应
+  - Session 52: 6 轮对话，三个切口生效但截断率未下降（61-66%），e(t) 升至 0.566 仍不够触发 Path 1
+  - tests/unit/test_v5_adaptive_tracking.py: 25/25 通过（零回归）
+  - tests/unit/test_v5_selection_pressure.py: 14/14 通过（零回归）
+  - tests/unit/test_v5_contract_auditor.py: 15/15 通过（零回归）
+  - core/adapters/output_pipeline.py: +8 行（char_limit_multiplier + sentence_limit_multiplier）
+  - core/repl.py: +35 行（脊髓反射状态机 + /v5-status Path 3 展示 + /new 重置）
+
+future_guidance: |
+  1. 观察 Session 53+ 中 EXEC_REFLEX 的实际触发频率。如果 >30% 的轮次触发脊髓反射，
+     说明基础管道限制设置过低——应提升 VERBOSE_CHAR_LIMITS 的默认值而非依赖反射。
+  2. 脊髓反射激活时，Path 1 的 e(t) 补偿应自动降低（因为截断率下降 → 痛感减轻）。
+     当前设计中这是自然发生的（截断率降低 → boost 减小），但需在真实会话中验证。
+  3. 如果出现"截断率未降但 EXEC_REFLEX 未触发"的情况，检查 truncation_ratio 计算
+     是否在 output_pipeline.process() 之后正确执行。
+  4. 倍率恢复后的"再截断"循环是需要警惕的边缘情况——如果用户在 limits ×2.0 后
+     仍然触发截断 >50%，说明问题不在管道而在生成逻辑（LLM 输出过长），
+     此时应让 Path 1 接管而非继续扩容。
+
+anti_patterns:
+  - 严禁 Path 3 的倍率跨会话持久化——每次 /new 必须重置为 1.0
+  - 严禁将脊髓反射的激活条件与 Path 1/2 的触发计数混合——三条路径独立计数
+  - 严禁在截断率 <50% 时维持倍率——"临时松绑"不是"永久扩容"
+  - 严禁倍率超过 2.0——超过此值说明管道容量不是瓶颈
+
+tags:
+  - v5
+  - path3
+  - execution_reflex
+  - spinal_reflex
+  - output_pipeline
+  - truncation
+  - feedback_loop
+  - control_surface
+  - layered_adaptation

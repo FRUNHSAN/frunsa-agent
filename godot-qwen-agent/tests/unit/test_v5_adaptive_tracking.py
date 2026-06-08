@@ -297,7 +297,7 @@ class TestMetaAdaptTrigger:
         trigger = MetaAdaptTrigger(
             error_threshold=0.70,
             persistence=2,
-            recovery_rate=1.05,
+            recovery_alpha=0.05,
             recovery_ratio=0.5,
             cooldown=0,  # No cooldown for clean test
         )

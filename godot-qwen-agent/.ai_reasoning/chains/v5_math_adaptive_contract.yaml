@@ -51,12 +51,26 @@ alternatives:
 evidence:
   - BRAINSTORM_TRUE_ADAPTIVE.md: 完整 5 次研究推导，含所有数学公式
   - tests/unit/test_v5_adaptive_tracking.py: 25 个单元测试，全部通过
+  - tests/unit/test_v5_selection_pressure.py: 14 个单元测试，全部通过
+  - tests/unit/test_v5_contract_auditor.py: 15 个单元测试，全部通过
   - core/adapters/wasserstein_proxy.py: 108 行，含 KR 对偶校准
   - core/adapters/tracking_error.py: 177 行，含自适应增益调度
-  - core/adapters/meta_adapt_trigger.py: 113 行，含退火保护
-  - 全量测试：510 通过（3 个预存失败），零新回归
+  - core/adapters/meta_adapt_trigger.py: 113 行，含退火保护 + 双路径触发
+  - core/adapters/selection_pressure_accumulator.py: 229 行，信任 EMA + 贝叶斯方差
+  - core/adapters/output_pipeline.py: +8 行，Path 3 动态倍率接口
+  - core/repl.py: +80 行，V5 感知-行动-执行三层闭环 + /v5-status
+  - Session 51-52: 真实交互验证，发现并修复执行层反馈缺口
+  - 全量单元测试：全绿，零新回归
 
 future_guidance: |
+  0. V5 完整控制面（详见 v5_path3_execution_reflex + v5_binary_bangbang_router）：
+     Path 3（脊髓）: 截断率 >50% ×2 → 输出容量 — 物理层，0 轮延迟
+     路由（快回路）: e(t)↑×2 + e>0.55 → A/C 二元 Bang-Bang — 资源层，2-3 轮
+     Path 2（边缘）: σ² > μ+2σ ×3 → 搜索宽度 — 任务层，3 轮（桩）
+     Path 1（皮层）: route==C + e(t)>0.70 ×5 → 选择阈值 — 认知层，5 轮
+     路由为二元 Bang-Bang 控制器，Pontryagin 最大值原理证明中间态（Track B）非最优。
+     Track B 已切除（硬编码 3 步模板 + 字符计数 = 假闭环，图论不含环）。
+
   1. 选择阈值 current_sel 当前在 REPL 中使用 meta_adapt.default_threshold，
      尚未与实际的工具选择/内容过滤逻辑耦合。下一步应该在 response selection
      时实际使用这个动态阈值。

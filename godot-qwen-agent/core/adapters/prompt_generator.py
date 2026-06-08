@@ -11,7 +11,7 @@ in LOW_ENERGY mode." The adaptation is implicit, not explicit.
 
 from __future__ import annotations
 
-from core.adapters.relational_inertia import RelationalHistory
+from core.adapters.selection_pressure_accumulator import SelectionPressureAccumulator
 from core.adapters.relational_state_aggregator import RelationalContext
 
 
@@ -27,7 +27,7 @@ class PromptGenerator:
     @staticmethod
     def grow(
         ctx: RelationalContext,
-        history: RelationalHistory | None = None,
+        history: SelectionPressureAccumulator | None = None,
     ) -> str:
         """Generate a relational seed from the current context.
 
@@ -35,17 +35,16 @@ class PromptGenerator:
         instructions like 'use short responses' — instead it describes
         the relational state, letting the LLM adapt naturally.
 
-        PLAN4: if RelationalHistory has high variance on any core
-        dimension, returns conservative fallback seed — the Agent
-        is 'confused' and should play it safe.
+        V5: if SelectionPressureAccumulator has high variance on trust,
+        returns conservative fallback seed — the selection pressure
+        is unstable and the Agent should play it safe.
         """
 
-        # ── PLAN4: Stage Directions (micro-expressions from variance) ──
+        # ── V5: Stage Directions (micro-expressions from trust variance) ──
         stage = ""
         if history is not None:
-            evar = history.get_variance("energy_strength")
             tvar = history.get_variance("trust")
-            stage = PromptGenerator._stage_directions(evar, tvar)
+            stage = PromptGenerator._stage_directions(tvar)
 
         # ── PLAN4: High-variance conservative fallback ──
         if history is not None and history.is_uncertain(threshold=0.5):
@@ -118,38 +117,39 @@ class PromptGenerator:
     # ── Stage Directions (PLAN4: variance -> performance guidance) ─
 
     @staticmethod
-    def _stage_directions(energy_var: float, trust_var: float) -> str:
-        """Translate Bayesian variances into LLM performance guidance.
+    def _stage_directions(trust_var: float) -> str:
+        """V5: 信任方差 → 信息密度/探索-利用权衡。
 
-        These are 'micro-expressions' — subtle stage directions that
-        tell the LLM how to modulate its tone based on relational state.
+        选择压力累积器的方差 = 环境可预测性。
+        低方差 → 用户行为模式稳定 → 系统可利用已知策略（高信息密度）
+        高方差 → 用户行为波动大 → 系统必须探索（增加澄清、减少假设）
+
+        ❌ 旧范式："不要过度热情""表达对混乱的理解" — 情感表达
+        ✅ V5：信息密度、假设性陈述控制、工具调用保守度 — 行为策略
         """
-        avg_var = (energy_var + trust_var) / 2.0
-
-        if avg_var < 0.05:
-            # Confident: user is predictable, relationship is stable
+        if trust_var < 0.05:
+            # 稳定环境：高信息密度，可利用已知模式
             return (
-                "【表演指导】直接、自信地给出答案。无需多余寒暄或确认。"
-                "你对当前状态有很高的把握。"
+                "【策略指导】环境稳定。直接给出结论和深层分析。"
+                "可以做出合理假设，无需反复确认。信息密度可以高。"
             )
-        elif avg_var < 0.15:
-            # Cautious openness: slight uncertainty, but manageable
+        elif trust_var < 0.15:
+            # 轻微不确定：中等信息密度，探索性轻触
             return (
-                "【表演指导】保持专业和温和。在给出答案后，"
-                "可以轻微加一句确认性话语（如'这样解释是否清楚？'），"
-                "以试探用户反馈。不要过度热情，也不要过度道歉。"
+                "【策略指导】环境有轻微波动。给出答案后追加一句澄清邀请"
+                "（如'这是否覆盖了你关心的方面？'），保持信息密度中等。"
             )
-        elif avg_var < 0.25:
-            # Alert but functional: moderate uncertainty
+        elif trust_var < 0.25:
+            # 中度不确定：降低假设性陈述，增加数据支撑
             return (
-                "【表演指导】语气需要谨慎。先承认问题的复杂性，"
-                "然后给出初步建议。保持开放态度，邀请用户纠正你的理解。"
-                "不要表现得过于确定。"
+                "【策略指导】环境不稳定。避免做出未经数据支撑的假设。"
+                "减少信息密度，拆分复杂回答为小段。主动邀请用户纠偏。"
+                "优先使用可验证的事实陈述，而非推测。"
             )
         else:
-            # Highly uncertain: recent volatility, play it safe
+            # 高度不确定：探索优先，最大化澄清，最小化断言
             return (
-                "【表演指导】语气必须极其谨慎。先表达对当前混乱状态的"
-                "理解（如'我注意到刚才的对话有些跳跃'），然后给出"
-                "最基础的回应。强烈建议邀请用户指明方向。"
+                "【策略指导】环境高度不可预测。以澄清为先——先确认用户意图，"
+                "再给出回答。只做最小化的事实断言。将工具调用限制在最安全的"
+                "操作上。强烈建议向用户请求方向确认。"
             )

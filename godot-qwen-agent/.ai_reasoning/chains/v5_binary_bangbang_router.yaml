@@ -1,0 +1,98 @@
+chain_id: v5_binary_bangbang_router
+title: "V5 二元 Bang-Bang 路由 — 从嵌入分类器到 Pontryagin 最优控制"
+created_at: "2026-06-08"
+status: active
+context: |
+  Phase B 的 embedding 路由分类器经过四轮迭代（中心平均→Top-3→strip→继承）
+  无法收敛。根因诊断：embedding 和 LLM 采样同属变异生成层（Variation），
+  路由决策属于选择层（Selection）——用变异层工具做选择层决策是本体论错误。
+
+  进一步审查发现 Track B 是"假结构"：Planning 是对任何输入返回相同 3 步
+  的硬编码模板，Critic 是 `total_chars < 50` 的字符计数。没有 Critic→Planning
+  的反馈边——图论上不含环，动力学上等价于 Track A。
+
+decision: |
+  1. 删除 embedding 路由分类器（~250 行）和 Track B（~90 行假管线）。
+  2. 路由从"前馈分类器"重构为"二元 Bang-Bang 状态反馈控制器"。
+  3. Pontryagin 最大值原理证明二元是最优：内部反馈的存在是布尔量，
+     半闭环不存在。控制代价对控制幅度凸 → 最优解在极端值。
+
+rationale: |
+  ### Pontryagin 最大值原理的工程映射
+
+  控制 u(t) ∈ {A: 开环, C: 闭环}。代价 J = Σ[e(t) + λ·cost(u)]。
+
+  Track B 的成本是 A 的 4 倍，但信息增益≈A（硬编码模板不提供自适应 Planning）。
+  ROI 曲线从 (1,1) 跳过 (4,1.2) 到 (N,N)，中间点被两端帕累托支配。
+
+  ### 施密特触发器：二元开关的迟滞
+
+  升级：e(t) 连续 2 轮上升 + e(t) > 0.55 → A→C
+  降级：e(t) 连续 3 轮下降 → C→A
+  非对称迟滞防止高频切换（Chattering）。
+
+  ### 硬覆盖规则（优先级链）
+
+  社交信号 → trust_crisis → Path 2 escalated → Path 1 relaxed → 冷启动 → 稳态
+
+  ### 冷启动 Minimax
+
+  session ≤ 2 + len>10 或结构化标点 → C（err-C 成本有界，err-A 成本无界）
+
+  ### 控制器最终形态（~40 行）
+
+  ```
+  u(t) = π(e(t), σ²(t), trust(t))
+
+  if social or trust < 0.10:          A
+  if escalated or is_relaxed:         A
+  if cold_start + len > 10:           C
+  if e_inc ≥ 2 and e > 0.55:         C  (Schmitt upgrade)
+  if e_dec ≥ 3:                       A  (Schmitt downgrade)
+  if σ² > 0.3:                        A  (variance safety)
+  else:                               hold
+  ```
+
+alternatives:
+  - "修复 Track B 使其名副其实" —— 被否。半闭环在数学上不存在，
+    修 B 只会产生更难维护的 if-else 补丁堆。
+  - "保留三元控制器" —— 被否。Pontryagin 证明中间值永远非最优。
+  - "加意图探针到 Track C" —— 推迟到 V5.1。当前版本应作为纯净
+    Bang-Bang 基线封版，避免探针税、双 Planner 竞争、上下文盲区。
+
+evidence:
+  - Session 51-58: 四轮 embedding 路由迭代，从未正确分类"越长越好"→complex
+  - Session 59-60: 二元控制器首次验证，冷启动和社交信号正确
+  - Session 61: 二元验证通过。R2 首次触发 C (coldstart_probe)。全程零 Track B。
+  - 全量单元测试 + 54 V5 测试：零回归
+  - 删除代码：~340 行（250 embedding 分类器 + 90 Track B）
+  - 新增代码：~40 行状态反馈控制器
+
+future_guidance: |
+  1. 成本悬崖已知：Track C 对浅层请求（如"字多一点"）仍跑全 DAG，
+     耗时 50-75s。V5.1 应在 Planning 阶段引入复杂度路由：
+     DIRECT_GENERATION vs FULL_DAG，让 C 内部成本连续化。
+     不加前置探针——在 Planning Prompt 中嵌入目标函数 max[Quality-λ·Steps]。
+  2. trust 长期偏低（0.09-0.14），频繁触发 trust_crisis 强制 A。
+     需检查 trust EMA 的衰减机制是否合理。
+  3. e(t) 信号范围偏窄（0.50-0.58），大部分输入不触发 compute_error_signal。
+     需扩展 GROWTH_SIGNAL_KEYWORDS 和 TECH_TERMS 覆盖更多领域。
+  4. 施密特迟滞参数（升 2 降 3，阈值 0.55）基于 Session 52-61 数据手工标定，
+     需更多会话数据确认最优性。
+
+anti_patterns:
+  - 严禁复活 Track B（硬编码管线）
+  - 严禁在路由层重加 embedding 分类器
+  - 严禁在 C 内部加前置意图探针（陷阱：探针税、双 Planner、上下文盲区）
+  - 严禁施密特迟滞对称化（升级必须比降级更严格）
+
+tags:
+  - v5
+  - binary_routing
+  - bang_bang_control
+  - pontryagin
+  - schmitt_trigger
+  - track_excision
+  - cost_cliff
+  - open_loop
+  - closed_loop

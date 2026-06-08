@@ -1,9 +1,9 @@
 # PLAN8 — 数学自适应契约：从伪自适应到保结构降阶
 
-**日期:** 2026-06-07
-**状态:** Phase 1 完成（3 模块落地 + 25 测试）
+**日期:** 2026-06-08
+**状态:** V5.0 封版 — Bang-Bang 基线（二元路由 + 三条控制面 + 54 测试）
 **触发:** 用户质疑——"自适应契约也不是完全自适应，伪自适应"
-**基线:** df89d59（V4.3 速度优化 + 命令分类器修复）
+**基线:** v5.0-bang-bang-baseline
 
 ---
 
@@ -54,9 +54,84 @@ LLM 擅长前者（概率采样 = 变异），但被错误地用于后者（自�
 2. **自适应增益调度** — EMA α = exp(-interval/tau)，防相位滞后
 3. **退火保护** — MIN_THRESHOLD = 0.30，COOLDOWN = 10 轮，防脑死亡和震荡
 
-### Phase 2 — 待规划
+### Phase 1.5 — 完成（2026-06-08）：三条控制面 + 脊髓反射
 
-1. **WassersteinProxy 校准** — 在启动时跑基准 QA 对，计算 d_min/d_max
+Session 51-52 的真实交互暴露了 Phase 1 的致命缺口：感知-行动闭环（e(t) + σ² → meta_adapt）
+正常运转，但输出管道在 V5 不知情的情况下截断了 60-65% 的 LLM 输出。
+**V5 知道用户要什么，但旧系统的输出管道劫持了执行层。**
+
+修复分两阶段：
+
+**阶段 A — 三切口手术（Session 51 尸检 → 立即修复）**：
+
+| 切口 | 改动 | 效果 |
+|------|------|------|
+| 语义精度 | 命令分类器加"全部一次性""越长越好"锚点 | "全部一次性给我" 匹配 HIGH 而非 MEDIUM |
+| 执行反馈 | 截断率 >30% → e(t) +min(0.15, ratio×0.2) | V5 感知到输出被阉割 |
+| 认知标记 | 截断率 >50% + 非 Path 2 → `[execution_constrained]` | 用户看到系统的执行约束 |
+
+**阶段 B — 脊髓反射（Path 3）**：
+
+Session 52 验证了三切口有效但不够——截断率仍 61-66%。
+Path 1（e(t) > 0.70 × 5 轮）从未触发，因为它是为"环境不确定性持续升高"设计的
+慢性疼痛检测器，但执行截断是每轮独立发生的急性疼痛。
+
+**三条控制面正式确立**：
+
+| 路径 | 触发信号 | 控制面 | 响应尺度 | 类比 |
+|------|---------|--------|---------|------|
+| Path 1 | e(t) >0.70 ×5 轮 | 策略选择 | 慢（会话级） | 皮层：换一种思考方式 |
+| Path 2 | σ² > μ+2σ ×3 轮 | 搜索宽度 | 中（任务级） | 边缘系统：扩大感知范围 |
+| Path 3 | 截断率 >50% ×2 轮 | 输出容量 | 快（轮次级） | 脊髓：松开物理束缚 |
+
+Path 3 的核心设计：
+- 不经 meta_adapt（皮层），直接调节 OutputPipeline 的 char/sentence 倍率
+- 倍率公式: streak=2→1.5x, streak=3→2.0x(capped)，硬上限 2.0x 防雪崩
+- 截断率回落 → 立即恢复默认倍率（不是 EMA 慢恢复——脊髓不是皮层）
+- `/new` 命令重置所有脊髓反射状态
+
+**模块汇总（Phase 1 + 1.5）**：
+
+| 模块 | 文件 | 行数 | 数学对应 | 测试 |
+|------|------|------|---------|------|
+| WassersteinProxy | `core/adapters/wasserstein_proxy.py` | 108 | W_1 的 KR 对偶上界 + 对比校准 | 5 |
+| TrackingErrorEstimator | `core/adapters/tracking_error.py` | 177 | e(t) 的噪声观测 + 自适应增益调度 | 11 |
+| MetaAdaptTrigger | `core/adapters/meta_adapt_trigger.py` | 212 | 双路径元适应触发 + 退火保护 | 9 |
+| SelectionPressureAccumulator | `core/adapters/selection_pressure_accumulator.py` | 229 | 信任 EMA + 贝叶斯方差 + 基线漂移 | 14 |
+| OutputPipeline (Path 3) | `core/adapters/output_pipeline.py` | +8 | 脊髓反射的动态倍率接口 | — |
+| REPL (V5 闭环) | `core/repl.py` | +115 | 感知-行动-执行三层闭环 + X-Ray + /v5-status | 15 |
+
+**总计**：~850 行 V5 代码。54 新测试全绿。全量单元测试零回归。
+
+### Phase B — 完成（2026-06-08）：二元 Bang-Bang 路由
+
+**Session 51-61，从 embedding 分类器到 Pontryagin 最优控制。**
+
+四轮 embedding 路由迭代失败后，诊断出本体论错误：embedding 属变异层，路由属选择层。
+Pontryagin 最大值原理证明"内部反馈的存在是布尔量"——半闭环不存在，
+Track B 的硬编码 3 步模板 + 字符计数在动力学上等价于 Track A。
+
+**切除**：
+- 删除 embedding 路由分类器（~250 行：锚点、Top-3、strip、继承）
+- 删除 Track B 假管线（~90 行：`_plan_task`, `_critique_results`, `_track_b_agentic`）
+
+**重建**：
+- ~40 行二元 Bang-Bang 控制器：u(t) = π(e(t), σ², trust) → {A, C}
+- 施密特迟滞：升级 2 轮 e(t)↑+e>0.55，降级 3 轮 e(t)↓
+- 冷启动 Minimax：len>10 或结构化标点 → C
+- 硬覆盖链：social → trust_crisis → escalated → relaxed → coldstart → steady-state
+
+**Session 61 验证**：首次 C 触发 (coldstart_probe)，全程零 Track B，A/C 切换干净。
+
+**已知问题 — 成本悬崖**：
+Track C 对浅层请求（"字多一点"）仍跑全 DAG（50-75s）。
+V5.1 应在 Planning 阶段引入 DIRECT_GENERATION vs FULL_DAG 复杂度路由，
+不加前置探针（陷阱：探针税、双 Planner 竞争、上下文盲区）。
+
+### Phase C — 待规划（V5.1+）
+
+1. **Track C 内部弹性** — Planning 阶段复杂度路由 DIRECT_GENERATION/FULL_DAG
+2. **WassersteinProxy 校准** — 在启动时跑基准 QA 对，计算 d_min/d_max
 2. **选择阈值耦合** — 将 meta_adapt 的动态阈值注入实际响应选择逻辑
 3. **需求层级识别** — LLM 输出 P(tool|input)、P(relational|input)、P(growth|input) 的概率分布，保持未压缩状态
 4. **层级切换** — 从"阈值降低"的代理方案升级为显式的流形切换（工具/关系/成长）

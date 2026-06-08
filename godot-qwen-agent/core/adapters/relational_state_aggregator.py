@@ -17,7 +17,7 @@ from typing import List
 from core.contracts.composition import ContractHealthReport, ContractViolation
 from core.contracts.event_sink import EventSink
 from core.contracts.interaction_repository import InteractionRepository
-from core.adapters.relational_inertia import RelationalHistory
+from core.adapters.selection_pressure_accumulator import SelectionPressureAccumulator
 from core.contracts.relational_field import RelationalField
 
 
@@ -69,7 +69,7 @@ class RelationalStateAggregator:
         sink: EventSink,
         memory: InteractionRepository,
         blueprint_fingerprint: str,
-        history: RelationalHistory | None = None,
+        history: SelectionPressureAccumulator | None = None,
     ) -> RelationalContext:
         """Aggregate all relational data into a single context."""
 
@@ -127,13 +127,17 @@ class RelationalStateAggregator:
         if severity == "critical":
             tone = "urgent"
 
-        # ── Relational Inertia (PLAN3/4) ──
+        # ── V5: 选择压力累积（仅信任 EMA）──
+        # V5 范式声明：
+        #   环境状态由选择压力及其不确定性完全表征。
+        #   能量/疲劳/语气维度已被 tracking_error.py 的自适应增益调度
+        #   在数学上替代，不再需要独立传递。
+        #   4→1 不是信息丢失，是维度坍缩——从"猜四个内部情绪"坍缩为
+        #   "量一个可观测行为差距"。
         if history is not None:
-            energy, urgency, trust, tone = history.smooth(
-                energy, urgency, trust, tone,
-            )
-            history.record(energy, urgency, trust, tone)
-            # Re-derive rhythm from smoothed values
+            trust = history.smooth_trust(trust)
+            history.record_trust(trust)
+            # Re-derive rhythm from raw energy/urgency (no inertia smoothing)
             rhythm = "normal"
             if energy == "low":
                 rhythm = "fatigued"

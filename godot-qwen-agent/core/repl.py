@@ -128,7 +128,72 @@ class Repl:
         self.prev_response_len = 0
         self.prev_signal: dict = {"dimension": None, "score": 0.0}
         self._last_interaction_time: float | None = None  # V5: tracking error
+        # ── V5 Phase B: State-Feedback Route Controller ──
+        self._route_track: str = "A"
+        self._e_inc_streak: int = 0
+        self._e_dec_streak: int = 0
+        self._prev_e_t: float = 0.5
+        # ── V5 Path 3: Execution Constraint Reflex ──
+        self._exec_truncation_streak: int = 0
+        self._exec_reflex_active: bool = False
         # Embedding model loads lazily on first _route_task() or _classify_command() call
+
+    # ── V5 Status dashboard ──
+
+    def _print_v5_status(self) -> None:
+        """Machine-readable + human-scannable V5 internal state."""
+        import statistics as _stats
+        acc = self.c.selection_pressure
+        meta = self.c.meta_adapt
+        te = self.c.tracking_error
+
+        trust_var = acc.get_variance("trust")
+        ph = list(meta._pressure_history)
+        if len(ph) >= 4:
+            mu = _stats.mean(ph)
+            sigma = _stats.stdev(ph) if len(ph) >= 2 else 0.0
+            dyn_thresh = mu + meta._pressure_sigma * sigma
+            dist = dyn_thresh - trust_var
+        else:
+            mu, sigma, dyn_thresh, dist = 0.0, 0.0, 1.0, float("inf")
+
+        sid = self.c.profile.session_count
+        print(f"\\n  [v5-status] session={sid} round={self.round_count}")
+
+        print(f"  -- Core --")
+        print(f"  trust_ema      = {acc.trust_ema:.3f}")
+        print(f"  variance       = {trust_var:.4f}  "
+              f"(mu={mu:.4f} sigma={sigma:.4f} -> mu+2sig={dyn_thresh:.4f}  "
+              f"dist={dist:+.4f})")
+        print(f"  tracking_err   = {te.value:.3f}  (samples={te.samples})")
+
+        print(f"  -- Meta-Adapt --")
+        print(f"  threshold      = {meta.default_threshold:.3f}")
+        print(f"  path1_count    = {meta.trigger_count - meta.pressure_trigger_count}")
+        print(f"  path2_count    = {meta.pressure_trigger_count}")
+        print(f"  relaxed        = {meta.is_relaxed}")
+        print(f"  escalated      = {meta.escalated}")
+
+        print(f"  -- Spinal (Path 3) --")
+        print(f"  trunc_streak   = {self._exec_truncation_streak}  (trigger >=2)")
+        print(f"  reflex_active  = {self._exec_reflex_active}")
+        pl = self.c.output_pipeline
+        print(f"  char_mult      = {pl.char_limit_multiplier:.1f}x")
+        print(f"  sent_mult      = {pl.sentence_limit_multiplier:.1f}x")
+
+        print(f"  -- Cognition --")
+        print(f"  cognition_mark = {meta.cognition if meta.cognition else 'NONE'}")
+
+        print(f"  -- Route Controller (Phase B) --")
+        print(f"  route_track    = {self._route_track}")
+        print(f"  e_inc_streak   = {self._e_inc_streak}")
+        print(f"  e_dec_streak   = {self._e_dec_streak}")
+
+        print(f"  -- e(t) History (last 5) --")
+        eh = list(meta._error_history)
+        if eh:
+            bars = "".join("BLOCK" if e > meta.error_threshold else "_" for e in eh)
+            print(f"  {bars}  BLOCK=>{meta.error_threshold:.2f}")
 
     # ── Prompt construction (delegates to adapters) ──
 
@@ -213,90 +278,105 @@ class Repl:
             return ("conversational_initiative", "PROACTIVE")
         return None
 
-    # ── V4.1 Phase 3: Track A/B/C Router ──
-
-    # Cached route anchors — computed once at init
-    _route_anchors: dict[str, list[str]] = {}
-    _route_centers: dict | None = None  # {track_label: numpy vector}
-
-    @classmethod
-    def _init_route_classifier(cls) -> None:
-        """Pre-load embedding model and cache route anchors (暗礁 3: cold start).
-
-        Reuses the same SentenceTransformer instance from _get_command_model()
-        to avoid loading a second copy into memory.
-        """
-        if cls._route_centers is not None:
-            return
-        import numpy as np
-        m, _, _ = _get_command_model()  # Reuse existing model
-        anchors = {
-            # "C" anchors: complex, multi-step, engine-worthy tasks
-            "C": [
-                "帮我准备面试", "写一份方案", "深度调研", "全面分析并给出策略",
-                "帮我设计架构", "对比多个方案并推荐", "模拟答辩",
-            ],
-            # "B" anchors: moderate complexity, static 3-step sufficient
-            "B": [
-                "分析优缺点", "做个对比", "解释原理", "总结要点",
-            ],
-        }
-        centers = {}
-        for label, sentences in anchors.items():
-            centers[label] = np.mean(m.encode(sentences), axis=0)
-        cls._route_centers = centers
+    # ═══════════════════════════════════════════════════════════════════
+    # V5 Phase B: State-Feedback Route Controller
+    #
+    # u(t) = pi(e(t), sigma2(t), trust(t)) -> {A, B, C}
+    #
+    # Principle of Exhausted Capacity (Cap(Route=C) interlock):
+    #   Path 1 only unlocks when route == C. Lower standards only after
+    #   exhausting processing capacity.
+    #
+    # Schmitt Trigger (asymmetric hysteresis):
+    #   Upgrade: 2 consecutive e(t) increases + e(t) > 0.55
+    #   Downgrade: 3 consecutive e(t) decreases
+    #
+    # Cold-start Minimax: err-C cost bounded, err-A cost unbounded.
+    #   sigma2 low-SNR at cold start -> use user effort as intent proxy.
+    #
+    # Constitutional: Path 3 (spinal) untouchable; Path 1/2 read-only.
 
     @staticmethod
-    def _route_task(text: str) -> str:
-        """Embedding-based router: returns 'A', 'B', or 'C'.
+    def _compute_confidence(e_t, trust_var, trust):
+        """Synthetic confidence for /v5-status display. Not used in routing."""
+        norm_var = min(trust_var / 0.5, 1.0)
+        penalty = 0.4 * e_t + 0.3 * norm_var + 0.3 * (1.0 - trust)
+        conf = max(0.05, 1.0 - penalty)
+        if conf > 0.70:    return "confident", conf
+        elif conf > 0.40:  return "cautious", conf
+        else:              return "uncertain", conf
 
-        Thresholds calibrated from natural gaps in anchor similarity distribution.
-        Tier 1 ambiguity → B (safer than falling to A).
-        """
-        try:
-            return Repl._route_task_embedding(text)
-        except Exception:
-            return Repl._route_task_fallback(text)
+    def _route_controller(self, e_t, trust_var, trust, user_text):
+        """State-feedback route controller. Returns (track_label, reason)."""
+        t = user_text.strip()
+        meta = self.c.meta_adapt
 
-    @staticmethod
-    def _route_task_embedding(text: str) -> str:
-        import os, numpy as np
-        os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
-        # Ensure route centers are computed
-        if Repl._route_centers is None:
-            Repl._init_route_classifier()
-        m, _, _ = _get_command_model()
-        centers = Repl._route_centers
-        emb = m.encode([text])[0]  # encode expects list, return first vector
-        scores = {}
-        for label, center in centers.items():
-            scores[label] = float(np.dot(emb, center) / (
-                np.linalg.norm(emb) * np.linalg.norm(center) + 1e-8
-            ))
-        # Tier decision: highest score wins, with minimum threshold
-        best = max(scores, key=scores.get)
-        best_score = scores[best]
+        # Keep e(t) baseline fresh regardless of overrides (prevents phantom
+        # trend accumulation when trust_crisis overrides suppress routing).
+        if e_t != self._prev_e_t:
+            if e_t > self._prev_e_t:
+                self._e_inc_streak += 1
+                self._e_dec_streak = 0
+            else:
+                self._e_dec_streak += 1
+                self._e_inc_streak = 0
+        self._prev_e_t = e_t
 
-        if best == "C" and best_score > 0.45:
-            return "C"
-        if best == "B" and best_score > 0.40:
-            return "B"
-        # Fuzzy: close to B/C boundary → B (safer than A)
-        if best_score > 0.30:
-            return "B"
-        return "A"
+        # 0. Social signals -> A
+        # Chinese farewells like "好的谢谢，拜拜" can be 7+ chars.
+        # Use more generous length bound + known social keywords.
+        socials = ("拜拜","再见","bye","你好","晚安","谢谢","好的","嗯","哦","行","ok","hi","嗨","哈喽")
+        if len(t) <= 10 and any(w in t for w in socials):
+            return "A", "social"
 
-    @staticmethod
-    def _route_task_fallback(text: str) -> str:
-        """Keyword fallback when embedding model is unavailable."""
-        markers_c = ["面试", "答辩", "方案", "策略", "架构", "深度", "全面"]
-        markers_b = ["分析", "比较", "对比", "原理", "优缺点", "为什么"]
-        if any(m in text for m in markers_c):
-            return "C"
-        if any(m in text for m in markers_b):
-            return "B"
-        return "A"
+        # 1. Trust crisis -> A (reset trend on entry — stale signals during crisis)
+        if trust < 0.10:
+            self._e_inc_streak = 0
+            self._e_dec_streak = 0
+            return "A", "trust_crisis"
 
+        # 2. Path 2 escalated -> force A (environment too unstable for engine)
+        if meta.escalated:
+            self._route_track = "A"
+            return "A", "path2_escalated"
+
+        # 3. Path 1 relaxed -> force A (Principle of Exhausted Capacity)
+        #    C has already been tried and failed. Fall back to direct.
+        if meta.is_relaxed:
+            self._route_track = "A"
+            return "A", "path1_relaxed"
+
+        # Cold-start exploration (Minimax: err-C bounded, err-A unbounded)
+        # 10+ Chinese chars = substantial user effort = strong intent proxy.
+        if self.round_count <= 2:
+            structural = user_text.count("\n") + user_text.count("?") + user_text.count("？") + user_text.count("：")
+            if len(user_text) > 10 or structural > 1:
+                self._route_track = "C"
+                return "C", "coldstart_probe"
+            self._route_track = "A"
+            return "A", "coldstart_default"
+
+        # Steady-state: Schmitt trigger on e(t) trend (binary A/C)
+        # Trend already updated at top of function — just check thresholds here.
+        cur = self._route_track
+        # Upgrade: 2 consecutive increases + e(t) above threshold -> fire engine
+        if self._e_inc_streak >= 2 and e_t > 0.55:
+            self._route_track = "C"
+            self._e_inc_streak = 0
+            return "C", "upgrade"
+
+        # Downgrade: 3 consecutive decreases -> fall back to direct
+        if self._e_dec_streak >= 3:
+            self._route_track = "A"
+            self._e_dec_streak = 0
+            return "A", "downgrade"
+
+        # sigma2 safety valve: high variance -> force A
+        if trust_var > 0.3 and cur != "A":
+            self._route_track = "A"
+            return "A", "variance_safety"
+
+        return cur, "hold"
     def _execute_tool(self, tool_name: str, params: dict, xray: XRay) -> str:
         """Execute a tool through ToolEngine (4th engine) with ActionPipeline gate."""
         # Contract gate (backlash, trust, autonomy)
@@ -415,84 +495,6 @@ class Repl:
             )
         return self._track_c_engine
 
-    def _track_b_agentic(self, user: str, system: str, trust: float,
-                         bp, xray: XRay, live=None) -> str:
-        """Track B: Planning → Orch → Critic. Live X-Ray updates."""
-        import time, sys
-
-        try:
-            t0 = time.time()
-            plan_steps = self._plan_task(user, system)
-            self.c.bus.emit("🔀 Track B Planning", f"拆解为 {len(plan_steps)} 步 ({time.time()-t0:.2f}s)")
-            self.c.bus.trace(TraceNode(
-                node_id=f"planning_{self.round_count}", name="Planning",
-                node_type="agent", status=TraceStatus.SUCCESS,
-                metadata={"steps": len(plan_steps), "elapsed_ms": (time.time()-t0)*1000},
-            ))
-            self._update_live(xray, live)
-
-            results = []
-            total = len(plan_steps)
-            for i, step in enumerate(plan_steps):
-                t_step = time.time()
-                if step.get("tool"):
-                    check = self.c.action_pipeline.check(step["tool"])
-                    if not check["allowed"]:
-                        results.append(
-                            f"[系统提示：由于契约限制({check['reason']})，无法执行 {step['tool']}。"
-                            f"请在回复中委婉地向用户解释此限制。]"
-                        )
-                        self.c.bus.emit(f"🔀 Track B Step {i+1}", f"🚫 拦截: {step['tool']}")
-                        continue
-                    # Execute tool via ToolAdapter (MCP or local)
-                    self.c.bus.emit_pending(f"🔀 Track B Step {i+1}", f"⏳ {step['tool']}...")
-                    self._update_live(xray, live)
-                    tool_result = self._execute_tool(step["tool"], {"query": step["prompt"]}, xray)
-                    results.append(f"[工具结果: {step['tool']}]\n{tool_result}")
-                    self.c.bus.emit(f"🔀 Track B Step {i+1}", f"{step['tool']} 完成 ({time.time()-t_step:.1f}s)")
-                else:
-                    self.c.bus.emit_pending(f"🔀 Track B Step {i+1}", "⏳ 执行中...")
-                    self._update_live(xray, live)
-                    step_prompt = f"{system}\n\n[当前任务]: {step['prompt']}\n[已有结果]: {results}"
-                    step_resp = self.c.cloud_llm.generate(step_prompt)
-
-                    # Auto-parse [TOOL:xxx] {...} from LLM response
-                    import re as _re
-                    tool_match = _re.search(r'\[TOOL:(\w+)\]\s*(\{[^}]+\})', step_resp)
-                    if tool_match:
-                        tool_name = tool_match.group(1)
-                        try:
-                            params = __import__('json').loads(tool_match.group(2))
-                            tool_result = self._execute_tool(tool_name, params, xray)
-                            step_resp += f"\n\n[工具结果: {tool_name}]\n{tool_result[:1500]}"
-                            self.c.bus.emit(f"🔀 Track B Step {i+1}", f"{tool_name} 完成")
-                        except Exception:
-                            pass  # Parse failed — use LLM response as-is
-
-                    results.append(step_resp)
-                    self.c.bus.emit(f"🔀 Track B Step {i+1}", f"完成 ({time.time()-t_step:.1f}s)")
-                self._update_live(xray, live)
-
-            t_critic = time.time()
-            critique = self._critique_results(user, results)
-            self.c.bus.emit("🔀 Track B Critic", f"评估: {critique} ({time.time()-t_critic:.1f}s)")
-            self._update_live(xray, live)
-
-            final_prompt = (
-                f"{system}\n\n用户问: {user}\n"
-                f"分析结果: {results}\n"
-                f"Critic建议: {critique}\n"
-                f"请基于以上内容生成最终回复。"
-            )
-            self.c.bus.emit_pending("🔀 Track B 合成", "⏳ 合成最终回复...")
-            self._update_live(xray, live)
-            return self.c.cloud_llm.generate(final_prompt)
-
-        except Exception as e:
-            self.c.bus.emit("⚠️ Track B", f"引擎异常降级: {e}")
-            self._update_live(xray, live)
-            return self.c.cloud_llm.generate(f"{system}\n\nUser: {user}")
-
     def _build_tools_section(self) -> str:
         """Build an [可用工具] section listing all registered tools."""
         try:
@@ -509,22 +511,6 @@ class Repl:
         lines.append("调用格式: 在回复中写 [TOOL:工具名] {\"参数\":\"值\"}")
         return "\n".join(lines)
 
-    @staticmethod
-    def _plan_task(user: str, system: str) -> list[dict]:
-        """Decompose user request into ordered steps."""
-        return [
-            {"prompt": f"分析用户问题的核心要点: {user}", "tool": ""},
-            {"prompt": f"基于分析结果，提供详细回答: {user}", "tool": "knowledge_search"},
-            {"prompt": f"总结并给出最终建议", "tool": ""},
-        ]
-
-    @staticmethod
-    def _critique_results(user: str, results: list[str]) -> str:
-        """Evaluate results completeness. Returns '满意' or suggestion."""
-        total_chars = sum(len(r) for r in results)
-        if total_chars < 50:
-            return "结果过短，建议补充细节"
-        return "满意"
 
     def _update_live(self, xray: XRay, live=None) -> None:
         if live and xray._stages:
@@ -622,7 +608,20 @@ class Repl:
                 self.c.bp.apply_proposal("conversational_initiative", "BALANCED", ignore_cooldown=True)
                 self.trust = 0.30  # 热数据重置
                 self.c.profile.start_session()
+                # ── V5: reset controller + spinal state ──
+                self._route_track = "A"
+                self._e_inc_streak = 0
+                self._e_dec_streak = 0
+                self._prev_e_t = 0.5
+                self._exec_truncation_streak = 0
+                if self._exec_reflex_active:
+                    self.c.output_pipeline.char_limit_multiplier = self.c.output_pipeline._base_char_multiplier
+                    self.c.output_pipeline.sentence_limit_multiplier = self.c.output_pipeline._base_sentence_multiplier
+                    self._exec_reflex_active = False
                 print(f"  [新对话] Session {self.c.profile.session_count}. 情绪状态已重置。")
+                continue
+            if cmd == "/v5-status":
+                self._print_v5_status()
                 continue
             if cmd == "/mood":
                 print(f"  当前: tone={bp.fields.get('tone_style','?')} "
@@ -673,7 +672,7 @@ class Repl:
                     import json as _json
                     print(_json.dumps(nodes, ensure_ascii=False, indent=2))
                 else:
-                    print("  [trace] 无 Trace 数据。尝试 Track B 任务。")
+                    print("  [trace] 无 Trace 数据。")
                 continue
             if cmd == "/rag stats":
                 from core.adapters.knowledge_search import cache_stats
@@ -712,7 +711,7 @@ class Repl:
                 except Exception:
                     sig = {"dimension": None, "score": 0.0, "all_scores": {}}
                 dim, score = sig["dimension"], sig["score"]
-            # Track B: LLM fallback when embedding is uncertain or unavailable
+            # LLM fallback when embedding is uncertain or unavailable
             if dim is None or (0.3 < score < 0.6 and USE_SEMANTIC):
                 try:
                     llm_judge = self.c.cloud_llm.generate(
@@ -796,13 +795,25 @@ class Repl:
             )
             e_t = self.c.tracking_error.update(error_raw, interval)
 
-            # Meta-adapt: check if tracking error persists
+            # ── V5: Selection pressure (trust EMA + Bayesian variance) ──
+            self.c.selection_pressure.record_trust(trust)
+            self.c.selection_pressure.bayesian_update("trust", trust)
+            trust_var = self.c.selection_pressure.get_variance("trust")
+            pressure_on, dyn_thresh = self.c.meta_adapt.feed_pressure(trust_var)
+
+            # Meta-adapt: check if tracking error persists OR pressure spikes
             current_sel = self.c.meta_adapt.default_threshold
             new_sel, action = self.c.meta_adapt.maybe_relax(e_t, current_sel)
             if action != "hold":
+                trigger_reason = "e(t)" if not pressure_on else "pressure"
                 self.c.bus.emit(
                     "元适应",
-                    f"e(t)={e_t:.2f} → {action} (thresh={new_sel:.2f})",
+                    f"e(t)={e_t:.2f} var={trust_var:.3f} -> {action} [{trigger_reason}] (thresh={new_sel:.2f})",
+                )
+            if pressure_on:
+                self.c.bus.emit(
+                    "选择压力",
+                    f"variance spike var={trust_var:.3f} > mu+2sigma={dyn_thresh:.3f}",
                 )
             if sig_type != "neutral":
                 self.c.bus.emit(
@@ -825,18 +836,13 @@ class Repl:
             self._update_live(xray, live)  # Flush events from _build_prompt
             full_prompt = f"{system}{rag_context}\n\nUser: {user}"
 
-            # ── V4.1 Phase 3: Track A/B/C Router ──
-            route = self._route_task(user)
-            # Conversation openers/closers → always Track A (no planning needed)
-            t = user.strip()
-            if len(t) <= 3 and any(w in t for w in ("拜拜","再见","bye","你好","晚安","谢谢","好的","嗯","哦","行","ok","hi")):
-                route = "A"
+            # ── V5 Phase B: State-Feedback Route Controller ──
+            route, reason = self._route_controller(e_t, trust_var, trust, user)
+            self.c.bus.emit("路由决策",
+                f"Track {route} ({reason}) "
+                f"[V5: e(t)={e_t:.2f} sigma2={trust_var:.3f} trust={trust:.2f}]")
             if route == "C":
-                self.c.bus.emit("路由决策", f"Track C (embedding)")
                 full_response = self._run_track_c(user, system, xray, live)
-            elif route == "B":
-                self.c.bus.emit("路由决策", "Track B")
-                full_response = self._track_b_agentic(user, system, trust, bp, xray, live)
             else:
                 self.c.bus.emit_pending("内容生成", "⏳ 生成中...")
                 self._update_live(xray, live)
@@ -854,7 +860,46 @@ class Repl:
             full_response, penalty = self.c.output_pipeline.process(full_response.strip())
             if penalty:
                 trust = max(0.0, trust - penalty)
-            self.c.bus.emit("输出管道", f"截断/清洗: {orig_len}→{len(full_response)} 字符 | tone={bp.fields.get('tone_style','?')}")
+            self.c.bus.emit("输出管道", f"截断/清洗: {orig_len}->{len(full_response)} 字符")
+
+            # ── V5: Execution feedback (truncation ratio -> e(t) compensation) ──
+            truncation_ratio = 1.0 - (len(full_response) / max(orig_len, 1))
+            if truncation_ratio > 0.3:
+                boost = min(0.15, truncation_ratio * 0.2)
+                boosted_e = min(1.0, self.c.tracking_error.value + boost)
+                self.c.tracking_error.update(boosted_e, interaction_interval_sec=1.0)
+                self.c.bus.emit("执行反馈",
+                    f"trunc={truncation_ratio:.0%} -> e(t)+{boost:.3f}")
+            elif truncation_ratio > 0.1:
+                self.c.bus.emit("执行反馈", f"mild trunc {truncation_ratio:.0%}")
+
+            # ── V5 Path 3: Execution Constraint Reflex (spinal) ──
+            EXEC_THRESH = 0.50
+            EXEC_STREAK = 2
+            EXEC_MULT = 1.5
+            MAX_MULT = 2.0
+            if truncation_ratio > EXEC_THRESH:
+                self._exec_truncation_streak += 1
+            else:
+                self._exec_truncation_streak = 0
+            pipeline = self.c.output_pipeline
+            if self._exec_truncation_streak >= EXEC_STREAK:
+                if not self._exec_reflex_active:
+                    pipeline._base_char_multiplier = pipeline.char_limit_multiplier
+                    pipeline._base_sentence_multiplier = pipeline.sentence_limit_multiplier
+                    self._exec_reflex_active = True
+                extra = self._exec_truncation_streak - EXEC_STREAK
+                mult = min(EXEC_MULT + 0.5 * extra, MAX_MULT)
+                pipeline.char_limit_multiplier = mult
+                pipeline.sentence_limit_multiplier = mult
+                self.c.bus.emit("EXEC_REFLEX",
+                    f"SPINAL_REFLEX: limits x{mult:.1f} (streak={self._exec_truncation_streak})")
+            elif self._exec_truncation_streak == 0 and self._exec_reflex_active:
+                pipeline.char_limit_multiplier = pipeline._base_char_multiplier
+                pipeline.sentence_limit_multiplier = pipeline._base_sentence_multiplier
+                self._exec_reflex_active = False
+                self.c.bus.emit("EXEC_REFLEX", "SPINAL_REFLEX released: limits restored")
+
             self._update_live(xray, live)
 
             # ── FSM intercept ──
@@ -876,6 +921,19 @@ class Repl:
             if live:
                 xray.render_live(live)
                 live.stop()
+
+            # ── V5: Cognitive honesty marker ──
+            cognition = self.c.meta_adapt.cognition
+            if cognition:
+                full_response = f"{full_response} {cognition}"
+                self.c.bus.emit("认知标记", "exploring: high uncertainty, broadening search")
+            elif truncation_ratio > 0.5:
+                exec_gap_mark = (
+                    "[execution_constrained: output truncated by pipeline, "
+                    "user requested more content than current mode allows]"
+                )
+                full_response = f"{full_response} {exec_gap_mark}"
+                self.c.bus.emit("认知标记", f"exec_constraint: trunc={truncation_ratio:.0%}")
 
             print(f"\n[agent] {full_response}")
             session_log.append(f"User: {user}\nAgent: {full_response}\n")

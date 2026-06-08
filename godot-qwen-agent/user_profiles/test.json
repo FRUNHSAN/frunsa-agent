@@ -1,0 +1,18 @@
+{
+  "user_id": "test",
+  "amendment_threshold": 3,
+  "outlier_field_count": 3,
+  "outlier_trust_delta": 0.25,
+  "current_session": 6,
+  "field_sessions": {},
+  "session_outlier": [],
+  "session_mod_count": {},
+  "session_trust_delta": {
+    "1": 0.0,
+    "2": 0.0,
+    "3": 0.0,
+    "4": 0.0,
+    "5": 0.0,
+    "6": 0.0
+  }
+}

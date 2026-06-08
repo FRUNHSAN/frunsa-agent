@@ -53,8 +53,10 @@ class Container:
         # ── Adaptive tracking (V5: Wasserstein model reduction) ──
         from core.adapters.tracking_error import TrackingErrorEstimator
         from core.adapters.meta_adapt_trigger import MetaAdaptTrigger
+        from core.adapters.selection_pressure_accumulator import SelectionPressureAccumulator
         self.tracking_error = TrackingErrorEstimator(tau=300.0)
         self.meta_adapt = MetaAdaptTrigger()
+        self.selection_pressure = SelectionPressureAccumulator()
 
         # ── Pre-load all registered components before sealing ──
         import core.adapters.keyword_chunker  # noqa: triggers @register_component

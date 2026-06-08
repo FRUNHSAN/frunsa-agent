@@ -13,7 +13,7 @@
 # Schema: schemas/reasoning_chain.schema.json
 
 library_version: 1
-last_updated: "2026-06-07T23:00:00Z"
+last_updated: "2026-06-08T17:00:00Z"
 
 # ── Chains by architectural layer ────────────────────────────────────
 
@@ -336,6 +336,20 @@ chains:
     tags: [v5, adaptive_contract, wasserstein, information_geometry, lyapunov, schrödinger_bridge, structure_preserving_reduction]
     status: active
 
+  - chain_id: v5_path3_execution_reflex
+    file: chains/v5_path3_execution_reflex.yaml
+    title: "V5 Path 3 执行约束脊髓反射 — 感知-行动-执行三层闭合"
+    layer: plan
+    tags: [v5, path3, execution_reflex, spinal_reflex, output_pipeline, truncation, feedback_loop, control_surface, layered_adaptation]
+    status: active
+
+  - chain_id: v5_binary_bangbang_router
+    file: chains/v5_binary_bangbang_router.yaml
+    title: "V5 二元 Bang-Bang 路由 — 从嵌入分类器到 Pontryagin 最优控制"
+    layer: plan
+    tags: [v5, binary_routing, bang_bang_control, pontryagin, schmitt_trigger, track_excision, cost_cliff]
+    status: active
+
   # ── Real LLM Orchestration + Critic Engines ──
   - chain_id: phase_18_real_orch_critic
     file: chains/phase_18_real_orch_critic.yaml
@@ -518,9 +532,23 @@ tag_index:
   orchestration: [v4_phase2_engine_ignition]
   critic: [v4_phase2_engine_ignition]
   rag_cache: [v4_phase2_engine_ignition]
-  v5: [v5_math_adaptive_contract]
+  v5: [v5_math_adaptive_contract, v5_path3_execution_reflex]
   adaptive_contract: [v5_math_adaptive_contract]
   wasserstein: [v5_math_adaptive_contract]
   information_geometry: [v5_math_adaptive_contract]
   schrödinger_bridge: [v5_math_adaptive_contract]
   structure_preserving_reduction: [v5_math_adaptive_contract]
+  path3: [v5_path3_execution_reflex]
+  execution_reflex: [v5_path3_execution_reflex]
+  spinal_reflex: [v5_path3_execution_reflex]
+  output_pipeline: [plan7_environmental_physics, v5_path3_execution_reflex]
+  truncation: [v5_path3_execution_reflex]
+  feedback_loop: [v5_path3_execution_reflex]
+  control_surface: [v5_path3_execution_reflex]
+  layered_adaptation: [v5_path3_execution_reflex]
+  binary_routing: [v5_binary_bangbang_router]
+  bang_bang_control: [v5_binary_bangbang_router]
+  pontryagin: [v5_binary_bangbang_router]
+  schmitt_trigger: [v5_binary_bangbang_router]
+  track_excision: [v5_binary_bangbang_router]
+  cost_cliff: [v5_binary_bangbang_router]

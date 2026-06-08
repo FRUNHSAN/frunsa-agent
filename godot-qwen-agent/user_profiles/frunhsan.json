@@ -1,0 +1,62 @@
+{
+  "user_id": "frunhsan",
+  "amendment_threshold": 3,
+  "outlier_field_count": 3,
+  "outlier_trust_delta": 0.25,
+  "current_session": 14,
+  "field_sessions": {
+    "response_verbose_level": [
+      1,
+      4,
+      5,
+      7,
+      8,
+      9,
+      12
+    ],
+    "proactive_suggestions": [
+      5
+    ],
+    "conversational_initiative": [
+      8,
+      9,
+      12
+    ],
+    "tone_style": [
+      8,
+      9,
+      12
+    ],
+    "contextual_anchoring": [
+      8,
+      9,
+      12
+    ]
+  },
+  "session_outlier": [],
+  "session_mod_count": {
+    "1": 1,
+    "4": 3,
+    "5": 2,
+    "7": 2,
+    "8": 5,
+    "9": 4,
+    "12": 6
+  },
+  "session_trust_delta": {
+    "1": 0.0,
+    "2": 0.0,
+    "3": 0.0,
+    "4": 0.0,
+    "5": 0.049542,
+    "6": 0.0,
+    "7": 0.044709,
+    "8": 0.04663800000000001,
+    "9": 0.052983,
+    "10": 0.035831999999999975,
+    "11": 0.035831999999999975,
+    "12": 0.05145899999999998,
+    "13": 0.035831999999999975,
+    "14": 0.03576800000000002
+  }
+}

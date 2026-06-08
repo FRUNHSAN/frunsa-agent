@@ -32,6 +32,8 @@ GROWTH_SIGNAL_KEYWORDS = frozenset({
     "为什么", "解释", "原理", "能详细点吗", "能展开吗",
     "怎么理解", "什么意思", "可以说说吗", "再讲一遍",
     "详细", "深入", "怎么看", "你觉得呢",
+    "越长越好", "一次性", "全部", "全流程",  # Output depth demands
+    "展开", "调研", "完整",  # Depth/research signals
 })
 
 TECH_TERMS = frozenset({
@@ -41,6 +43,12 @@ TECH_TERMS = frozenset({
     "api", "数据库", "database", "表", "table", "视图",
     "子查询", "subselect", "并发", "concurrent", "异步",
     "内存", "memory", "缓存", "cache", "线程", "thread",
+    # Physics / quantum / general science
+    "量子", "超导", "比特", "表面码", "纠错",
+    "离子阱", "光子", "退相干", "拓扑", "相干",
+    # CS / architecture / general
+    "架构", "设计", "系统", "协议", "网络",
+    "编译", "内核", "渲染", "加密", "安全",
 })
 
 # Feedback that indicates acceptance (user didn't need more)
