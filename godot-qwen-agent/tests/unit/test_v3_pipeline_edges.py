@@ -24,15 +24,15 @@ class TestOutputPipelineEdges:
         p = OutputPipeline(bp)
         raw = "一。二。三。四。五。"
         clean, _ = p.process(raw)
-        assert clean.count("。") <= 3
+        assert clean.count("。") <= 4  # LOW: 4 sentences
 
     def test_high_no_truncation(self):
         bp = MockBP({"response_verbose_level": "HIGH", "tone_style": "WARM"})
         p = OutputPipeline(bp)
         raw = "一。二。三。四。五。六。七。八。九。"
         clean, _ = p.process(raw)
-        # HIGH allows up to 8
-        assert clean.count("。") <= 8
+        # HIGH allows up to 16
+        assert clean.count("。") == 9  # 9 sentences, no truncation
 
     def test_pragmatic_strips_fillers(self):
         bp = MockBP({"response_verbose_level": "HIGH", "tone_style": "PRAGMATIC"})

@@ -157,6 +157,69 @@ SemanticTrustEngine 降级为纯 X-Ray 观测指标。FEEDFORWARD_GAIN=0.0。
 - Principle #4: Signal over Schedule（信号优于时刻表）
 - Principle #5: Observe, Don't Inject（观测不注入）
 
+### V5.3 — 完成（2026-06-09）：双引擎观测器 + drift⊕clarity 融合
+
+**关键词门控归零。纯数学双传感器融合。**
+
+#### 问题
+
+V6 的 `_path2_branch_count(raw_drift, user_text)` 用关键词列表 `_SIMPLIFY_CANCEL`/`_SIMPLIFY_DOWNGRADE`
+检测"简化意图"——无限回归：每次发现新边界就加新关键词。Session 73 修复（len<50 门控）
+在 Session 74 回放中再次失效（用户完整请求 110 字符）。
+
+drift 是标量——分不清"加深"和"简化"。两者都产生高 cosine distance。
+需要第二个正交维度来判定方向。
+
+#### 数学：双传感器正交融合
+
+drift `d` 和 clarity `c` 是物理正交维度：
+- drift：轨迹变化（跨轮 cosine distance）—— 用户"转弯"了多少
+- clarity：状态质量（轮内 LLM 推理）—— 用户"清醒"还是"混乱"
+
+融合函数：
+```
+f = Φ(d, c) = {
+    min(f_drift(d), 0.20)    if c > 0.80   (清醒压制)
+    max(f_drift(d), 1 - c)   otherwise      (OR 逻辑)
+}
+```
+
+**清醒压制 (c > 0.80)：** 用户清醒 + 高 drift = 有意的非连续性。压制 → EXPLOIT。
+**OR 逻辑 (c ≤ 0.80)：** 任一传感器报警 → 探索。首轮荒谬指令（c=0.15, d=0）也能被检测。
+
+#### 执行器分派
+
+| 执行器 | 信号源 | 理由 |
+|--------|--------|------|
+| Planning n | **f_fused** (drift ⊕ clarity) | 探索宽度由意图不确定性决定 |
+| Critic θ | **f_drift × g(e_t)** | 验收标准由语义空间稳定性决定——Critic 对 drift 的敏感性是 feature |
+
+#### 工程落地
+
+- `SemanticTrustEngine` 升级为双引擎观测器：`detect()` (embedding) + `assess_clarity()` (LLM)
+- ThreadPoolExecutor 并发：clarity LLM 调用与 drift 计算重叠执行
+- 正则提取 float：防御 LLM 输出废话前缀
+- X-Ray 🧊 标记：清醒压制激活时可视化
+
+#### 删除
+
+- `_SIMPLIFY_CANCEL` / `_SIMPLIFY_DOWNGRADE` / `_detect_simplification` (~20 行关键词门控)
+- `_path2_branch_count` 签名从 `(raw_drift, user_text="")` 改为 `(f: float)` —— 纯数学，零字符串匹配
+
+#### 场景验证
+
+| 场景 | d | c | f | 行为 |
+|------|---|---|---|------|
+| Scene 3 R1 (荒谬指令) | 0.000 | 0.15 | 0.85 | EXPLORE — 首轮检测到混乱 |
+| Scene 4 R2 (清醒切换) | 0.687 | 0.95 | 0.20 | EXPLOIT 🧊 — 清醒压制 |
+| Scene 1 (正常稳定) | 0.050 | 0.85 | 0.00 | EXPLOIT — 稳定+清醒 |
+| Scene 2 (模糊+失效) | 0.420 | 0.35 | 0.65 | EXPLORE — OR 逻辑触发 |
+
+#### 新增测试
+
+- `tests/unit/test_v5_3_dual_sensor.py`：26 参数化测试 + 6 边界测试 = 32 测试，全部通过
+- 全量单元测试零回归
+
 ### Phase C — 待规划（V6+）
 
 1. **Planning/Orch/Critic 引擎重构** — DAG 依赖解析、并发调度、语义级 Critique

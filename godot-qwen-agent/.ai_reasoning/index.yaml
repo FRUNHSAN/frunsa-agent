@@ -13,7 +13,7 @@
 # Schema: schemas/reasoning_chain.schema.json
 
 library_version: 1
-last_updated: "2026-06-08T19:45:00Z"
+last_updated: "2026-06-09T18:00:00Z"
 
 # ── Chains by architectural layer ────────────────────────────────────
 
@@ -357,6 +357,13 @@ chains:
     tags: [v5.2, observer_downgrade, semantic_trust, signal_interpreter, feedforward_zero, observe_dont_inject, actuator_conflict, planning_template]
     status: active
 
+  - chain_id: v5_3_dual_sensor_fusion
+    file: chains/v5_3_dual_sensor_fusion.yaml
+    title: "V5.3 双引擎观测器 — LLM clarity 传感器 + drift⊕clarity 融合 + 关键词门控切除"
+    layer: plan
+    tags: [v5.3, dual_sensor_fusion, clarity, semantic_drift, planning_branch, critic_threshold, keyword_gate_deletion, dual_engine_observer, lucid_suppression, observe_dont_inject]
+    status: active
+
   # ── Real LLM Orchestration + Critic Engines ──
   - chain_id: phase_18_real_orch_critic
     file: chains/phase_18_real_orch_critic.yaml
@@ -539,7 +546,7 @@ tag_index:
   orchestration: [v4_phase2_engine_ignition]
   critic: [v4_phase2_engine_ignition]
   rag_cache: [v4_phase2_engine_ignition]
-  v5: [v5_math_adaptive_contract, v5_path3_execution_reflex]
+  v5: [v5_math_adaptive_contract, v5_path3_execution_reflex, v5_binary_bangbang_router, v5.2_observer_downgrade, v5_3_dual_sensor_fusion]
   adaptive_contract: [v5_math_adaptive_contract]
   wasserstein: [v5_math_adaptive_contract]
   information_geometry: [v5_math_adaptive_contract]
@@ -559,3 +566,13 @@ tag_index:
   schmitt_trigger: [v5_binary_bangbang_router]
   track_excision: [v5_binary_bangbang_router]
   cost_cliff: [v5_binary_bangbang_router]
+  v5.3: [v5_3_dual_sensor_fusion]
+  dual_sensor_fusion: [v5_3_dual_sensor_fusion]
+  clarity: [v5_3_dual_sensor_fusion]
+  semantic_drift: [v5_3_dual_sensor_fusion]
+  planning_branch: [v5_3_dual_sensor_fusion]
+  critic_threshold: [v5_3_dual_sensor_fusion]
+  keyword_gate_deletion: [v5_3_dual_sensor_fusion]
+  dual_engine_observer: [v5_3_dual_sensor_fusion]
+  lucid_suppression: [v5_3_dual_sensor_fusion]
+  observe_dont_inject: [v5.2_observer_downgrade, v5_3_dual_sensor_fusion]

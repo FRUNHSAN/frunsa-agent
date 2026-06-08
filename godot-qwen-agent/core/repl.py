@@ -136,6 +136,9 @@ class Repl:
         # ── V5 Path 3: Execution Constraint Reflex ──
         self._exec_truncation_streak: int = 0
         self._exec_reflex_active: bool = False
+        # ── V6: Semantic drift tracking (Path 2 sensor) ──
+        self._prev_user_emb = None       # Previous round's user embedding
+        self._drift_history: list[float] = []  # Drift values for Z-score baseline
         # Embedding model loads lazily on first _route_task() or _classify_command() call
 
     # ── V5 Status dashboard ──
@@ -155,7 +158,7 @@ class Repl:
             dyn_thresh = mu + meta._pressure_sigma * sigma
             dist = dyn_thresh - trust_var
         else:
-            mu, sigma, dyn_thresh, dist = 0.0, 0.0, 1.0, float("inf")
+            mu, sigma, dyn_thresh, dist = 0.19, 0.03, 1.0, float("inf")  # Cold-start defaults
 
         sid = self.c.profile.session_count
         print(f"\\n  [v5-status] session={sid} round={self.round_count}")
@@ -442,11 +445,15 @@ class Repl:
                 pass
 
     def _run_track_c(self, user: str, system: str, xray: XRay, live=None,
-                     trust: float = 0.5, e_t: float = 0.5) -> str:
-        """Track C: full engine pipeline. V5.1: passes trust + e_t for lambda scheduling."""
+                     trust: float = 0.5, e_t: float = 0.5,
+                     raw_drift: float = 0.0,
+                     clarity: float = 0.5):
+        """Track C: full engine pipeline. V5.3: returns (response, output_capacity_mult)."""
         from core.track_c import TrackCEngine
         engine = self._get_track_c_engine()
-        return engine.run(user, system, self.round_count, trust=trust, e_t=e_t)
+        return engine.run(user, system, self.round_count,
+                          trust=trust, e_t=e_t, raw_drift=raw_drift,
+                          clarity=clarity)
 
     def _get_track_c_engine(self):
         """Lazy-init Track C engine with real CloudLLM backend."""
@@ -570,12 +577,12 @@ class Repl:
         print(f"  /quit 退出 | /new 新对话")
         print(f"{'='*50}")
 
-        # Semantic trust (lazy load)
+        # Semantic trust (lazy load) — V5.3: dual-engine observer
         USE_SEMANTIC = False
         sem = None
         try:
             from core.adapters.semantic_trust import SemanticTrustEngine
-            sem = SemanticTrustEngine()
+            sem = SemanticTrustEngine(llm_client=self.c.cloud_llm)
             USE_SEMANTIC = True
         except (ImportError, OSError):
             pass
@@ -603,6 +610,8 @@ class Repl:
                 self._e_dec_streak = 0
                 self._prev_e_t = 0.5
                 self._exec_truncation_streak = 0
+                self._prev_user_emb = None           # Reset semantic drift
+                self._drift_history.clear()
                 if self._exec_reflex_active:
                     self.c.output_pipeline.char_limit_multiplier = self.c.output_pipeline._base_char_multiplier
                     self.c.output_pipeline.sentence_limit_multiplier = self.c.output_pipeline._base_sentence_multiplier
@@ -691,17 +700,49 @@ class Repl:
                 self.c.profile.start_session()
                 print(f"  [新对话] Session {self.c.profile.session_count}.")
 
-            # ── V5.2: Semantic observer (X-Ray only, no control injection) ──
+            # ── V5.3 Observe Phase: Dual-Engine Observer ──
+            # 1a. Fast Path: embedding-based emotional/state signals (~30ms)
             dim, score = None, 0.0
+            clarity = 0.5  # default neutral (no LLM available)
+            _clarity_future = None
             if USE_SEMANTIC and sem:
                 try:
                     sig = sem.detect(user)
                 except Exception:
                     sig = {"dimension": None, "score": 0.0, "all_scores": {}}
                 dim, score = sig["dimension"], sig["score"]
+
+                # 1b. Reasoning Path: LLM clarity → thread pool (I/O-bound, releases GIL)
+                #     Submit future NOW so API call overlaps with drift computation below.
+                import concurrent.futures
+                _pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+                _clarity_future = _pool.submit(sem.assess_clarity, user)
             if dim:
                 self.c.bus.emit("语义感知", f"{dim}={score:.3f}")
                 self._update_live(xray, live)
+
+            # 1c. Historical Path: semantic drift via cosine distance (~30ms, no API)
+            #     Runs on main thread WHILE clarity LLM call is in flight (I/O overlap).
+            import numpy as _np
+            raw_drift = 0.0
+            if len(user.strip()) > 3:
+                try:
+                    m, _, _ = _get_command_model()
+                    cur_emb = m.encode([user])[0]
+                    if self._prev_user_emb is not None:
+                        cos_sim = float(_np.dot(cur_emb, self._prev_user_emb)
+                                        / (_np.linalg.norm(cur_emb) * _np.linalg.norm(self._prev_user_emb) + 1e-8))
+                        raw_drift = 1.0 - cos_sim
+                    self._prev_user_emb = cur_emb
+                except Exception:
+                    pass  # Embedding model unavailable → raw_drift stays 0
+
+            # Barrier: collect clarity result (may already be done if API was fast)
+            if _clarity_future is not None:
+                clarity = _clarity_future.result(timeout=5.0)
+                self.c.bus.emit("观测器", f"clarity={clarity:.2f}")
+                self._update_live(xray, live)
+                _pool.shutdown(wait=False)
 
             # ── Phase 9: pending consent proposals ──
             if self.pending_consent:
@@ -802,8 +843,14 @@ class Repl:
                 f"Track {route} ({reason}) "
                 f"[V5: e(t)={e_t:.2f} sigma2={trust_var:.3f} trust={trust:.2f}]")
             if route == "C":
-                full_response = self._run_track_c(user, system, xray, live,
-                                                     trust=trust, e_t=e_t)
+                full_response, cog_mult = self._run_track_c(user, system, xray, live,
+                    trust=trust, e_t=e_t, raw_drift=raw_drift,
+                    clarity=clarity)
+                # V6: Cognitive depth → dynamic output capacity
+                if cog_mult > 1.0:
+                    pl = self.c.output_pipeline
+                    pl.char_limit_multiplier = max(pl.char_limit_multiplier, cog_mult)
+                    pl.sentence_limit_multiplier = max(pl.sentence_limit_multiplier, cog_mult)
             else:
                 self.c.bus.emit_pending("内容生成", "⏳ 生成中...")
                 self._update_live(xray, live)

@@ -1,0 +1,119 @@
+chain_id: v5_3_dual_sensor_fusion
+title: "V5.3 双引擎观测器 — clarity LLM 传感器 + drift⊕clarity 融合 + 关键词门控切除"
+created_at: "2026-06-09"
+status: active
+context: |
+  V6 Path 2 的 _path2_branch_count(raw_drift, user_text) 依赖关键词列表
+  _SIMPLIFY_CANCEL/_SIMPLIFY_DOWNGRADE 检测"简化意图"，这是架构债务：
+
+  1. 关键词列表硬编码不可扩展——不同语言需要不同列表
+  2. 关键词无法区分"逻辑矛盾"和"话题切换"——Scene 3 荒谬 C/IE6 指令
+     只能靠首轮冷启动绕过去，无法在首轮就被识别为"混乱"
+  3. 违反 V5 核心哲学：用数学信号而非静态规则替代 if-else 条件
+
+  Scene 4 的双重失败：
+  - Session 73: drift=0.687 触发 EXPLORE，但用户说的是"算了...换个简单任务"
+  - Session 73 fix: 添加 _detect_simplification 关键词门控
+  - Session 74 replay: 门控再次失效——用户完整请求 110 字符超过 len<50 阈值
+
+  关键词补丁的本质是无限回归：每次回放发现新边界，就要加新关键词。
+
+  数学突破：drift 和 clarity 是正交维度。
+  drift 测轨迹（跨轮变化），clarity 测状态（轮内质量）。
+  两者都高 = 清醒切换 → 抑制。drift 低 clarity 低 = 混乱 → 触发。
+  关键词门控试图用字符串匹配逼近这个二维决策面——必然失败。
+
+decision: |
+  1. SemanticTrustEngine 升级为双引擎观测器：
+     - Fast Path (detect): embedding + anchor → 情绪/状态信号（不变）
+     - Reasoning Path (assess_clarity): 轻量 LLM → 意图清晰度 0.0~1.0
+
+  2. track_c.py 新增 compute_dual_sensor_f(raw_drift, clarity) → f_fused:
+     - clarity > 0.80 → min(f_drift, 0.20)  // 清醒压制
+     - 否则 → max(f_drift, 1-clarity)       // OR 逻辑
+
+  3. 删除三个关键词符号：_SIMPLIFY_CANCEL, _SIMPLIFY_DOWNGRADE, _detect_simplification
+
+  4. _path2_branch_count 签名从 (raw_drift, user_text="") 改为 (f: float)
+     ——纯数学，零字符串匹配
+
+  5. Critic 继续使用 drift-only f（不混入 clarity）：
+     Critic 的验收标准应关注语义空间稳定性。高 drift 意味着语义基准面漂移——
+     前一轮的"好"标准不适用。Critic 对 drift 的敏感性是 feature，不是 bug。
+
+  6. REPL 观测阶段使用 ThreadPoolExecutor 并发执行 clarity LLM 调用，
+     与 drift 计算重叠，避免主线程阻塞。
+
+  7. X-Ray 新增 🧊 标记：清晰压制激活时可视化"高 drift 被 clarity 压制"。
+
+rationale: |
+  ### 双传感器融合的数学基础
+
+  drift 和 clarity 是两个物理上正交的维度：
+  - drift d: 轨迹变化量（跨轮 cosine distance）→ 用户"转弯"了多少
+  - clarity c: 状态质量（轮内 LLM 推理）→ 用户"清醒"还是"混乱"
+
+  融合函数 Φ(d, c)：
+  ```
+  f_fused = {
+      min(f_drift(d), 0.20)    if c > 0.80   (清醒压制)
+      max(f_drift(d), 1 - c)   otherwise      (OR 逻辑)
+  }
+  ```
+
+  **清醒压制 (c > 0.80)：** 用户高度清醒 + 高 drift = 有意的非连续性
+  （lucid discontinuity）。用户不是混乱，而是主动切换了话题。
+  压制 drift → 保持 EXPLOIT，不浪费 token 探索不需要的路径。
+
+  **OR 逻辑 (c ≤ 0.80)：** 任一传感器报警就触发探索。
+  - 高 drift 低 clarity：用户混乱且方向剧变 → 最大 EXPLORE
+  - 低 drift 低 clarity：首轮荒谬指令，无历史但有 clarity 检测 → EXPLORE
+  - 高 drift 中 clarity：话题偏移但有部分方向感 → BALANCED
+
+  ### Planning vs Critic 传感器分派
+
+  | 执行器 | 控制量 | 信号源 | 理由 |
+  |--------|--------|--------|------|
+  | Planning n | 搜索空间体积 | f_fused (drift ⊕ clarity) | 探索宽度由意图不确定性决定 |
+  | Critic θ | 验收阈值 | f_drift × g(e_t) | 验收标准由语义空间稳定性决定 |
+
+  Critic 不用 fused f 的原因：清醒压制会让 θ 纹丝不动——但话题确实变了，
+  旧标准可能不适用。Critic 对 drift 的敏感性是一项 feature。
+
+  ### 工程保障
+
+  - ThreadPoolExecutor: clarity LLM 调用与 drift 计算并发，避免主线程 1s 阻塞
+  - 正则提取 float: `re.search(r'\b(0?\.\d+|1\.0*|0|1)\b', response)` 防御 LLM 输出废话前缀
+  - Fallback 0.5: 无 LLM 或解析失败时中性值，不影响控制决策
+  - 纯数学签名: _path2_branch_count(f) 不接触任何字符串
+
+evidence:
+  - core/adapters/semantic_trust.py: +35 行，assess_clarity() + llm_client 参数
+  - core/track_c.py: -20 行（关键词门控删除）+35 行（双传感器融合 + 🧊 标记）
+  - core/repl.py: +15 行，ThreadPoolExecutor 并发观测 + clarity 传递
+  - tests/unit/test_v5_3_dual_sensor.py: 26 参数化测试 + 6 独立测试，80/80 通过
+  - tests/unit/test_v5_adaptive_tracking.py: 24 测试，零回归
+  - tests/unit/test_v3_pipeline_edges.py: 16 测试，零回归
+  - tests/unit/test_v5_selection_pressure.py: 14 测试，零回归
+  - Session 73 Scene 4 回放: drift=0.687, clarity=0.95 → EXPLOIT 🧊 (清醒压制生效)
+  - Session 74 Scene 3 R1 预期: clarity=0.15 → EXPLORE (首轮冷启动盲区解决)
+
+alternatives:
+  - "继续迭代关键词列表 —— 被否，关键词门控是无限回归。每次新边界需要新关键词。"
+  - "Path B: Planning 始终生成 3 分支，用 clarity 后截断 —— 被否，高 clarity 时白生成 2 条 DAG 路径，浪费 Planning token 和 TTFT。"
+  - "Path A: 滞后一轮 —— 被否，Scene 3 R1 首轮盲区无法解决。"
+  - "clarity 用 embedding 锚点做 —— 被否，clarity 是逻辑推理问题，不是语义相似度问题。锚点永远匹配不到自相矛盾的需求。"
+
+anti_patterns:
+  - "用关键词列表做意图分类 —— 无限回归，不可扩展，违反 V5 数学哲学"
+  - "让同一个 LLM 调用既做裁判又做运动员 —— clarity 评估和 DAG 生成混合在一个 prompt 中，传感器和执行器耦合"
+  - "Critic 也用 fused f —— 清醒压制会让 Critic 在话题切换时丧失敏感度，旧标准不适用新话题的 case 无法被宽容"
+  - "串行执行 clarity + drift —— 1s LLM 阻塞主线程，用户感知到卡顿"
+
+future_guidance: |
+  V5.3 将 drift⊕clarity 双传感器融合固化为标准控制模式。
+  未来任何新的 Path 2 传感器（如 assess_urgency, assess_risk）都应：
+    1. 继承 SemanticTrustEngine 的统一观测器接口（单一职责）
+    2. 在 compute_dual_sensor_f 中增加维度（如三传感器融合）
+    3. 明确分配给 Planning/Critic/Orch 中的哪个执行器
+    4. 绝不混入关键词逻辑——纯数学信号流

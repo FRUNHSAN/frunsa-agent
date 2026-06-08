@@ -1,15 +1,24 @@
-"""PLAN6 Semantic Trust Engine — embedding-based signal detection.
+"""V5.3 Dual-Engine Observer — embedding-based pattern matching + LLM reasoning.
 
-Replaces brittle keyword matching with cosine similarity against
-hand-crafted anchor sentences. Each anchor set defines a trust dimension.
+Embedding Engine (Fast Path): cosine similarity against anchor sentences for
+emotional/state dimensions (fatigue, frustration, gratitude, curiosity).
+~30ms per inference, zero API calls.
 
-Model: all-MiniLM-L6-v2 (80MB, CPU-only, ~30ms per inference)
+LLM Reasoning Engine (Reasoning Path): lightweight LLM call for logical
+coherence assessment (clarity). Only an LLM can judge that "C language + IE6
++ WebAssembly" is self-contradictory. ~10 output tokens, ~1s.
+
+Both engines share a unified observer interface — detect() for embedding signals,
+assess_clarity() for reasoning signals. V5.2 "Observe, Don't Inject" preserved.
+
+Model: paraphrase-multilingual-MiniLM-L12-v2 (~120MB, CPU-only)
 Supports Chinese naturally via multilingual pretraining.
 
 Design:
   - Anchors computed ONCE at startup (not per round)
-  - Two-tier: embedding recall -> LLM confirmation (6.2)
+  - Dual-engine: embedding (pattern match) + LLM (logical reasoning)
   - Threshold per dimension, tunable per user (6.4)
+  - Graceful degradation: clarity falls back to 0.5 without LLM
 """
 
 from __future__ import annotations
@@ -71,18 +80,25 @@ ANCHOR_SENTENCES: dict[str, list[str]] = {
 
 
 class SemanticTrustEngine:
-    """Embedding-based trust signal detector.
+    """Dual-Engine Observer: embedding pattern matching + LLM logical reasoning.
 
     Usage:
-        engine = SemanticTrustEngine()
+        engine = SemanticTrustEngine(llm_client=cloud_llm)
+
+        # Fast Path: embedding-based emotional/state signals
         signal = engine.detect("今天真的好烦啊")
-        # {"dimension": "fatigue", "score": 0.72}
+        # {"dimension": "fatigue", "score": 0.72, ...}
+
+        # Reasoning Path: LLM-based logical clarity assessment
+        clarity = engine.assess_clarity("C语言写IE6前端")
+        # 0.15 (self-contradictory) ~ 0.95 (crystal clear)
     """
 
     def __init__(
         self,
         model_name: str = "paraphrase-multilingual-MiniLM-L12-v2",
         thresholds: dict[str, float] | None = None,
+        llm_client: object = None,  # V5.3: optional LLM for assess_clarity
     ) -> None:
         if not HAS_SENTENCE_TRANSFORMERS:
             raise ImportError(
@@ -95,6 +111,7 @@ class SemanticTrustEngine:
             "frustration": 0.45,
             "curiosity": 0.40,
         }
+        self._llm = llm_client  # V5.3: Reasoning Path backend
         # Pre-compute anchor centers ONCE
         self._centers: dict[str, np.ndarray] = {}
         for dim, sentences in ANCHOR_SENTENCES.items():
@@ -125,6 +142,44 @@ class SemanticTrustEngine:
             "score": round(best_score, 4),
             "all_scores": all_scores,
         }
+
+    def assess_clarity(self, user_input: str) -> float:
+        """[V5.3] Reasoning Path: lightweight LLM → intent clarity 0.0~1.0.
+
+        Embedding-based detect() handles pattern matching (fatigue, frustration...).
+        This method handles logical reasoning — only an LLM can judge that
+        "C language + IE6 + WebAssembly" is self-contradictory.
+
+        Returns:
+            0.0 — self-contradictory, missing critical detail, physically impossible
+            1.0 — extremely specific, technically feasible, unambiguous
+            0.5 — fallback when no LLM available or parse failure (neutral)
+
+        Robust float extraction: LLM may output "0.15", "0.15。", or
+        "The clarity is 0.15" — regex extracts the first valid float.
+        """
+        if self._llm is None:
+            return 0.5
+
+        import re
+        prompt = (
+            "评估以下用户需求的意图清晰度 (0.0 到 1.0)。\n"
+            "- 0.0: 需求自相矛盾、缺乏必要技术细节、或包含物理/逻辑上不可能的要求。\n"
+            "- 1.0: 需求极其明确、具体、技术可行且无歧义。\n"
+            "只输出一个浮点数，不要任何解释。\n\n"
+            f'用户需求: "{user_input}"\n'
+            "清晰度分数:"
+        )
+        try:
+            response = self._llm.generate(prompt)
+            # Robust float extraction — handles "0.15", "0.15。", "The clarity is 0.15", etc.
+            match = re.search(r'\b(0?\.\d+|1\.0*|0|1)\b', response)
+            if match:
+                score = float(match.group(1))
+                return max(0.0, min(1.0, score))
+        except Exception:
+            pass
+        return 0.5  # Fallback: neutral — don't let parse failure affect control
 
     @property
     def thresholds(self) -> dict[str, float]:

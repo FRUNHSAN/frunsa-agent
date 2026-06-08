@@ -52,6 +52,87 @@ def _lambda_hint(trust: float, e_t: float) -> str:
     return ""  # No hint — LLM uses its own semantic judgment
 
 
+# ── V5.3 Path 2: Dual-Sensor Fusion (drift ⊕ clarity) ─────────────────
+
+def _compute_drift_factor(raw_drift):
+    """Map absolute cosine distance [0,2] to drift factor [0,1].
+    Deadzone 0.20: normal topic flow, f=0.
+    Ramp 0.20-0.60: substantial direction shift.
+    Saturation >0.60: user overturned all assumptions, f=1.
+    Calibrated from Session 70: R1→R2 drift=0.54, R2→R3 drift=0.42."""
+    if raw_drift < 0.20:
+        return 0.0
+    if raw_drift > 0.60:
+        return 1.0
+    return (raw_drift - 0.20) / 0.40
+
+
+def compute_dual_sensor_f(raw_drift: float, clarity: float) -> float:
+    """Dual-sensor fusion: drift (cross-round trajectory) + clarity (in-round state).
+
+    f_drift: how much user changed topics (temporal, drift factor).
+    f_clarity: how confused user is (instantaneous, 1 - clarity).
+
+    Lucid suppression: clarity > 0.80 → min(f_drift, 0.20).
+    High clarity + high drift = user is lucidly changing topics, not confused.
+    Suppress drift-driven exploration to stay focused.
+
+    Otherwise OR logic: max(f_drift, f_clarity).
+    Either sensor alone can trigger exploration — drift OR confusion.
+
+    Returns fused sensor factor f ∈ [0.0, 1.0].
+    """
+    f_drift = _compute_drift_factor(raw_drift)
+    f_clarity = max(0.0, 1.0 - clarity)
+
+    # Lucid topic switch: user is clear → suppress drift-triggered exploration
+    if clarity > 0.80:
+        return min(f_drift, 0.20)
+
+    # OR logic: either signal triggers exploration
+    return max(f_drift, f_clarity)
+
+
+def _path2_branch_count(f: float) -> int:
+    """Fused sensor factor → Planning branches. Pure math — zero keyword logic.
+
+    f ≤ 0.30:   EXPLOIT  (1 branch, focused execution)
+    0.30 < f ≤ 0.50: BALANCED (2 branches, moderate exploration)
+    f > 0.50:   EXPLORE  (3 branches, maximal coverage)
+    """
+    if f <= 0.3:
+        return 1  # EXPLOIT
+    if f > 0.5:
+        return 3  # EXPLORE
+    return 2      # BALANCED
+
+
+def _critic_factors(raw_drift, e_t):
+    """f(drift): user direction change via deadzone+ramp.
+       g(e_t): strategy failure via deadzone+ramp."""
+    f = _compute_drift_factor(raw_drift)
+    g = max(0.0, min(1.0, (e_t - 0.55) / 0.15))
+    return f, g
+
+
+def _critic_threshold(f, g):
+    """Multiplicative gating. θ drops only when user changed topic AND strategy fails."""
+    return max(0.50, 0.75 - 0.25 * f * g)
+
+
+def _dynamic_output_mult(branch_count, raw_drift):
+    """Cognitive complexity → output capacity multiplier.
+    More branches + higher drift = system is exploring deeply → let it speak fully."""
+    mult = 1.0
+    if branch_count >= 3:
+        mult = 1.8
+    elif branch_count >= 2:
+        mult = 1.4
+    if raw_drift > 0.5:
+        mult = max(mult, 1.6)  # Major topic shift → ensure room
+    return mult
+
+
 # ── Safe async bridge (暗礁 1: event loop bomb) ──────────────────────
 
 def safe_async_run(coro):
@@ -148,18 +229,39 @@ class TrackCEngine:
     # ── Public entry point ──────────────────────────────────────────
 
     def run(self, user: str, system: str, round_count: int = 0,
-            trust: float = 0.5, e_t: float = 0.5) -> str:
-        """Execute Track C pipeline synchronously. Called by REPL.
+            trust: float = 0.5, e_t: float = 0.5,
+            raw_drift: float = 0.0,
+            clarity: float = 0.5):
+        """Execute Track C pipeline. Returns (response_text, output_capacity_mult).
 
-        V5.1: Lambda gain scheduling + DIRECT short-circuit.
+        V5.3: Dual-sensor fusion — raw semantic drift (cross-round) + LLM clarity
+        (in-round) jointly drive Planning branch_count via compute_dual_sensor_f.
+        Critic threshold remains drift-only (preserves sensitivity to semantic
+        space instability even during lucid topic switches).
+
         Flow: Planning → {DIRECT: Synthesis} | {FULL_DAG: Orch → Critic → (retry?) → Synthesize}
         """
         t0 = time.time()
         lambda_hint = _lambda_hint(trust, e_t)
 
+        # ── V5.3 Path 2: Dual-sensor fusion (drift ⊕ clarity) ──
+        f_fused = compute_dual_sensor_f(raw_drift, clarity)
+        branch_count = _path2_branch_count(f_fused)
+        # Critic: drift-only (not fused) — keeps sensitivity to semantic space instability
+        f_drift, g = _critic_factors(raw_drift, e_t)
+        theta = _critic_threshold(f_drift, g)
+        output_mult = _dynamic_output_mult(branch_count, raw_drift)
+        mode = "EXPLORE" if branch_count >= 3 else "BALANCED" if branch_count >= 2 else "EXPLOIT"
+        # 🧊 = lucid suppression active: high clarity killed a drift spike
+        suppression_mark = " 🧊" if clarity > 0.80 and raw_drift > 0.40 else ""
+        self._emit("Path 2",
+            f"{mode}{suppression_mark} (drift={raw_drift:.3f}, clarity={clarity:.2f}, "
+            f"f={f_fused:.2f}, branches={branch_count}, θ={theta:.2f}, out×{output_mult:.1f})")
+
         # ── Phase 1: Planning ──
         self._emit("🔀 Track C Planning", "⏳ 动态规划中...")
-        plan_result = safe_async_run(self._do_plan(user, system, lambda_hint))
+        plan_result = safe_async_run(self._do_plan(
+            user, system, lambda_hint, branch_count))
         is_direct = plan_result and len(plan_result) == 1 and plan_result[0].get("type") == "DIRECT"
 
         self._emit_trace(TraceNode(
@@ -178,7 +280,7 @@ class TrackCEngine:
             pad.critic_score = 1.0  # No critic — assume satisfaction
             final = self._synthesize(user, system, pad)
             self._emit("🔀 Track C 合成", f"完成 ({time.time()-t0:.1f}s)")
-            return final
+            return final, output_mult
 
         # ── FULL_DAG: unchanged pipeline ──
         self._emit("🔀 Track C Planning", f"FULL_DAG: {len(plan_result)} 步 ({time.time()-t0:.1f}s)")
@@ -200,7 +302,7 @@ class TrackCEngine:
             t_critic = time.time()
             self._emit("🔀 Track C Critic", "⏳ 评估中...")
             score, detail = safe_async_run(
-                self._do_critique(user, pad.truncated_for_critic())
+                self._do_critique(user, pad.truncated_for_critic(), theta)
             )
             pad.critic_score = score
             pad.critic_detail = detail
@@ -217,20 +319,17 @@ class TrackCEngine:
         self._emit("🔀 Track C 合成", "⏳ 合成最终回复...")
         final = self._synthesize(user, system, pad)
         self._emit("🔀 Track C 合成", f"完成 ({time.time()-t0:.1f}s)")
-        return final
+        return final, output_mult
 
     # ── Async engine wrappers ───────────────────────────────────────
 
     async def _do_plan(self, user: str, system: str, lambda_hint: str = "",
-                       retry: bool = False) -> list[dict]:
-        """V5.1: Complexity-routing Planning with lambda gain scheduling.
+                       branch_count: int = 1, retry: bool = False) -> list[dict]:
+        """V6: Complexity-routing Planning with lambda + Path 2 gain scheduling.
 
-        LLM chooses between two output formats:
-          DIRECT  — trivial task, skip Orch+Critic, go straight to Synthesis.
-          FULL_DAG — non-trivial task, full Planning→Orch→Critic pipeline.
-
-        Lambda hint injects system state (trust, e_t) as a dynamic prior,
-        adjusting the LLM's risk aversion without commanding its decision.
+        LLM chooses between DIRECT (shallow) and FULL_DAG (deep).
+        When branch_count > 1, FULL_DAG generates parallel exploration paths
+        from different perspectives — each a distinct hypothesis.
         """
         from engines.planning.interface import PlanningContext
         from core.contracts.streaming_protocol import PaceConfig
@@ -238,6 +337,14 @@ class TrackCEngine:
 
         state_hint = f"\n\n{lambda_hint}" if lambda_hint else ""
         min_steps = int(os.environ.get("MIN_PLAN_STEPS", MIN_PLAN_STEPS))
+
+        if branch_count > 1:
+            branch_hint = (
+                f"生成 {branch_count} 条从不同角度切入的探索路径。"
+                f"每条路径代表一种截然不同的假设或视角，避免内容重复。"
+            )
+        else:
+            branch_hint = ""
 
         if not retry:
             goal = (
@@ -250,6 +357,7 @@ class TrackCEngine:
                 f'  {{"type": "FULL_DAG", "steps": [{{"prompt": "...", "tool": ""}}, ...]}}\n'
                 f"  （拆解为 {min_steps}-5 步，每步包含 prompt 和 tool 字段。"
                 f"在 JSON 之前用 <!-- reasoning --> 注释简要说明选择理由。）"
+                f"{' ' + branch_hint if branch_hint else ''}"
                 f"{state_hint}"
             )
         else:
@@ -330,14 +438,23 @@ class TrackCEngine:
         ))
         return "".join(item.delta for item in items)
 
-    async def _do_critique(self, user: str, result_text: str) -> tuple[float, str]:
-        """Evaluate results via CriticEngine."""
+    async def _do_critique(self, user: str, result_text: str,
+                           theta: float = 0.75) -> tuple[float, str]:
+        """Evaluate results via CriticEngine. V6: theta from Path 2 gain schedule."""
         from engines.critic.interface import CriticContext
         from core.contracts.streaming_protocol import PaceConfig
 
+        theta_hint = ""
+        if theta < 0.75:
+            theta_hint = (
+                f"\n[SYSTEM] High uncertainty mode. Lower your passing threshold "
+                f"to {theta:.2f} — prioritize recall over precision. "
+                f"Accept results that are directionally useful even if imperfect."
+            )
+
         ctx = CriticContext(
-            plan_output=f"Goal: {user}\n\nResults: {result_text}",
-            metadata={"goal": user},
+            plan_output=f"Goal: {user}\n\nResults: {result_text}{theta_hint}",
+            metadata={"goal": user, "v6.critic_theta": theta},
         )
         items = await _collect(self._critic.evaluate(
             ctx, deadline=30.0, pace_config=PaceConfig(),

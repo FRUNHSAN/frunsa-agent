@@ -18,10 +18,10 @@ from __future__ import annotations
 import re
 
 # ── Verbose → max sentences ──
-VERBOSE_SENTENCE_LIMITS = {"HIGH": 8, "MEDIUM": 5, "LOW": 3, "MINIMAL": 2}
+VERBOSE_SENTENCE_LIMITS = {"HIGH": 16, "MEDIUM": 8, "LOW": 4, "MINIMAL": 2}
 
 # ── Verbose → max characters (semantic: finds last 。！？ before limit) ──
-VERBOSE_CHAR_LIMITS = {"HIGH": 800, "MEDIUM": 400, "LOW": 150, "MINIMAL": 60}
+VERBOSE_CHAR_LIMITS = {"HIGH": 1600, "MEDIUM": 600, "LOW": 200, "MINIMAL": 80}
 
 # ── PRAGMATIC tone: filler phrases to strip ──
 PRAGMATIC_FILLERS = [
