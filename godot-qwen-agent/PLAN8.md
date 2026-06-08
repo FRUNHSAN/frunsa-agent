@@ -220,12 +220,84 @@ f = Φ(d, c) = {
 - `tests/unit/test_v5_3_dual_sensor.py`：26 参数化测试 + 6 边界测试 = 32 测试，全部通过
 - 全量单元测试零回归
 
-### Phase C — 待规划（V6+）
+### V6 — 部分完成（2026-06-09）：引擎增益调度 + 输出管道重构
 
-1. **Planning/Orch/Critic 引擎重构** — DAG 依赖解析、并发调度、语义级 Critique
-2. **WassersteinProxy 校准** — 在启动时跑基准 QA 对，计算 d_min/d_max
-5. **跨会话模式发现** — 当某个行为模式在 ≥ 3 个会话中被用户的同类型行为选中 → 提议固化为用户画像特征
-6. **TDA 集成** — 用 ripser/gudhi 对交互数据点云做持续同调，检测真正需要新维度的信号
+**V6 不是新的大版本——它是 V5 控制面在引擎层的落地。**
+V5.1-V5.3 完成了 V6 规划中的核心部分，剩余三项待落地。
+
+#### ✅ 已完成（V5.1 → V5.3 中实现）
+
+| V6 原计划 | 落地版本 | 实现 |
+|-----------|---------|------|
+| Path 2: σ² → Planning 分支数 | V5.1 + V5.3 | `_path2_branch_count(f)` — drift⊕clarity 双传感器驱动 1/2/3 分支 |
+| Path 2: σ² × e(t) → Critic 阈值 | V5.1 + V6 | `_critic_threshold(f_drift, g)` — 乘法门控，θ∈[0.50, 0.75] |
+| Path 2: 认知深度 → 输出容量 | V6 pipeline | `_dynamic_output_mult` — 分支数 × drift → 1.0x-1.8x 管道倍率 |
+| Path 3: 脊髓反射 | V5 Phase 1.5 | 连续截断 → char/sentence 倍率自动提升 → 截断缓解 → 自动恢复 |
+| 输出管道基线上限翻倍 | V6 pipeline | HIGH 800→1600 chars, MEDIUM 400→600, LOW 150→200 |
+| 二元 Bang-Bang 路由 | V5 Phase B | Pontryagin 最优控制 → A/C 二元切换, Schmitt trigger 滞后 |
+| 关键词门控切除 | V5.3 | `_SIMPLIFY_CANCEL/DOWNGRADE/_detect_simplification` 删除，纯数学替代 |
+| 双引擎观测器 | V5.3 | `SemanticTrustEngine.assess_clarity()` — LLM 推理通道 |
+
+#### 📋 待落地
+
+**1. Orchestration DAG 拓扑感知（V6.1）**
+
+当前 Orch 引擎（[llm.py:404](engines/orchestration/llm.py)）对所有 step 执行 `asyncio.gather` ——
+全并行。LLM 路由决策返回 `parallel_depth` 但实际未用于控制并发度。
+
+问题：
+- EXPLOIT 模式（branch_count=1）下，用户意图明确——步骤间大概率有依赖关系
+- 全并行执行时，后续步骤无法引用前序步骤的输出
+- `parallel_depth` 只作为 trace metadata 记录，不控制实际并发
+
+目标：
+- 当 `f_fused ≤ 0.3`（EXPLOIT）且 `branch_count=1` → `parallel_depth=1`（串行），步骤间可传递中间结果
+- 当 `f_fused > 0.5`（EXPLORE）→ `parallel_depth=3`（全并行），最大化搜索宽度
+- BALANCED → `parallel_depth=2`
+- 使用 `asyncio.Semaphore(parallel_depth)` 限流，而非全量 `asyncio.gather`
+
+信号源：`f_fused`（来自 V5.3 `compute_dual_sensor_f`）→ 直接映射到 `parallel_depth`。
+零额外 LLM 调用——不需要 LLM 路由决策，纯数学映射。
+
+改动范围：
+- `core/track_c.py`：`_do_orchestrate` 注入 `parallel_depth`
+- `engines/orchestration/llm.py`：`orchestrate()` 接受 `parallel_depth`，用 Semaphore 限流
+- OrchestrationContext 加 `parallel_depth` 字段
+
+**2. WassersteinProxy 启动校准（V6.2）**
+
+当前 `WassersteinProxy.uncalibrated()` 使用原始 cosine distance → [0,1] 的简单映射。
+校准后的 Proxy 通过基准 QA 对学习 d_min/d_max，实现真正的全局 Lipschitz L=1 归一化。
+
+目标：
+- 启动时跑 3-5 对基准 QA（完美匹配 vs 完全无关）
+- 计算 d_min（最佳匹配的 cosine distance）和 d_max（最差匹配的 cosine distance）
+- 归一化：`W_calibrated(a,b) = (cos_dist(a,b) - d_min) / max(d_max - d_min, 1e-8)`
+- 校准后 `is_calibrated = True`，`distance()` 输出真正归一化到 [0,1]
+
+改动范围：
+- `core/adapters/wasserstein_proxy.py`：`calibrate()` 已实现，需在启动时调用
+- `core/repl.py` 或 `core/container.py`：启动时跑基准 QA 对
+
+**3. Path 1 与 Track C 联锁（V6.3）**
+
+当前 Path 1（selection threshold relaxation）和 Track C 引擎各自独立运行。
+Path 1 的 `is_relaxed` 状态会阻止 Track C 激活（`_route_controller` 中强制 route=A），
+但 Track C 内部的 Planning/Critic 参数不感知 Path 1 状态。
+
+目标：
+- 当 Path 1 `is_relaxed` 时，如果 Track C 仍在运行（如用户显式要求引擎），
+  Planning 应使用更大的 `branch_count`（更低的选择阈值 = 更宽的搜索）
+- θ 同步降低——选择阈值宽松意味着 Critic 也应该更宽容
+
+改动范围：
+- `core/track_c.py`：`run()` 接受 `meta_adapt_state`，在 Path 1 relaxed 时
+  对 `f_fused` 加偏置（+0.15）确保至少 BALANCED
+
+### Phase C — 待规划（V6.1+）
+
+1. **跨会话模式发现** — 当某个行为模式在 ≥ 3 个会话中被用户的同类型行为选中 → 提议固化为用户画像特征
+2. **TDA 集成** — 用 ripser/gudhi 对交互数据点云做持续同调，检测真正需要新维度的信号
 
 ### Phase 3 — 远景（需更多研究）
 
