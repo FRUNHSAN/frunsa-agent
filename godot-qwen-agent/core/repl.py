@@ -240,18 +240,6 @@ class Repl:
         context = _build_context(self.history, self.contract_events)
         now = datetime.now().strftime("%H:%M")
         system = f"{contract}\n当前时间: {now}\n{context}".strip()
-
-        # ── V2.2: Relational hint ──
-        hint = self.c.patterns.generate_hint(self.c.cfg.user_id) if self.round_count <= 2 else None
-        if hint:
-            system = f"{hint}\n\n{system}"
-            if xray: self.c.bus.emit("模式记录", hint[:80])
-        # ── V3.1: Narrative emergence (first round only) ──
-        if self.round_count == 1:
-            narrative = self.c.narrative.inject(uid)
-            if narrative:
-                system = f"{narrative}\n\n{system}"
-                if xray: self.c.bus.emit("叙事注入", f"注入用户画像 ({len(narrative)} chars)")
         return system
 
     def _detect_explicit_command(self, text: str) -> tuple[str, str] | None:
@@ -453,11 +441,12 @@ class Repl:
             except Exception:
                 pass
 
-    def _run_track_c(self, user: str, system: str, xray: XRay, live=None) -> str:
-        """Track C: full engine pipeline with retry."""
+    def _run_track_c(self, user: str, system: str, xray: XRay, live=None,
+                     trust: float = 0.5, e_t: float = 0.5) -> str:
+        """Track C: full engine pipeline. V5.1: passes trust + e_t for lambda scheduling."""
         from core.track_c import TrackCEngine
         engine = self._get_track_c_engine()
-        return engine.run(user, system, self.round_count)
+        return engine.run(user, system, self.round_count, trust=trust, e_t=e_t)
 
     def _get_track_c_engine(self):
         """Lazy-init Track C engine with real CloudLLM backend."""
@@ -702,8 +691,7 @@ class Repl:
                 self.c.profile.start_session()
                 print(f"  [新对话] Session {self.c.profile.session_count}.")
 
-            # ── Evaluate (dual-track: Embedding + LLM fallback) ──
-            trust_before = trust
+            # ── V5.2: Semantic observer (X-Ray only, no control injection) ──
             dim, score = None, 0.0
             if USE_SEMANTIC and sem:
                 try:
@@ -711,25 +699,6 @@ class Repl:
                 except Exception:
                     sig = {"dimension": None, "score": 0.0, "all_scores": {}}
                 dim, score = sig["dimension"], sig["score"]
-            # LLM fallback when embedding is uncertain or unavailable
-            if dim is None or (0.3 < score < 0.6 and USE_SEMANTIC):
-                try:
-                    llm_judge = self.c.cloud_llm.generate(
-                        f"判断用户这句话的情绪倾向,只输出一个词(fatigue/gratitude/frustration/neutral):\n"
-                        f"用户: {user}\n情绪:"
-                    ).strip().lower()
-                    if "fatigue" in llm_judge: dim, score = "fatigue", 0.55
-                    elif "frustrat" in llm_judge: dim, score = "frustration", 0.55
-                    elif "gratitude" in llm_judge or "grateful" in llm_judge: dim, score = "gratitude", 0.55
-                except Exception:
-                    pass  # Both tracks failed — skip this round
-
-            if dim == "fatigue":
-                trust = max(0.0, trust - 0.01 * (1 + score))
-            elif dim == "gratitude":
-                trust = min(0.85, trust + 0.02 * (1 + score))
-            elif dim == "frustration":
-                trust = max(0.0, trust - 0.03 * (1 + score))
             if dim:
                 self.c.bus.emit("语义感知", f"{dim}={score:.3f}")
                 self._update_live(xray, live)
@@ -771,15 +740,6 @@ class Repl:
                 if self._apply_proposal(cmd_prop, label="USER COMMAND"):
                     self.contract_events.append(f"[R{self.round_count}] {cmd_prop['target_blueprint_key']} -> {cmd_prop['new_value']}")
                     self.c.bus.emit("用户指令", f"{cmd_prop['target_blueprint_key']} → {cmd_prop['new_value']}")
-
-            # ── Signal interpreter (legacy, kept for backward compat) ──
-            if USE_SEMANTIC and dim:
-                from core.adapters.signal_interpreter import interpret as signal_interpret
-                learned = self.c.learner.get_all_thresholds()
-                for sp in signal_interpret(dim, score, trust, bp.snapshot, user, thresholds=learned):
-                    if self._apply_proposal(sp, label="SIGNAL→CONTRACT"):
-                        self.contract_events.append(f"[R{self.round_count}] {sp['target_blueprint_key']} -> {sp['new_value']}")
-                        self.c.bus.emit("契约演化", f"{sp['target_blueprint_key']} → {sp['new_value']} ({sp.get('human_reason','')[:40]})")
 
             # ── V5: Tracking Error + Meta-Adapt Trigger ──
             from core.adapters.tracking_error import compute_error_signal
@@ -842,7 +802,8 @@ class Repl:
                 f"Track {route} ({reason}) "
                 f"[V5: e(t)={e_t:.2f} sigma2={trust_var:.3f} trust={trust:.2f}]")
             if route == "C":
-                full_response = self._run_track_c(user, system, xray, live)
+                full_response = self._run_track_c(user, system, xray, live,
+                                                     trust=trust, e_t=e_t)
             else:
                 self.c.bus.emit_pending("内容生成", "⏳ 生成中...")
                 self._update_live(xray, live)
@@ -943,12 +904,6 @@ class Repl:
                 result = self.c.listener.on_user_input(user, self.prev_signal, self.prev_response_len)
                 if result:
                     pass
-
-            # ── Record patterns ──
-            if dim == "fatigue" and score > 0.5:
-                self.c.patterns.record(uid, behavior="fatigue_brevity", action="verbose_reduce")
-            if any(w in user for w in ("字少点", "别啰嗦", "简洁")):
-                self.c.patterns.record(uid, behavior="fatigue_explicit", action="brevity_command")
 
             self.prev_response_len = len(full_response)
             self.prev_signal = {"dimension": dim, "score": score} if dim else {"dimension": None, "score": 0.0}
@@ -1067,9 +1022,5 @@ class Repl:
         # Cleanup: close SQLite connections
         try:
             self.c.learner.close()
-        except Exception:
-            pass
-        try:
-            self.c.patterns.close()
         except Exception:
             pass

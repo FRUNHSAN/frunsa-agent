@@ -23,6 +23,35 @@ from core.trace_node import TraceStatus, TraceNode
 MIN_PLAN_STEPS = 3  # Minimum plan steps before retry (configurable via env)
 
 
+# ── V5.1: Lambda Gain Scheduling ───────────────────────────────────
+
+def _lambda_hint(trust: float, e_t: float) -> str:
+    """Inject system state as a dynamic prior into the Planning prompt.
+
+    lambda = f(trust, e_t): adjusts the LLM's risk aversion, not its decision.
+    Low trust or high e(t) -> lambda->0 -> conservative -> prefer FULL_DAG.
+    High trust + low e(t) -> lambda free -> efficiency-optimized -> DIRECT OK.
+    """
+    if trust < 0.15 or e_t > 0.65:
+        return (
+            "[SYSTEM STATE] Trust critically low or tracking error elevated. "
+            "Be extremely conservative — use DIRECT only for trivial single-word "
+            "replies or explicit goodbyes. Default to FULL_DAG for everything else."
+        )
+    if trust < 0.30 or e_t > 0.55:
+        return (
+            "[SYSTEM STATE] Trust below comfort zone or error trending up. "
+            "Lean conservative — DIRECT only for clear format adjustments "
+            "('make it shorter', 'add more detail'). Borderline cases -> FULL_DAG."
+        )
+    if trust > 0.70 and e_t < 0.45:
+        return (
+            "[SYSTEM STATE] High trust, stable tracking. You have full autonomy "
+            "to optimize for efficiency. DIRECT is encouraged for simple tasks."
+        )
+    return ""  # No hint — LLM uses its own semantic judgment
+
+
 # ── Safe async bridge (暗礁 1: event loop bomb) ──────────────────────
 
 def safe_async_run(coro):
@@ -118,22 +147,41 @@ class TrackCEngine:
 
     # ── Public entry point ──────────────────────────────────────────
 
-    def run(self, user: str, system: str, round_count: int = 0) -> str:
-        """Execute full Track C pipeline synchronously. Called by REPL.
+    def run(self, user: str, system: str, round_count: int = 0,
+            trust: float = 0.5, e_t: float = 0.5) -> str:
+        """Execute Track C pipeline synchronously. Called by REPL.
 
-        Flow: Planning → Orchestration → Critic → (retry?) → Synthesize
+        V5.1: Lambda gain scheduling + DIRECT short-circuit.
+        Flow: Planning → {DIRECT: Synthesis} | {FULL_DAG: Orch → Critic → (retry?) → Synthesize}
         """
         t0 = time.time()
+        lambda_hint = _lambda_hint(trust, e_t)
 
         # ── Phase 1: Planning ──
         self._emit("🔀 Track C Planning", "⏳ 动态规划中...")
-        plan_result = safe_async_run(self._do_plan(user, system))
+        plan_result = safe_async_run(self._do_plan(user, system, lambda_hint))
+        is_direct = plan_result and len(plan_result) == 1 and plan_result[0].get("type") == "DIRECT"
+
         self._emit_trace(TraceNode(
             node_id=f"c_plan_{round_count}", name="TrackC_Planning",
             node_type="agent", status=TraceStatus.SUCCESS,
-            metadata={"elapsed_ms": (time.time() - t0) * 1000, "steps": len(plan_result)},
+            metadata={"elapsed_ms": (time.time() - t0) * 1000,
+                      "steps": len(plan_result),
+                      "mode": "DIRECT" if is_direct else "FULL_DAG"},
         ))
-        self._emit("🔀 Track C Planning", f"拆解 {len(plan_result)} 步 ({time.time()-t0:.1f}s)")
+
+        # ── V5.1: DIRECT short-circuit ──
+        if is_direct:
+            self._emit("🔀 Track C Planning", f"DIRECT (short-circuit, {time.time()-t0:.1f}s)")
+            pad = Scratchpad(max_retries=0)
+            pad.plan = plan_result
+            pad.critic_score = 1.0  # No critic — assume satisfaction
+            final = self._synthesize(user, system, pad)
+            self._emit("🔀 Track C 合成", f"完成 ({time.time()-t0:.1f}s)")
+            return final
+
+        # ── FULL_DAG: unchanged pipeline ──
+        self._emit("🔀 Track C Planning", f"FULL_DAG: {len(plan_result)} 步 ({time.time()-t0:.1f}s)")
 
         # ── Phase 2: Orchestration → Critic (retry loop) ──
         pad = Scratchpad(max_retries=2)
@@ -173,31 +221,42 @@ class TrackCEngine:
 
     # ── Async engine wrappers ───────────────────────────────────────
 
-    async def _do_plan(self, user: str, system: str, retry: bool = False) -> list[dict]:
-        """Call PlanningEngine, group StreamItems by step_index into plan steps.
+    async def _do_plan(self, user: str, system: str, lambda_hint: str = "",
+                       retry: bool = False) -> list[dict]:
+        """V5.1: Complexity-routing Planning with lambda gain scheduling.
 
-        Engine emits one StreamItem per reasoning unit with trace_context keys:
-          planning.step_index, planning.reasoning_depth, planning.parent_step_id.
-        We group by step_index → each group = one plan step.
+        LLM chooses between two output formats:
+          DIRECT  — trivial task, skip Orch+Critic, go straight to Synthesis.
+          FULL_DAG — non-trivial task, full Planning→Orch→Critic pipeline.
+
+        Lambda hint injects system state (trust, e_t) as a dynamic prior,
+        adjusting the LLM's risk aversion without commanding its decision.
         """
         from engines.planning.interface import PlanningContext
         from core.contracts.streaming_protocol import PaceConfig
         import os
 
+        state_hint = f"\n\n{lambda_hint}" if lambda_hint else ""
         min_steps = int(os.environ.get("MIN_PLAN_STEPS", MIN_PLAN_STEPS))
-        goal = user
-        if retry:
+
+        if not retry:
             goal = (
                 f"{user}\n\n"
-                f"[约束: 必须拆解为至少 {min_steps} 个独立子任务。"
-                f"每步包含 prompt 和 tool 字段。返回 JSON 数组。]"
+                f"[规划指令] 根据用户意图的复杂度选择输出格式：\n\n"
+                f"如果用户意图是格式微调、简单追问、闲聊或延续已有内容"
+                f"（如'字多一点'、'继续'、'好的'），输出 DIRECT：\n"
+                f'  {{"type": "DIRECT", "action": "直接基于上下文生成回复"}}\n\n'
+                f"如果用户意图需要新增知识、多步推理或工具调用，输出 FULL_DAG：\n"
+                f'  {{"type": "FULL_DAG", "steps": [{{"prompt": "...", "tool": ""}}, ...]}}\n'
+                f"  （拆解为 {min_steps}-5 步，每步包含 prompt 和 tool 字段。"
+                f"在 JSON 之前用 <!-- reasoning --> 注释简要说明选择理由。）"
+                f"{state_hint}"
             )
         else:
             goal = (
                 f"{user}\n\n"
-                f"[约束: 直接输出 {min_steps}-5 个 JSON 步骤。"
-                f"在 JSON 之前用 <!-- reasoning --> 注释简要说明分解逻辑,"
-                f"但最终输出只需 JSON。不需要先分析再合成, 一步完成。]"
+                f"[约束: 必须拆解为至少 {min_steps} 个独立子任务。"
+                f"每步包含 prompt 和 tool 字段。返回 JSON 数组。]"
             )
 
         ctx = PlanningContext(goal=goal, max_parallel_branches=2)
@@ -218,12 +277,22 @@ class TrackCEngine:
         for idx in sorted(groups.keys()):
             text = "".join(groups[idx]).strip()
             if text:
-                steps.append({"prompt": text[:300], "tool": ""})
+                # V5.1: Preserve type field for DIRECT detection
+                step = {"prompt": text[:300], "tool": ""}
+                if '"type": "DIRECT"' in text or "'type': 'DIRECT'" in text:
+                    step["type"] = "DIRECT"
+                elif '"type": "FULL_DAG"' in text or "'type': 'FULL_DAG'" in text:
+                    step["type"] = "FULL_DAG"
+                steps.append(step)
 
-        # Retry if too few steps
+        # DIRECT: always valid (1 step is correct)
+        if steps and steps[0].get("type") == "DIRECT":
+            return steps
+
+        # FULL_DAG: retry if too few steps
         if len(steps) < min_steps and not retry:
             self._emit("🔀 Track C Planning", f"仅 {len(steps)} 步 → 重新规划")
-            return await self._do_plan(user, system, retry=True)
+            return await self._do_plan(user, system, lambda_hint, retry=True)
 
         return steps if steps else [{"prompt": f"综合分析: {user}", "tool": ""}]
 

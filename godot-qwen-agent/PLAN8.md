@@ -1,7 +1,7 @@
 # PLAN8 — 数学自适应契约：从伪自适应到保结构降阶
 
 **日期:** 2026-06-08
-**状态:** V5.0 封版 — Bang-Bang 基线（二元路由 + 三条控制面 + 54 测试）
+**状态:** V5.2 封版 — 纯净控制回路（二元路由 + 三控制面 + 零情绪注入）
 **触发:** 用户质疑——"自适应契约也不是完全自适应，伪自适应"
 **基线:** v5.0-bang-bang-baseline
 
@@ -128,13 +128,39 @@ Track C 对浅层请求（"字多一点"）仍跑全 DAG（50-75s）。
 V5.1 应在 Planning 阶段引入 DIRECT_GENERATION vs FULL_DAG 复杂度路由，
 不加前置探针（陷阱：探针税、双 Planner 竞争、上下文盲区）。
 
-### Phase C — 待规划（V5.1+）
+### V5.1 — 完成（2026-06-08）：Track C 自适应计算深度
 
-1. **Track C 内部弹性** — Planning 阶段复杂度路由 DIRECT_GENERATION/FULL_DAG
+**拉格朗日松弛消除成本悬崖。**
+
+在 Planning 目标函数中嵌入 λ·Cost(Plan) 项，LLM 隐式估计 λ 选择 DIRECT 或 FULL_DAG。
+λ 增益调度 = f(trust, e_t)：trust<0.15 或 e_t>0.65 → λ→0（强制 FULL_DAG）。
+~40 行改动，1 个文件。
+
+同时发现并修复了 LLMPlanningEngine 模板与 V5.1 格式冲突——引擎的
+PLAN_DECOMPOSE_TEMPLATE 强制 "exactly 3 steps"，覆盖了 V5.1 的复杂度路由指令。
+Session 65: Planning 步数从永远 2 变为 1-4 动态。
+
+### V5.2 — 完成（2026-06-08）：情绪检测器降级 + 化石切除
+
+**Observe, Don't Inject（观测不注入）。**
+
+三连切除：
+- signal_interpreter.py（情绪→动作，143 行）— 执行器冲突病灶
+- LLM fallback 情绪检测 — 每轮省 1 次 LLM 调用
+- RelationalPatterns + NarrativeEmergence（时间启发式，~420 行）— "周五下午=用户疲惫"
+- 情绪→trust 惩罚 — 情绪不应修改信任值
+
+SemanticTrustEngine 降级为纯 X-Ray 观测指标。FEEDFORWARD_GAIN=0.0。
+总计 ~710 行删除，零新功能代码。
+
+设计原则确立：
+- Principle #4: Signal over Schedule（信号优于时刻表）
+- Principle #5: Observe, Don't Inject（观测不注入）
+
+### Phase C — 待规划（V6+）
+
+1. **Planning/Orch/Critic 引擎重构** — DAG 依赖解析、并发调度、语义级 Critique
 2. **WassersteinProxy 校准** — 在启动时跑基准 QA 对，计算 d_min/d_max
-2. **选择阈值耦合** — 将 meta_adapt 的动态阈值注入实际响应选择逻辑
-3. **需求层级识别** — LLM 输出 P(tool|input)、P(relational|input)、P(growth|input) 的概率分布，保持未压缩状态
-4. **层级切换** — 从"阈值降低"的代理方案升级为显式的流形切换（工具/关系/成长）
 5. **跨会话模式发现** — 当某个行为模式在 ≥ 3 个会话中被用户的同类型行为选中 → 提议固化为用户画像特征
 6. **TDA 集成** — 用 ripser/gudhi 对交互数据点云做持续同调，检测真正需要新维度的信号
 

@@ -36,7 +36,6 @@ class TestContainer:
         assert ctr.fsm is not None
         assert ctr.profile is not None
         assert ctr.learner is not None
-        assert ctr.patterns is not None
         assert ctr.listener is not None
 
     def test_local_llm_initializes(self):

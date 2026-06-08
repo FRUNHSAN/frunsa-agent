@@ -362,26 +362,3 @@ class TestMetaAdaptTrigger:
         assert isinstance(snap["error_history"], list)
 
 
-# ═══════════════════════════════════════════════════════════════════════
-# Backward compatibility: interpret() still works
-# ═══════════════════════════════════════════════════════════════════════
-
-class TestBackwardCompat:
-    def test_interpret_has_same_signature(self):
-        from core.adapters.tracking_error import interpret
-
-        result = interpret(
-            dim="fatigue",
-            score=0.60,
-            trust=0.30,
-            current_bp={
-                "response_verbose_level": "HIGH",
-                "conversational_initiative": "BALANCED",
-                "tone_style": "WARM",
-                "contextual_anchoring": "HIGH",
-                "proactive_suggestions": "ENABLED",
-                "explanation_style": "THEORETICAL",
-            },
-            user_text="好累",
-        )
-        assert isinstance(result, list)

@@ -13,7 +13,7 @@
 # Schema: schemas/reasoning_chain.schema.json
 
 library_version: 1
-last_updated: "2026-06-08T17:00:00Z"
+last_updated: "2026-06-08T19:45:00Z"
 
 # ── Chains by architectural layer ────────────────────────────────────
 
@@ -348,6 +348,13 @@ chains:
     title: "V5 二元 Bang-Bang 路由 — 从嵌入分类器到 Pontryagin 最优控制"
     layer: plan
     tags: [v5, binary_routing, bang_bang_control, pontryagin, schmitt_trigger, track_excision, cost_cliff]
+    status: active
+
+  - chain_id: v5.2_observer_downgrade
+    file: chains/v5.2_observer_downgrade.yaml
+    title: "V5.2 情绪检测器降级 — 从伪控制器到纯观测器 + 化石大切除"
+    layer: plan
+    tags: [v5.2, observer_downgrade, semantic_trust, signal_interpreter, feedforward_zero, observe_dont_inject, actuator_conflict, planning_template]
     status: active
 
   # ── Real LLM Orchestration + Critic Engines ──

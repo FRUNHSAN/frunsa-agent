@@ -1,0 +1,96 @@
+chain_id: v5.2_observer_downgrade
+title: "V5.2 情绪检测器降级 — 从伪控制器到纯观测器"
+created_at: "2026-06-08"
+status: active
+context: |
+  Session 64 之前，系统有三层情绪检测→动作管线：
+    1. SemanticTrustEngine.detect() — embedding 检测 fatigue/frustration/curiosity/gratitude
+    2. LLM fallback — 每轮 1 次 LLM 调用猜测用户情绪（仅输出一个词）
+    3. signal_interpreter.interpret() — 情绪标签 → Blueprint 修改（verbosity/tone/initiative）
+
+  这条管线和 V5 的显式命令分类器竞争同一个参数空间（verbosity）。
+  Session 51-52 的尸检已证明：frustration=0.671 → verbosity=LOW
+  与用户显式指令"字多一点"→ verbosity=MEDIUM 冲突。
+
+  更根本的问题：embedding 输出是未标定的。7 条人工锚点句 + cosine similarity
+  → 判断用户情绪 → 修改 Blueprint。噪声方差 Var(n) 极可能大于真实
+  情绪扰动方差 Var(d_true)。注入控制回路必然放大误差。
+
+decision: |
+  1. 删除 signal_interpreter.py（情绪→动作的核心病灶，143 行）
+  2. 删除 tracking_error.py 的 interpret() 兼容包装器
+  3. 删除 LLM fallback（每轮省 1 次 LLM 调用）
+  4. 删除情绪→trust 惩罚（fatigue/gratitude/frustration 修改信任值）
+  5. SemanticTrustEngine 降级为纯 X-Ray 观测指标，FEEDFORWARD_GAIN=0.0
+
+rationale: |
+  ### 数学判决：未标定传感器不配做前馈
+
+  前馈有效的条件是 Var(estimate) < Var(disturbance)。SemanticTrust
+  在 7 条锚点句上的 cosine similarity 未标定——false positive rate 未知、
+  混淆矩阵未知。在噪声方差大于信号方差的情况下注入控制回路，
+  必然放大误差而非减小。
+
+  ### 观测不注入（Observe, Don't Inject）
+
+  SemanticTrust 在 X-Ray 中保留观测价值——开发者调试时看到
+  frustration=0.92 可以解释 e(t) 的后续行为。但它不驱动任何动作。
+  死区 = 全范围，增益 = 0。这是数学上唯一正确的默认值。
+
+  ### 执行器冲突解决
+
+  删除 signal_interpreter 后，verbosity/tone/initiative 的修改
+  只由两个 V5 兼容的源驱动：
+    1. 显式命令分类器（用户明确说"字少点""详细点"）
+    2. 显式用户指令（USER COMMAND 源，绕过所有门控）
+  不再有情绪标签和内容指令在同一参数空间竞争。
+
+  ### 附带修复：Planning 模板冲突
+
+  LLMPlanningEngine 的 PLAN_DECOMPOSE_TEMPLATE 强制"exactly 3 steps"，
+  与 V5.1 的 DIRECT/FULL_DAG 格式冲突。改为 "Follow planning instructions in Goal"。
+  _parse_planning_steps 扩展为同时接受引擎原生格式和 V5.1 复杂度路由格式。
+  Session 65 验证：步数从永远 2 变为 1-4 动态。
+
+alternatives:
+  - "保留 SemanticTrust 作为扰动前馈注入 e(t)" — 被否。未标定传感器的
+    前馈注入等价于在控制回路串入未知方差噪声源。死区阈值本身也是猜的。
+    FEEDFORWARD_GAIN=0 在数学上是唯一正确的默认值。
+  - "保留 signal_interpreter 但降低其权重" — 被否。任何非零权重
+    都会造成执行器冲突。半保留 = 半噪声。
+  - "改造 SemanticTrust 为卡尔曼观测融合" — 被否。Embedding 的
+    噪声方差极难标定，未标定观测器融合必然发散。
+
+evidence:
+  - Session 64: frustration 检测保留在 X-Ray，不修改 Blueprint ✅
+  - Session 65: Planning 步数 1-4 动态，模板冲突解除 ✅
+  - 删除 ~290 行（signal_interpreter 143 + interpret 24 + LLM fallback 10
+    + trust 惩罚 6 + 测试 ~100 + repl 调用 8）
+  - 全量单元测试 + 53 V5 测试：零回归
+  - engines/planning/llm.py: PLAN_DECOMPOSE_TEMPLATE 去固定步数约束
+  - engines/planning/llm.py: _parse_planning_steps 支持 V5.1 双格式
+
+future_guidance: |
+  1. SemanticTrust 的观测输出仅写入 X-Ray 日志，绝不进入 LLM Prompt Context。
+     确保观测者效应（Observer Effect）不会造成 LLM 行为偏移。
+  2. 如果未来有 100+ 标注会话的 frustration 检测准确率数据，
+    可以重新评估 FEEDFORWARD_GAIN 从 0 调到非零。但标定数据就绪前，
+    零是最优值。
+  3. Planning/Orch/Critic 引擎架构不动——它们是 V5 的执行器，不是控制器。
+    引擎的 DAG 依赖解析、并发调度、语义 Critique 属于 V6 范畴。
+
+anti_patterns:
+  - 严禁情绪标签重新注入控制回路（FEEDFORWARD_GAIN 必须保持 0.0）
+  - 严禁 SemanticTrust 输出进入 LLM System Prompt
+  - 严禁复活 signal_interpreter.py
+  - 严禁在未标定数据的情况下调整前馈增益
+
+tags:
+  - v5.2
+  - observer_downgrade
+  - semantic_trust
+  - signal_interpreter
+  - feedforward_zero
+  - observe_dont_inject
+  - actuator_conflict
+  - planning_template

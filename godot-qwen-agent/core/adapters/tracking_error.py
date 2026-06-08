@@ -196,24 +196,3 @@ class TrackingErrorEstimator:
         self._last_update = None
 
 
-# ── Backward-compatible interpret() wrapper ───────────────────────────
-# Keeps the same signature as old signal_interpreter.py for test compat.
-# New code should use TrackingErrorEstimator directly.
-
-def interpret(
-    dim: str | None,
-    score: float,
-    trust: float,
-    current_bp: dict[str, str],
-    user_text: str = "",
-    thresholds: dict[str, float] | None = None,
-) -> list[dict]:
-    """Backward-compatible wrapper. Delegates to old signal_interpreter.
-
-    This function exists so that existing tests importing `interpret`
-    from signal_interpreter continue to work. The new tracking error
-    path is accessed via TrackingErrorEstimator, not this function.
-    """
-    # Delegate to old implementation for backward compat
-    from core.adapters.signal_interpreter import interpret as _old_interpret
-    return _old_interpret(dim, score, trust, current_bp, user_text, thresholds)

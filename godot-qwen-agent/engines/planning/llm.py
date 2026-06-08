@@ -71,13 +71,14 @@ class MockLLMBackend:
 # ── Prompt Templates ───────────────────────────────────────────────────
 
 PLAN_DECOMPOSE_TEMPLATE = """\
-You are a planning agent. Decompose the following goal into concrete steps.
+You are a planning agent. Follow the planning instructions in the Goal section below.
 
 Goal: {goal}
 
 Sub-tasks to dispatch in parallel: {sub_tasks}
 Max parallel branches: {max_branches}
 
+If the Goal does not specify a custom output format, use this default:
 Return a JSON array of planning steps. Each step has:
 - "step_id": integer (0-based position in the reasoning chain)
 - "depth": integer (0=root analysis, 1=sub-task decomposition)
@@ -85,12 +86,7 @@ Return a JSON array of planning steps. Each step has:
 - "content": string (the reasoning text for this step)
 - "is_terminal": boolean (true only for the final conclusion step)
 
-Include exactly 3 steps:
-1. Root analysis of the goal (depth=0, parent_id=null)
-2. Sub-task decomposition into parallel branches (depth=1)
-3. (terminal) Synthesis of branch results (depth=1, is_terminal=true)
-
-Respond with ONLY the JSON array, no other text."""
+Respond with ONLY the JSON, no other text."""
 
 PLAN_SYNTHESIZE_TEMPLATE = """\
 Synthesize the following parallel branch results into a final conclusion.
@@ -139,8 +135,8 @@ def _parse_planning_steps(
 ) -> List[PlanningStep]:
     """Parse LLM output into PlanningStep instances.
 
-    Handles markdown code fences, extra JSON fields, missing optional fields.
-    Raises ValueError with context on parse failures.
+    V5.2: accepts both the engine-native format (step_id/depth/content array)
+    and the V5.1 complexity-routing format (DIRECT or FULL_DAG object).
     """
     text = raw_text.strip()
     if text.startswith("```"):
@@ -158,9 +154,33 @@ def _parse_planning_steps(
             f"Raw (first 500 chars): {raw_text[:500]}"
         )
 
+    # ── V5.2: Handle V5.1 complexity-routing format ──
+    if isinstance(data, dict) and "type" in data:
+        plan_type = data["type"]
+        if plan_type == "DIRECT":
+            return [PlanningStep(
+                step_index=0, reasoning_depth=0, parent_step_id=None,
+                content=json.dumps(data, ensure_ascii=False),
+                is_terminal=True,
+            )]
+        if plan_type == "FULL_DAG":
+            dag_steps = data.get("steps", [])
+            steps = []
+            for i, s in enumerate(dag_steps):
+                steps.append(PlanningStep(
+                    step_index=i, reasoning_depth=1, parent_step_id=None,
+                    content=s.get("prompt", str(s)),
+                    is_terminal=(i == len(dag_steps) - 1),
+                ))
+            if steps:
+                return steps
+            raise ValueError("FULL_DAG had no steps")
+
+    # ── Engine-native format: JSON array ──
     if not isinstance(data, list):
         raise ValueError(
-            f"Expected JSON array of steps, got {type(data).__name__}"
+            f"Expected JSON array of steps or V5.1 planning object, "
+            f"got {type(data).__name__}"
         )
 
     steps: List[PlanningStep] = []

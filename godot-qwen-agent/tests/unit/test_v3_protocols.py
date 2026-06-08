@@ -2,75 +2,14 @@
 
 import pytest
 from core.contracts.v3_protocols import (
-    SemanticTrustDetector, PatternRepository, ToolRegistry,
+    SemanticTrustDetector, ToolRegistry,
 )
 from tests.mocks import (
-    MockPatternRepository, MockSemanticTrustDetector, MockToolRegistry,
+    MockSemanticTrustDetector, MockToolRegistry,
 )
 
 
 # ═══════════════════ PatternRepository Protocol ═══════════════════
-
-class TestPatternRepositoryProtocol:
-    """Both SQLite and Mock must satisfy PatternRepository."""
-
-    def test_mock_satisfies_protocol(self):
-        repo = MockPatternRepository()
-        assert isinstance(repo, PatternRepository)
-
-    def test_sqlite_satisfies_protocol(self):
-        from core.adapters.relational_patterns import RelationalPatterns
-        repo = RelationalPatterns(":memory:")
-        assert isinstance(repo, PatternRepository)
-        repo.close()
-
-    def test_mock_record_and_query(self):
-        repo = MockPatternRepository()
-        for _ in range(4):
-            repo.record("user_a", "fatigue_brevity", "verbose_low",
-                        tags="Tuesday,afternoon")
-        results = repo.query_active("user_a")
-        assert len(results) >= 1
-        assert results[0]["confidence"] >= 0.8
-
-    def test_mock_below_threshold_no_results(self):
-        repo = MockPatternRepository()
-        for _ in range(2):  # Only 2 — below min_occurrence=3
-            repo.record("user_a", "fatigue_brevity", "verbose_low")
-        results = repo.query_active("user_a")
-        assert len(results) == 0
-
-    def test_mock_low_confidence_filtered(self):
-        repo = MockPatternRepository()
-        for i in range(3):
-            repo.record("user_a", "fatigue_brevity", "verbose_low",
-                        success=(i == 0))  # 1/3 success = 33%
-        results = repo.query_active("user_a", min_confidence=0.8)
-        assert len(results) == 0
-
-    def test_mock_hint_generation(self):
-        repo = MockPatternRepository()
-        for _ in range(3):
-            repo.record("user_a", "fatigue_brevity", "verbose_low")
-        hint = repo.generate_hint("user_a")
-        assert hint is not None
-        assert "关系预判" in hint
-
-    def test_mock_no_hint_for_unknown_user(self):
-        repo = MockPatternRepository()
-        hint = repo.generate_hint("unknown")
-        assert hint is None
-
-    def test_mock_decay(self):
-        repo = MockPatternRepository()
-        for _ in range(3):
-            repo.record("user_a", "fatigue_brevity", "verbose_low")
-        decayed = repo.decay_all("user_a")
-        assert decayed >= 1
-
-
-# ═══════════════════ SemanticTrustDetector Protocol ═══════════════
-
 class TestSemanticTrustProtocol:
     """Embedding engine + mock must satisfy SemanticTrustDetector."""
 
@@ -156,18 +95,12 @@ class TestToolRegistryProtocol:
 class TestV3MockIntegration:
     """Pipeline components with mock dependencies."""
 
-    def test_signal_interpreter_with_mock_detector(self):
+    def test_semantic_detector_with_mock(self):
         detector = MockSemanticTrustDetector()
         detector.set_response("fatigue", 0.72)
         sig = detector.detect("字少点")
         assert sig["dimension"] == "fatigue"
-
-        from core.adapters.signal_interpreter import interpret
-        proposals = interpret(sig["dimension"], sig["score"], trust=0.30,
-                              current_bp={"response_verbose_level": "HIGH",
-                                          "conversational_initiative": "BALANCED",
-                                          "tone_style": "WARM"})
-        assert len(proposals) > 0
+        assert sig["score"] == 0.72
 
     def test_action_pipeline_with_mock_registry(self):
         registry = MockToolRegistry({
@@ -182,14 +115,3 @@ class TestV3MockIntegration:
                              if k in ToolContract.__dataclass_fields__})
         ok, _ = tc.check_trust(0.30)
         assert ok
-
-    def test_pattern_repo_mock_feeds_hint_to_prompt(self):
-        repo = MockPatternRepository()
-        for _ in range(3):
-            repo.record("user_a", "fatigue_brevity", "verbose_low")
-        hint = repo.generate_hint("user_a")
-        assert hint is not None
-        # Simulate what run_live.py does
-        system_prompt = f"{hint}\n\n[CURRENT MODE] Verbose: MEDIUM"
-        assert "关系预判" in system_prompt
-        assert "CURRENT MODE" in system_prompt

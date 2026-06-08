@@ -5,7 +5,6 @@ Stable single-implementation components stay as-is.
 
 Protocols defined:
   - SemanticTrustDetector : embedding | zero-shot classifier | tinyLLM+GBNF
-  - PatternRepository     : SQLite | Redis | Postgres
   - ToolRegistry          : static dict | MCP dynamic discovery
   - ThresholdLearner      : (already exists in threshold_learner.py, referenced here)
 """
@@ -35,42 +34,6 @@ class SemanticTrustDetector(Protocol):
     @property
     def dimensions(self) -> list[str]:
         """List of detectable trust dimensions."""
-        ...
-
-
-# ═══════════════════════════════════════════════════════════════════
-# PatternRepository — 三个后端: SQLite / Redis / Postgres
-# ═══════════════════════════════════════════════════════════════════
-
-@runtime_checkable
-class PatternRepository(Protocol):
-    """Store and query cross-session behavioral patterns.
-
-    Current: RelationalPatterns (SQLite)
-    Future:  RedisPatternRepository (in-memory, clustered)
-             PostgresPatternRepository (multi-tenant, HA)
-    """
-
-    def record(
-        self, user_id: str, behavior: str, action: str,
-        success: bool = True, tags: str = "",
-    ) -> bool:
-        """Record a pattern occurrence. Returns True if newly created."""
-        ...
-
-    def query_active(
-        self, user_id: str, min_occurrence: int = 3,
-        min_confidence: float = 0.8,
-    ) -> list[dict]:
-        """Return patterns ready for proactive anticipation."""
-        ...
-
-    def generate_hint(self, user_id: str) -> str | None:
-        """Return a natural-language proactive hint, or None."""
-        ...
-
-    def decay_all(self, user_id: str, days: int = 28) -> int:
-        """Apply time decay to old patterns. Returns count of rows decayed."""
         ...
 
 

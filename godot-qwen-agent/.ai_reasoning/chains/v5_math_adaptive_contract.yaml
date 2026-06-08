@@ -70,6 +70,8 @@ future_guidance: |
      Path 1（皮层）: route==C + e(t)>0.70 ×5 → 选择阈值 — 认知层，5 轮
      路由为二元 Bang-Bang 控制器，Pontryagin 最大值原理证明中间态（Track B）非最优。
      Track B 已切除（硬编码 3 步模板 + 字符计数 = 假闭环，图论不含环）。
+     V5.2: 情绪检测器降级为纯 X-Ray 观测器（Observe, Don't Inject）。
+     signal_interpreter.py 删除，LLM fallback 删除，FEEDFORWARD_GAIN=0.0。
 
   1. 选择阈值 current_sel 当前在 REPL 中使用 meta_adapt.default_threshold，
      尚未与实际的工具选择/内容过滤逻辑耦合。下一步应该在 response selection
