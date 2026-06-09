@@ -1279,17 +1279,86 @@ AST 解析 → Mypy 类型检查 → RestrictedPython 转换 → 沙箱执行
 
 Mypy 排在沙箱之前——类型错误比运行时错误更安全、更早暴露。RestrictedPython 是"语义滤网"（防 LLM 幻觉），不是"安全防线"（防恶意注入——那是 OS 沙箱的工作）。
 
+### V8 铺垫：per-Loop 预算 + retry_policy 注入点
+
+V8 的 2-范畴 Loop 形式化需要三个东西同时在线：Loop 对象、重试关系（2-态射）、横合成代数。V7.2 只有一种 Loop 类型（物理执行），过度抽象没有意义。但两处 8 行铺垫可以让 V8 不拆核心引擎。
+
+**铺垫 1: PhysicalBudget 从全局 → per-Loop**
+
+```python
+# V7.1: TrackCEngine 类级共享计数器
+budget = PhysicalBudget(max=5)  # 所有 step 共享
+
+# V7.2: 每个物理 step 携带预算切片
+# Orch 分配: 3 个物理 step → budget=[2, 2, 1]
+# V8 多 Agent 时每个 Agent 有独立的预算边界，不需要全局协商
+```
+
+5 行 — `_orchestrate_one` 的参数从无到 `budget_slice: int = 1`。
+
+**铺垫 2: retry 逻辑暴露注入点**
+
+```python
+# V7.1: while 循环硬编码在循环体内
+# V7.2: retry_policy 是 optional callable
+# 默认行为不变，但 V8 可以替换成 formal Loop 对象
+
+async def _orchestrate_one(self, step, ..., retry_policy=None):
+    if retry_policy is None:
+        retry_policy = _default_retry_policy
+```
+
+3 行 — 不改任何行为，留一个 V8 插手的接口。
+
+**为什么不在 V7.2 做更多**：等 V7.3 把 MCP 物理集成 + 阻力场 DAG 做完，就有了至少三种 Loop 类型（代码执行、MCP 文件操作、语义规划）。那时候 2-范畴的横合成才有实际的组合对象可以操作。
+
+| | V7.2 不做铺垫 | V7.2 做铺垫 | 
+|---|---|---|
+| V7.2 成本 | 0 | 8 行 |
+| V8 成本 | 拆 TrackCEngine 类级状态 + 嵌入式 while | 替换 retry_policy + per-Loop budget |
+
+### 四个工程补丁
+
+#### 补丁 A: Mypy 进程内调用 + dmypy 预埋
+
+`subprocess(['mypy', tmpfile])` 每次 fork + typeshed 加载 = 300-800ms。4 个物理 step × Mypy = 2-3 秒浪费。
+
+**V7.2**: `mypy.api.run(['-c', code_string])` 进程内调用，首调用 ~300ms，后续 ~50ms。
+**V7.3 预埋**: 注释 `# TODO V7.3: dmypy daemon, ~10ms per check`
+
+#### 补丁 B: Test Cases 特洛伊木马 — 双重过滤 + 声明式约束
+
+test_cases 是 LLM 生成的代码——和 code 有相同的破坏力。
+
+**防御 1**: test_cases 必须和 code 一样过 AST + RestrictedPython。
+**防御 2**: Prompt 硬约束 — "test_cases 只能包含 assert 语句。禁止 import/class/for/while/I/O。"
+
+#### 补丁 C: 预算耗尽 Fail-Safe — REJECT, 不裸奔
+
+```
+if not budget.can_afford(next_layer_cost):
+    return REJECTED  // 绝不让代码在没有完整滤网的情况下执行
+```
+
+#### 补丁 D: f-string assert → 零 LLM 正则提取
+
+Prompt 约束: `assert func(input) == expected, f"Expected {expected}, got {actual}"`
+→ `AssertionError: Expected [1,2,3], got [3,2,1]`
+→ `re.search(r"Expected (.*), got (.*)", msg)` → 纯正则，零 LLM
+
 ### V7.2 改动清单
 
 | 文件 | 改动 | 行数 |
 |------|------|------|
-| `core/track_c.py` | `_do_plan()` prompt — Test-First 契约：先输出 test_cases，再输出代码 | +10 |
-| `core/execution/sandbox.py` | +`_check_mypy(code)` — subprocess mypy 类型检查 (Layer 2) | +30 |
-| `core/execution/sandbox.py` | +`_run_restricted(code, test_cases)` — RestrictedPython 沙箱 (Layer 3) | +40 |
-| `core/execution/sandbox.py` | `run()` — 三层滤网顺序执行 + 分层计费 (PhysicalBudget) | +15 |
-| `tests/unit/test_v7_2_layered_execution.py` | AST+Mypy+Sandbox 分层验收 + test_cases 前置契约 | +30 |
+| `core/track_c.py` | `_do_plan()` prompt — Test-First + f-string assert + 声明式约束 (补丁 B+D) | +15 |
+| `core/execution/sandbox.py` | +`_check_mypy(code)` — `mypy.api.run()` 进程内调用 (补丁 A) | +30 |
+| `core/execution/sandbox.py` | +`_run_restricted(code, test_cases)` — RestrictedPython (Layer 3) | +40 |
+| `core/execution/sandbox.py` | `run()` — 三层滤网顺序 + 预算 REJECT + test_cases 双重过滤 (补丁 B+C) | +15 |
+| `core/execution/error_mapper.py` | +`_extract_from_assertion(msg)` — f-string 正则提取 (补丁 D) | +8 |
+| `core/track_c.py` | V8 铺垫: `_orchestrate_one` +`budget_slice`, +`retry_policy` 注入点 | +8 |
+| `tests/unit/test_v7_2_layered_execution.py` | 分层 + 双重过滤 + REJECT + 正则提取 | +40 |
 
-**总计: ~125 行, 2 文件。**
+**总计: ~156 行, 4 文件。**
 
 ### 验收标准
 
