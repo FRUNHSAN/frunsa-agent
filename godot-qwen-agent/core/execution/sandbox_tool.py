@@ -5,19 +5,18 @@ USB pattern: zero ToolEngine changes. Just register and dispatch.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
-from core.contracts.registry import COMPONENT_REGISTRY
+from core.contracts import SemVer
+from core.contracts.registry import register_component
 from core.contracts.tool import ToolResult, ToolProtocol
 
 
-@COMPONENT_REGISTRY.register("tool", "sandbox_python")
+@register_component("tool", "sandbox_python")
 class SandboxPythonTool(ToolProtocol):
-    """Tool implementation: execute Python code in sandbox and return result.
+    """Tool implementation: execute Python code in sandbox and return result."""
 
-    Registered as: COMPONENT_REGISTRY.register("tool", "sandbox_python", SandboxPythonTool)
-    """
-
+    VERSION: ClassVar[SemVer] = SemVer(1, 0, 0)
     name = "sandbox_python"
     description = "Execute Python code in an isolated sandbox with AST verification and optional test cases."
     parameters_schema = {
