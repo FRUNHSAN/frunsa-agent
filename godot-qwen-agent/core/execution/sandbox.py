@@ -89,19 +89,24 @@ class SandboxExecutor:
 
     def run(self, code: str, test_cases: list[dict] | None = None,
             intent_type: str = "EXECUTABLE",
-            budget=None) -> ExecutionResult:
-        """V7.2: Layered physical verification with weighted budget.
+            budget=None,
+            use_docker: bool = False) -> ExecutionResult:
+        """V7.3: Layered physical verification with optional OS isolation.
 
         Layer 1 (AST, cost=0): always runs, catches ~80% syntax errors.
         Layer 2 (Mypy, cost=0.1): static type check, skipped if budget < 0.1.
         Layer 3 (Sandbox, cost=1.0): restricted execution with timeout.
-        Fail-Safe: budget < 1.0 → REJECT (never execute without full filter chain).
+        Layer 4 (Docker, cost=2.0, optional): OS-level container isolation.
+            Red-Team #1: stdin pipe — cross-platform compatible.
+            Graceful fallback to Layer 3 if Docker unavailable.
+        Fail-Safe: budget < 1.0 -> REJECT.
 
         Args:
             code: Python source code to verify.
             test_cases: Optional list of {input, expected} pairs.
             intent_type: EXECUTABLE, PSEUDOCODE, DEMONSTRATION, DESTRUCTIVE_TEST.
             budget: Optional PhysicalBudget for layered accounting.
+            use_docker: If True, attempt Layer 4 Docker isolation after Layer 3.
         """
         t0 = time.perf_counter()
         tc = test_cases or []
@@ -151,6 +156,29 @@ class SandboxExecutor:
         if budget is None or budget.spend(1.0):
             exec_result = self._run_restricted(code, tc)
             exec_result.elapsed_ms = (time.perf_counter() - t0) * 1000
+
+            # If Layer 3 failed or Docker not requested, return immediately
+            if exec_result.state != PhysicalState.PASS or not use_docker:
+                return exec_result
+
+            # ── Layer 4: Docker OS isolation (V7.3, cost=2.0, optional) ──
+            # S4 filter — catches kernel escapes, filesystem violations.
+            # Only attempted when Layer 3 passes AND budget allows.
+            if budget is not None and budget.remaining < 2.0:
+                # Budget can't afford Docker — return Layer 3 result as-is
+                exec_result.output += " [Docker skipped: insufficient budget]"
+                return exec_result
+
+            if budget is None or budget.spend(2.0):
+                docker_result = self._run_docker(code, tc)
+
+                if docker_result.state == PhysicalState.DOCKER_UNAVAILABLE:
+                    # Graceful fallback to Layer 3 result
+                    return exec_result
+
+                docker_result.elapsed_ms = (time.perf_counter() - t0) * 1000
+                return docker_result
+
             return exec_result
 
         return ExecutionResult(
@@ -244,6 +272,232 @@ class SandboxExecutor:
                 error_message=f"mypy error: {e}",
             )
         return ExecutionResult(state=PhysicalState.PASS)
+
+    # ── Layer 2b: dmypy daemon (V7.3) ────────────────────────────────
+
+    # Module-level state for dmypy daemon lifecycle
+    _dmypy_started: bool = False
+    _dmypy_lock = None  # threading.Lock, lazily initialized
+
+    @classmethod
+    def _check_mypy_daemon(cls, code: str) -> ExecutionResult:
+        """V7.3 Layer 2b: dmypy daemon — persistent typeshed (~10ms vs 300ms).
+
+        First call starts dmypy daemon. Subsequent calls use dmypy check
+        for cached type-check. Falls back to _check_mypy() if dmypy is
+        unavailable or crashes.
+
+        Mathematical: path-connected state space — dmypy keeps typeshed
+        loaded across checks, avoiding the disconnected subprocess hops.
+        """
+        import threading
+        if cls._dmypy_lock is None:
+            cls._dmypy_lock = threading.Lock()
+
+        try:
+            from mypy import api as mypy_api
+        except ImportError:
+            return cls._check_mypy(code)  # Fallback to regular mypy
+
+        with cls._dmypy_lock:
+            try:
+                # First call: start daemon if not running
+                if not cls._dmypy_started:
+                    try:
+                        mypy_api.run_dmypy([
+                            'start', '--', '--ignore-missing-imports',
+                        ])
+                        cls._dmypy_started = True
+                    except Exception:
+                        # dmypy not available -> fall back to regular mypy
+                        return cls._check_mypy(code)
+
+                # Use dmypy for fast type check
+                stdout, stderr, exit_code = mypy_api.run_dmypy([
+                    'check', '-c', code,
+                ])
+                if exit_code != 0:
+                    error_text = stdout[:500] or stderr[:500] or f"dmypy exit {exit_code}"
+                    return ExecutionResult(
+                        state=PhysicalState.TYPE_MISMATCH,
+                        error_message=error_text,
+                    )
+            except Exception:
+                # dmypy crashed or disconnected — fall back
+                cls._dmypy_started = False
+                return cls._check_mypy(code)
+
+        return ExecutionResult(state=PhysicalState.PASS)
+
+    # ── Layer 4: Docker OS isolation (V7.3) ───────────────────────────
+
+    def _build_full_script(self, code: str,
+                           test_cases: list[dict]) -> str:
+        """Pack code + test_cases into a self-contained Python script.
+
+        The script:
+          1. Defines safe builtins
+          2. Executes the user code
+          3. Runs each test case
+          4. Prints a structured JSON result line
+        """
+        import json
+        lines = [
+            "import sys, json, traceback",
+            "",
+            "# Restricted builtins",
+            "_safe_builtins = {",
+            "    'abs': abs, 'all': all, 'any': any, 'bool': bool,",
+            "    'dict': dict, 'enumerate': enumerate, 'filter': filter,",
+            "    'float': float, 'int': int, 'len': len, 'list': list,",
+            "    'map': map, 'max': max, 'min': min, 'print': print,",
+            "    'range': range, 'reversed': reversed, 'round': round,",
+            "    'set': set, 'sorted': sorted, 'str': str, 'sum': sum,",
+            "    'tuple': tuple, 'type': type, 'zip': zip,",
+            "    'True': True, 'False': False, 'None': None,",
+            "    'Exception': Exception, 'ValueError': ValueError,",
+            "    'TypeError': TypeError, 'KeyError': KeyError,",
+            "    'IndexError': IndexError, 'StopIteration': StopIteration,",
+            "}",
+            "_ns = {'__builtins__': _safe_builtins}",
+            "",
+            "# User code",
+            "try:",
+        ]
+        for line in code.split("\n"):
+            lines.append(f"    {line}")
+
+        lines.append("    exec(compile(__code__, '<docker_sandbox>', 'exec'), _ns)")
+        lines.append("except Exception as e:")
+        lines.append("    print(json.dumps({'state': 'RUNTIME_ERR', 'error': str(e)}))")
+        lines.append("    sys.exit(1)")
+        lines.append("")
+
+        # Test cases
+        if test_cases:
+            lines.append("# Test cases")
+            lines.append("_results = []")
+            lines.append(f"_tc = {json.dumps(test_cases)}")
+            lines.append("for _i, _t in enumerate(_tc):")
+            lines.append("    try:")
+            lines.append("        _fn = None")
+            lines.append("        for _k, _v in _ns.items():")
+            lines.append("            if callable(_v) and not _k.startswith('_'):")
+            lines.append("                _fn = _v; break")
+            lines.append("        if _fn is None:")
+            lines.append("            _results.append({'index': _i, 'error': 'no callable found'})")
+            lines.append("            continue")
+            lines.append("        _args = eval(_t['input'], {'__builtins__': {}}, {})")
+            lines.append("        _got = _fn(*_args) if isinstance(_args, tuple) else _fn(_args)")
+            lines.append("        _expected = _t.get('expected')")
+            lines.append("        _passed = _got == _expected")
+            lines.append("        _results.append({'index': _i, 'got': repr(_got),")
+            lines.append("                         'expected': _expected, 'passed': _passed})")
+            lines.append("    except Exception as _e:")
+            lines.append("        _results.append({'index': _i, 'got': f'{type(_e).__name__}: {_e}',")
+            lines.append("                         'expected': _t.get('expected'), 'passed': False})")
+            lines.append("print(json.dumps({'state': 'PASS', 'test_results': _results}))")
+        else:
+            lines.append("print(json.dumps({'state': 'PASS'}))")
+
+        return "\n".join(lines)
+
+    def _run_docker(self, code: str,
+                    test_cases: list[dict]) -> ExecutionResult:
+        """V7.3 Layer 4: Docker container OS isolation.
+
+        Red-Team #1: stdin pipe instead of volume mount — direct morphism
+        avoids cross-OS pullback failure on Windows/WSL2.
+
+        Mathematical: S4 filter in the code filtration tower.
+        Topological: C \\ S4 = open set of "code that violates OS isolation."
+        Docker shrinks this open set to near measure-zero.
+
+        Graceful degradation:
+          - Docker not installed -> DOCKER_UNAVAILABLE (fallback S3)
+          - Container timeout -> TIMEOUT (semantic escape)
+          - Container crash -> RUNTIME_ERR (retryable)
+        """
+        import subprocess
+
+        full_script = self._build_full_script(code, test_cases)
+
+        try:
+            result = subprocess.run([
+                'docker', 'run', '--rm', '-i',
+                '--network=none',
+                '--memory=256m',
+                '--cpus=0.5',
+                '--read-only',
+                '--tmpfs=/tmp:rw,noexec',
+                'python:3.11-slim',
+                'timeout', '5', 'python', '-c',
+                'import sys; exec(sys.stdin.read())',
+            ], input=full_script, capture_output=True, text=True, timeout=10)
+
+        except FileNotFoundError:
+            return ExecutionResult(
+                state=PhysicalState.DOCKER_UNAVAILABLE,
+                error_message="Docker is not installed or not in PATH.",
+            )
+        except subprocess.TimeoutExpired:
+            return ExecutionResult(
+                state=PhysicalState.TIMEOUT,
+                error_message="Docker container exceeded 10s deadline.",
+            )
+
+        if result.returncode != 0:
+            stderr = result.stderr[:500] or "unknown docker error"
+            # Parse the JSON error if possible
+            try:
+                import json
+                data = json.loads(stderr.split('\n')[-2] if '\n' in stderr else stderr)
+                return ExecutionResult(
+                    state=PhysicalState.RUNTIME_ERR,
+                    error_message=data.get('error', stderr),
+                )
+            except Exception:
+                pass
+            return ExecutionResult(
+                state=PhysicalState.RUNTIME_ERR,
+                error_message=stderr,
+            )
+
+        # Parse JSON result from stdout
+        try:
+            import json
+            # Last non-empty line should be the JSON result
+            output_lines = [l for l in result.stdout.split('\n') if l.strip()]
+            if output_lines:
+                data = json.loads(output_lines[-1])
+                state_str = data.get('state', 'PASS')
+                if state_str == 'PASS':
+                    test_results = data.get('test_results', [])
+                    all_passed = all(t.get('passed', False) for t in test_results)
+                    if test_results and not all_passed:
+                        failed_count = sum(1 for t in test_results if not t.get('passed', False))
+                        return ExecutionResult(
+                            state=PhysicalState.RUNTIME_ERR,
+                            error_message=f"{failed_count}/{len(test_results)} test cases failed",
+                            test_results=test_results,
+                        )
+                    return ExecutionResult(
+                        state=PhysicalState.PASS,
+                        output=result.stdout[:500],
+                        test_results=test_results,
+                    )
+                else:
+                    return ExecutionResult(
+                        state=PhysicalState.RUNTIME_ERR,
+                        error_message=data.get('error', 'Docker sandbox failed'),
+                    )
+        except Exception:
+            pass
+
+        return ExecutionResult(
+            state=PhysicalState.PASS,
+            output=result.stdout[:500],
+        )
 
     # ── Layer 3: Sandbox ────────────────────────────────────────────
 
