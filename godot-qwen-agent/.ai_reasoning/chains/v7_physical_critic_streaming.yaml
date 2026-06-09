@@ -65,20 +65,27 @@ rationale: |
   社交信号 |err_A|≈0 → 控制纯浪费 → 选 A 是数学最优
 
 evidence:
-  - core/execution/sandbox.py: SandboxExecutor + PhysicalState (24 tests)
-  - core/execution/error_mapper.py: ErrorMapper assertion diff + traceback fallback
-  - core/critic/dual_track.py: DualTrackCritic + PhysicalBudget (14 integration tests)
-  - core/track_c.py: _synthesize_stream + _stream_and_collect
-  - core/repl.py: streaming callback + live.stop/start + Track A decay directive
+  - core/execution/sandbox.py: SandboxExecutor + PhysicalState + 3-tier filters (AST, Mypy, RestrictedPython)
+  - core/execution/error_mapper.py: ErrorMapper + ⊢ delimiter extraction (zero-LLM regex)
+  - core/critic/dual_track.py: DualTrackCritic + PhysicalBudget (float-weighted)
+  - core/track_c.py: _synthesize_stream + _build_synthesis_prompt(constraints) + hard retry loop
+  - core/track_c.py: _extract_code (π: S→C projection) + _format_retry_hint + _signature_lock_hint
+  - core/repl.py: streaming callback + Track A FIR decay + --pseudo flag
+  - core/config.py: --pseudo CLI flag (all steps PSEUDOCODE, skip physical verification)
   - tests/unit/test_v7_1_physical_critic.py: 24 tests
+  - tests/unit/test_v7_2_layered_execution.py: 20 tests (budget, filters, ⊢ extraction, double-filter)
   - tests/integration/test_v7_1_sandbox_integration.py: 14 tests
   - Session 78-80: streaming works, X-Ray deduplicated, Track A FIR kernel
+  - Session 86-87: physical retry loop triggered (COMPILE_ERR → fix_hint → retry → PASS)
+  - Session 88: --pseudo mode skips physical verification, budget 0 consumed
 
 alternatives:
-  - "物理 Critic 一票否决语义 Critic" — 被否决 (违背自适应契约身份，生硬层级关系)
-  - "Traceback 帧快照还原犯罪现场" — 被否决 (第三方库和表达式求值是黑盒)
-  - "Track A 保持全量历史" — 被否决 (IIR 导致社交信号触发长篇技术回复)
+  - "物理 Critic 一票否决语义 Critic" — 被否决 (违背自适应契约身份，乘法门控保留)
+  - "Traceback 帧快照还原犯罪现场" — 被否决 (第三方库和表达式求值是黑盒，改用 ⊢ 正则)
+  - "Track A 保持全量历史" — 被否决 (IIR 导致社交信号触发长篇技术回复，FIR 核修正)
   - "流式前渲染 X-Ray 快照" — 被否决 (导致 X-Ray 碎片化和重复渲染)
+  - "物理验证挂在 Orch step" — 被否决 (代码在 Synthesis 生成，不在 Orch step。Phase 1 尸检发现)"
+  - "硬 retry 环注入 pad.plan" — 被否决 (Synthesis 不读 pad.plan。Phase 2 重构为 constraints 接口)
 
 anti_patterns:
   - "物理替代语义 (physical veto)" — 乘法门控才是正确的融合方式

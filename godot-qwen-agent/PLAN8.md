@@ -1,7 +1,7 @@
 # PLAN8 — 数学自适应契约：从伪自适应到保结构降阶
 
 **日期:** 2026-06-09
-**状态:** V6 封板 | V7 Phase 1 (流式) + V7.1 MVP (物理 Critic) + Track A FIR 核 — 已落地
+**状态:** V6 封板 | V7 Phase 1 (流式) + V7.1 MVP (物理 Critic) + V7.2 Phase 1+2 (硬闸门 + 物理 Retry) — 封板
 **触发:** 用户质疑——"自适应契约也不是完全自适应，伪自适应"
 **基线:** v5.0-bang-bang-baseline
 

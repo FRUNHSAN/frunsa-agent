@@ -1385,6 +1385,212 @@ V7.2:   + 物理验证接入实时管线
 | X-Ray 遥测 | Path 2, θ, w-gain | + PhysicalBudget remaining, degraded mode flag |
 | Rigid Contract #5 | 已定义 (物理安全红线) | 接线后首次被代码路径触发 |
 
+### V7.2 Phase 2：硬验证 — 物理 Retry 闭合 + 三奇点补丁
+
+**Phase 1 发现**: 物理验证在 Synthesis 之后（软验证）。代码已经流式推给用户。真正的自动化奇点要求物理验证是 Synthesis 之前的硬闸门。
+
+**数学跃迁: 开环 → 闭环**
+
+```
+Phase 1 (开环):  Synthesis → stream → Verify → WARN
+                物理 Critic 是事后观察者
+
+Phase 2 (闭环):  Synthesis → Verify → gate? → PASS → stream
+                                    ↓ FAIL
+                              fix_hint → re-Synthesis
+                物理 Critic 是混合自动机的守卫条件 g: S → {PASS, FAIL}
+```
+
+**核心挑战**: 代码在 Synthesis 阶段生成（不在 Orch step）。Synthesis 是一次 LLM 调用产出全文。
+
+**方案**: 硬 Retry 环包裹 Synthesis。
+
+---
+
+#### 数学诠释
+
+**1. 混合自动机的守卫条件**
+
+```
+状态转移:
+  (s, RUNNING) → (s, PASS)   if g(Synthesis(s)) = PASS
+  (s, RUNNING) → (s', RETRY) if g(Synthesis(s)) = FAIL
+    其中 s' = s + accumulated_fix_hints  (积分项注入)
+  (s, PASS)    → stream → 用户  (终端状态)
+```
+
+g 是 0/1 的二值守卫——不和语义 Critic 的连续 θ 混淆。物理事实不可协商。
+
+**2. Retry 作为 2-态射**
+
+```
+Synthesis₁: I → C₁       (第一次尝试)
+Verify:     C₁ → FAIL    (AST 拒绝)
+Retry:      FAIL → I'    (fix_hint 注入, I' = I + Σconstraints)
+Synthesis₂: I' → C₂      (第二次尝试, 约束更紧)
+Verify:     C₂ → PASS    (闸门打开)
+```
+
+fix_hint 是 2-态射携带的数据——从 FAIL 到修正态的信息通道。
+
+**3. 信息增益: 每次重试缩小搜索空间**
+
+```
+第1次: 约束=∅, 输出空间=S (全体文本)
+AST报错: 约束+={valid_python}, 输出空间→S₁ ⊂ S
+Mypy报错: 约束+={type_safe},    输出空间→S₂ ⊂ S₁
+Sandbox报错: 约束+={logic_correct}, 输出空间→S₃ ⊂ S₂
+```
+
+**4. 不动点**
+
+```
+C* = Fix(Synthesis ∘ Verify)
+Synthesis(C*) → Verify → PASS
+
+存在性: 有解任务存在不动点。无解任务（矛盾需求）不动点不存在 → 预算耗尽 → [PHYSICAL FAIL xN]
+```
+
+---
+
+#### 三个红队奇点补丁
+
+**奇点 1: 极限环震荡 (Ping-Pong)**
+
+LLM 修 A 坏 B、修 B 坏 A。在高维非凸空间中两个局部错误间反复横跳，永远无法到达不动点。
+
+**修复: 历史约束累加 (积分项)**
+
+```python
+# ❌ 只给最新 fix_hint
+prompt = base + fix_hint_n
+
+# ✅ 累加全部历史约束
+accumulated.append(fix_hint_n)
+prompt = base + "\n".join(accumulated)
+```
+
+**数学意义**: 强制第 n 次生成的代码必须同时满足前 n-1 次失败定义的所有超平面约束。几何上保证可行域单调递减——Cₙ 的约束集是 Cₙ₋₁ 约束集的真子集，不可能回到之前的状态。**搜索空间单调收缩，极限环被拓扑消除。**
+
+**奇点 2: TIMEOUT/OOM 第三态**
+
+守卫 g 是二值 {PASS, FAIL}。但真实沙箱有第三态: TIMEOUT（死循环）或 OOM。此时无 traceback、无 assert 差异，ErrorMapper 无法提取差分。
+
+**修复: 三值守卫 + 语义逃逸**
+
+```
+g ∈ {PASS, FAIL, UNDEFINED}
+
+UNDEFINED (TIMEOUT/OOM):
+  → 不触发物理 2-态射 (retry)
+  → 直接冒泡到语义层
+  → fix_hint = "代码存在死循环或复杂度过高, 请重构算法"
+  → 触发语义 Retry (1-范畴重新规划)
+```
+
+**数学意义**: 当系统失去观测能力（无法获取执行结果）时，承认局部物理修复失效。**从 2-范畴（局部 retry）跃迁到 1-范畴（全局重新规划）。** 防止在高熵无信息状态下低效重试。
+
+**奇点 3: 非压缩映射破缺**
+
+Banach 不动点定理要求 ‖Cₙ₊₁ - Cₙ‖ < ‖Cₙ - Cₙ₋₁‖（压缩映射）。但 LLM 的 temperature > 0，生成是概率采样。某次 retry 可能无视 fix_hint 生成更差的代码——压缩条件被打破。
+
+**修复: Prompt 级退火**
+
+```python
+# 第一次 retry
+prompt += "\n[PHYSICAL FAIL] " + fix_hint
+
+# 第二次 retry (最后一次)
+prompt += "\n[CRITICAL] 最后一次修正机会。严格按 fix_hint 修改，不要引入任何其他变更。"
+```
+
+**数学意义**: 不在客户端降低 temperature（太重），而是在 prompt 空间强制收紧采样方差。**将 LLM 从概率分布采样逼近为确定性映射。** 压缩条件在 prompt 约束下近似成立——强制性引导系统收敛。
+
+---
+
+#### 改动清单
+
+| 文件 | 改动 | 行数 |
+|------|------|------|
+| `core/track_c.py` | 移除 post-Synthesis 软验证 | -20 |
+| `core/track_c.py` | 硬 Retry 环包裹 Synthesis + 累积约束 (Patch 1) | +30 |
+| `core/track_c.py` | TIMEOUT → 语义逃逸 (Patch 2) | +8 |
+| `core/track_c.py` | Prompt 级退火 (Patch 3) | +5 |
+| `core/track_c.py` | 移除 `_orchestrate_one` 的 `phys_budget` | -3 |
+
+**总计: ~20 行净增, 1 文件。**
+
+#### Phase 1 → Phase 2
+
+| | Phase 1 (软) | Phase 2 (硬) |
+|---|---|---|
+| 验证位置 | Synthesis 之后 | Synthesis 之前 (闸门) |
+| 用户看到 | 含语法错误的代码 + WARN | 通过 Sandbox 的代码 |
+| Retry | 无 | 有，带积分项 + 退火 |
+| TIMEOUT | 未处理 | 语义逃逸 |
+| 不动点保护 | 无 | 累积约束 + 温度退火 |
+| X-Ray | `WARN: COMPILE_ERR` | `PHYSICAL RETRY(1/2)` → `PASS` |
+
+### V8 铺垫：per-Loop 预算 + retry_policy 注入点
+
+**Phase 1 发现**：物理验证在 Synthesis 之后（软验证）。代码已经流式推给用户，Sandbox 只能在末尾贴 WARN。真正的自动化奇点要求物理验证是 Synthesis 之前的硬闸门——代码不通过 Sandbox，用户看不到。
+
+**核心挑战**：代码在 Synthesis 阶段生成（不在 Orch step）。Synthesis 是一次 LLM 调用产出全文。
+
+**方案**：硬 Retry 环包裹 Synthesis。
+
+```
+Phase 1 (软):  Synthesis → stream to user → [WARN: COMPILE_ERR]
+Phase 2 (硬):  Synthesis → extract code → Sandbox → PASS? → stream to user
+                                    ↓ FAIL
+                              ErrorMapper → fix_hint → inject into prompt → re-Synthesis
+```
+
+#### 改动
+
+```
+run() 中:
+  替换 post-Synthesis 验证为 pre-stream 硬 Retry 环
+
+  phys_retries = 0
+  while True:
+      final = _synthesize(user, system, pad)  # LLM generates text
+      code = _extract_code(final)
+      if not code: break  # no code to verify
+
+      result = SandboxExecutor().run(code, test_cases, "EXECUTABLE", phys_budget)
+      if result.state == PASS:
+          if stream_callback: stream_callback(final)
+          break  # 硬闸门通过
+
+      # 物理失败 → 注入 fix_hint → 重试
+      fix_hint = ErrorMapper().map(result, code).fix_hint
+      pad.step_results[-1] = f"{pad.step_results[-1]}\n[PHYSICAL FAIL: {fix_hint}]"
+      phys_retries += 1
+      if phys_retries >= 2 or phys_budget.is_exhausted:
+          final += f"\n[PHYSICAL FAIL x{phys_retries}]"  # 告警但放行
+          break
+```
+
+#### 改动清单
+
+| 文件 | 改动 | 行数 |
+|------|------|------|
+| `core/track_c.py` | 移除 post-Synthesis 软验证 | -20 |
+| `core/track_c.py` | 加硬 Retry 环包裹 Synthesis | +30 |
+| `core/track_c.py` | 移除 `_orchestrate_one` 的 `phys_budget` 参数 | -3 |
+
+**总计: ~7 行净增, 1 文件。**
+
+#### Phase 1 → Phase 2 关键变化
+
+| | Phase 1 (软) | Phase 2 (硬) |
+|---|---|---|
+| 验证位置 | Synthesis 之后 | Synthesis 之前（闸门） |
+| 用户看到 | 含语法错误的代码 + WARN | 通过 Sandbox 验证的代码 |
+| Retry | 无 — 事后标记 | 有 — 失败后重跑 Synthesis |
+| X-Ray | `WARN: COMPILE_ERR` | `PHYSICAL RETRY` → `PASS` |
+
 ### V8 铺垫：per-Loop 预算 + retry_policy 注入点
 
 V8 的 2-范畴 Loop 形式化需要三个东西同时在线：Loop 对象、重试关系（2-态射）、横合成代数。V7.2 只有一种 Loop 类型（物理执行），过度抽象没有意义。但两处 8 行铺垫可以让 V8 不拆核心引擎。
