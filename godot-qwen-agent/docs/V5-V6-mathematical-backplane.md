@@ -1280,6 +1280,111 @@ AST 解析 → Mypy 类型检查 → RestrictedPython 转换 → 沙箱执行
 
 Mypy 排在沙箱之前——类型错误比运行时错误更安全、更早暴露。RestrictedPython 是"语义滤网"（防 LLM 幻觉），不是"安全防线"（防恶意注入——那是 OS 沙箱的工作）。
 
+### V7.2 Phase 1：接线 — 物理 Critic 集成到 Track C
+
+**核心目标**：将独立的 SandboxExecutor、ErrorMapper、PhysicalBudget 串入 Track C 的实时管线，实现物理层与语义层的双轨 Retry。
+
+**规模**：~80 行，1 个核心文件 (`core/track_c.py`)。
+
+#### 接线六步（最终封版）
+
+| 步骤 | 工程动作 | 行数 | 数学/架构意义 |
+|------|---------|------|-------------|
+| Step 1 | **代码提取 π**: 正则提取 ```python 或 def/class 连续行 | +15 | 投影 π: S → C。将语义流形上的输出映射到代码子空间 |
+| Step 1.5 | **Fail-Fast 截断** (红队补丁 1): `if len(code) < 10: return FORMAT_ERROR`，不消耗物理预算，触发语义层格式重试 | +5 | π 的纤维截断。防止定义域外的脏数据（空代码/无 fence）污染物理层度量空间，杜绝预算黑洞 |
+| Step 2 | **物理分支 + ErrorMapper**: 判定 `tool=="sandbox_python"`，调用 Sandbox。失败时提取 fix_hint | +25 | 1-态射的物理执行与 2-态射（修复方向）的生成 |
+| Step 3 | **PhysicalBudget 注入**: 在 `run()` 外层创建 `budget=5.0`。传入 `_do_orchestrate`，retry 不重置 | +5 | DAG 上的联络 (Connection)。保守量沿偏序单调递减 |
+| Step 4 | **物理 Retry + 降级惩罚** (红队补丁 3): 局部重试当前 step。若无 test_cases (降级模式)，单次消耗 2.0 预算，最多重试 1 次 | +25 | 纤维内的垂直移动。对高熵分支（无先验契约）施加热力学惩罚，防止幻觉死循环 |
+| Step 4.5 | **Prompt 级接口锁定** (红队补丁 2 优化): 物理 retry 时注入 Prompt — "修复时必须保持函数名、参数、返回类型完全不变，只改内部逻辑" | +5 | 先验边界约束。用 Prompt 公理锁死 LLM 采样空间，防止局部 2-态射破坏 1-态射的对外契约 |
+
+#### 三层防御网（Phase 1 验收基线）
+
+| 防御层 | 机制 | 数学对应 |
+|--------|------|---------|
+| **格式防御** (Step 1.5) | LLM 忘写 Markdown fence → 拦截，不扣物理预算 | π 的定义域外截断 |
+| **契约防御** (Step 4.5) | LLM 修复时改了函数名 → 下游 test_cases 报 NameError → 再次拦截 | 2-态射的接口同构保持 |
+| **熵增防御** (Step 4) | LLM 没写 test_cases 瞎跑 → 预算消耗翻倍 → 迅速熔断 | 高熵分岔的热力学惩罚 |
+
+#### 改动清单
+
+| 文件 | 改动 | 行数 |
+|------|------|------|
+| `core/track_c.py` | +`_extract_code(text)` 代码块提取器 | +15 |
+| `core/track_c.py` | `_orchestrate_one` 物理分支 + ErrorMapper + fix_hint | +25 |
+| `core/track_c.py` | `run()` 创建 PhysicalBudget + 物理 retry 路径 + 降级惩罚 | +25 |
+| `core/track_c.py` | `_do_orchestrate` 传递 budget | +3 |
+| `core/track_c.py` | Step 1.5 Fail-Fast + Step 4.5 Prompt 接口锁定 | +10 |
+
+**总计: ~78 行, 1 文件。**
+
+#### 验证
+
+```
+输入: "写一个 parse_csv_line 函数...边界情况"
+  → Planning: test_cases=[{input: 'a,"b,c",d', expected: ['a','b,c','d']}]
+  → Orch: LLM 生成代码 → Sandbox.run(code, test_cases)
+  → FAIL (处理了逗号但漏了引号闭合) → ⊢ 提取 → fix_hint
+  → retry: 带 fix_hint + "签名不变"约束 → Sandbox PASS
+  → X-Ray: PHYSICAL RETRY → PHYSICAL PASS
+
+输入: LLM 忘了 ```python fence
+  → Step 1.5: code=="", FORMAT_ERROR
+  → 不扣预算，语义层重试 "必须用 ```python 包裹代码"
+  → X-Ray: FORMAT RETRY (budget=5.0)
+
+输入: 无 test_cases (降级模式)
+  → Step 4: 消耗 2.0 预算/次, max 1 retry
+  → X-Ray: DEGRADED MODE (budget=3.0)
+```
+
+#### 接线后的项目形态：双轨自适应契约
+
+接线前：
+
+```
+自适应契约运行在 S (纯语义流形) 上
+信号源: 用户行为 (drift, clarity, e(t))
+物理组件: 独立存在，单元测试中调用，未接入实时管线
+```
+
+接线后：
+
+```
+自适应契约运行在 S × Q (语义 + 物理) 上
+信号源: 用户行为 + 物理事件 (编译结果、测试红绿、预算耗尽)
+每一次物理验证 = 一次契约事件 = 一次选择压力输入
+```
+
+**契约不变结构，增加三个新信号源（已有钩子，不需新字段）：**
+
+| 物理事件 | 契约含义 | 已有钩子 |
+|---------|---------|---------|
+| `PHYSICAL_PASS` | 系统自主验证了自己的输出 — 正向选择事件 | `trust_ema` 微增 (α=0.08) |
+| `PHYSICAL_FAIL + RETRY` | 物理层拒绝语义输出 — 负向选择事件 | `tracking_error` 微增 (e(t) 补偿) |
+| `BUDGET_EXHAUSTED` | 物理资源耗尽 — 能力穷尽信号 | `meta_adapt.is_relaxed` 路径 |
+
+**和 V5 的同构**：用户说"这代码跑不通" → e(t)↑。编译器说"这代码跑不通" → 同样的 e(t)↑。**选择压力来源不同，契约处理方式完全相同。** V5 的 trust_ema, e(t), meta_adapt 从来不是"只接受用户信号"——它们是"接受任何选择压力事件"的通用累积器。
+
+**项目形态演进**：
+
+```
+V5→V6:  能感知用户意图、自适应调节引擎参数的语义智能体
+V7.1:   + 独立的物理验证能力（未在线）
+V7.2:   + 物理验证接入实时管线
+        = 能感知用户意图 AND 自主验证自己输出的双轨智能体
+
+自适应契约 = Agent↔Human (语义选择压力) + Agent↔Environment (物理选择压力)
+             同一个数学结构，两个信号源
+```
+
+**需要显式化的三项（不涉及新字段/新不变量）：**
+
+| 项目 | 接线前 | 接线后 |
+|------|--------|--------|
+| 契约事件类型 | `human_feedback` 一种 | + `physical_pass`, `physical_fail`, `physical_retry`, `budget_exhausted` |
+| X-Ray 遥测 | Path 2, θ, w-gain | + PhysicalBudget remaining, degraded mode flag |
+| Rigid Contract #5 | 已定义 (物理安全红线) | 接线后首次被代码路径触发 |
+
 ### V8 铺垫：per-Loop 预算 + retry_policy 注入点
 
 V8 的 2-范畴 Loop 形式化需要三个东西同时在线：Loop 对象、重试关系（2-态射）、横合成代数。V7.2 只有一种 Loop 类型（物理执行），过度抽象没有意义。但两处 8 行铺垫可以让 V8 不拆核心引擎。
