@@ -1257,10 +1257,11 @@ V7.2 把 test_cases 作为 generate_code 的**严格前置节点**：
 ### 三层递增滤网
 
 ```
-Filter 1 (AST):      完备性=0.80,  代价=1ms     "语法对吗？"
-Filter 2 (Mypy):     完备性=0.90,  代价=500ms   "类型一致吗？"
-Filter 3 (Restricted):完备性=0.95,  代价=100ms   "操作安全吗？"
-Filter 4 (OS):       完备性=0.99,  代价=500ms+  "物理隔离" ← V7.3
+Filter 1 (AST):      完备性=0.80,  代价=1ms,   预算=0    "语法对吗？"
+Filter 2 (Mypy):     完备性=0.90,  代价=500ms,  预算=0.1  "类型一致吗？"
+Filter 3 (Restricted):完备性=0.95,  代价=100ms,  预算=0.1  "操作安全吗？"
+Filter 3.5 (Timeout): 完备性=0.96,  代价=3s cap, 预算=0    "不会炸宿主吗？"
+Filter 4 (OS):       完备性=0.99,  代价=500ms+, 预算=2.0  "物理隔离" ← V7.3
 
 错误捕获率:
   P(miss) = P(miss_AST) × P(miss_Mypy) × P(miss_Sandbox)
@@ -1333,18 +1334,58 @@ test_cases 是 LLM 生成的代码——和 code 有相同的破坏力。
 **防御 1**: test_cases 必须和 code 一样过 AST + RestrictedPython。
 **防御 2**: Prompt 硬约束 — "test_cases 只能包含 assert 语句。禁止 import/class/for/while/I/O。"
 
-#### 补丁 C: 预算耗尽 Fail-Safe — REJECT, 不裸奔
+#### 补丁 B.1: 沙箱时空硬限制 — 防资源耗尽型 DoS
+
+RestrictedPython 防住了 `import os`，防不住合法语法的资源耗尽：
+
+```python
+assert func(1) == [x for x in range(10**8)]  # OOM — 语法合法
+assert func(2) == sum(i*i for i in range(10**9)) # CPU 死循环 — 语法合法
+```
+
+**防御**: `_run_restricted` 不直接 `exec()`。用 `multiprocessing.Process` + 强制 Timeout:
+
+```python
+process = Process(target=sandbox_exec, args=(code, test_cases))
+process.start()
+process.join(timeout=3.0)
+if process.is_alive():
+    process.terminate()
+    return ExecutionResult(state=PhysicalState.TIMEOUT,
+        error_message="Test case execution exceeded 3s limit.")
+```
+
+**意义**: 把"资源耗尽"这种致命物理崩溃降级为 ErrorMapper 可处理的 TIMEOUT——Agent 自己修复那个死循环的 test case，而不是宿主进程一起死。
+
+#### 补丁 C: 预算耗尽 Fail-Safe + 按计算成本加权
+
+预算按"层数"计费（Mypy=1, RP=1, Sandbox=1）有致命倒挂：budget=2 → 跑完 Mypy+RP → 预算归零 → **最昂贵的沙箱执行根本没跑。** 最便宜的静态检查把最贵的验证挤掉了。
+
+**修正**：按计算成本加权，和 V7 阻力场（高风险 = 高代价）同构。
 
 ```
-if not budget.can_afford(next_layer_cost):
-    return REJECTED  // 绝不让代码在没有完整滤网的情况下执行
+AST:            0    (免费，永远跑，~1ms)
+Mypy:           0.1  (微额，~500ms)
+RestrictedPython: 0.1  (微额，~5ms 转换)
+Sandbox exec:   1.0  (全额，100ms+ 每个 test case)
+
+Fail-Safe: if budget < 1.0 → REJECT
+// 确保至少保留一次沙箱执行的预算 — 否则前面的静态检查毫无意义
 ```
 
-#### 补丁 D: f-string assert → 零 LLM 正则提取
+**数学意义**: 预算分配和验证价值对齐。最昂贵的操作消耗最多的预算。静态检查的价值是"滤除低级错误"——它应该便宜。沙箱执行的价值是"捕获逻辑错误"——它值得消耗最多的预算。
 
-Prompt 约束: `assert func(input) == expected, f"Expected {expected}, got {actual}"`
-→ `AssertionError: Expected [1,2,3], got [3,2,1]`
-→ `re.search(r"Expected (.*), got (.*)", msg)` → 纯正则，零 LLM
+#### 补丁 D: f-string assert → 零 LLM 正则提取 (with 反贪婪定界符)
+
+Prompt 约束:
+```
+assert func(input) == expected, f"⊢EXPECTED⊢{expected}⊢ACTUAL⊢{actual}"
+```
+
+→ `AssertionError: ⊢EXPECTED⊢[1,2,3]⊢ACTUAL⊢[3,2,1]`
+→ `re.search(r"⊢EXPECTED⊢(.*)⊢ACTUAL⊢(.*)", msg)` → 纯正则，零 LLM
+
+**为什么用 Unicode 定界符**：如果 actual 本身是包含逗号或 ", got" 子串的字符串，`r"Expected (.*), got (.*)"` 的贪婪匹配会提取错误数据。`⊢EXPECTED⊢` 不可能出现在正常 Python 输出中——**彻底杀死贪婪匹配和子串冲突。**
 
 ### 四个补丁的数学与拓扑诠释
 
@@ -1388,39 +1429,39 @@ test_cases 是 code 的约束 — 定义接受域 A ⊂ Y
 #### 补丁 D: f-string assert → 纤维丛的正则截面
 
 ```
-f"Expected {expected}, got {actual}"
+f"⊢EXPECTED⊢{expected}⊢ACTUAL⊢{actual}"
         ↓ Python 运行时格式化 (确定性)
-"Expected [1,2,3], got [3,2,1]"
-        ↓ re.search(r"Expected (.*), got (.*)") (确定性)
-("1,2,3", "3,2,1")  ← 结构化差分对
-
-vs. 纯文本 traceback + LLM 推理 (概率性)
+"⊢EXPECTED⊢[1,2,3]⊢ACTUAL⊢[3,2,1]"
+        ↓ re.search(r"⊢EXPECTED⊢(.*)⊢ACTUAL⊢(.*)") (确定性)
+("[1,2,3]", "[3,2,1]")  ← 结构化差分对
 ```
 
-**拓扑意义**: 错误信息空间 E 是一个**纤维丛**。每个错误类型是底点，每个底点上的纤维是所有可能的错误消息变体。f-string 把每条消息固定到纤维中的**正则截面**——"Expected X, got Y" 是断言错误的截面上唯一形式。Regex 是这个截面的**选择函数**——从底点唯一地选出标准形式。**确定性 = 存在连续的截面选择函数。**
+**为什么用 Unicode 定界符**: 如果 actual 本身是包含 `", got "` 子串或逗号的复杂对象，普通正则的 `(.*)` 贪婪匹配会提取错误数据。`⊢EXPECTED⊢` 不可能出现在正常 Python 输出中——截面选择函数**在所有纤维上都是良定义的**，不存在子串冲突的奇点。
+
+**拓扑意义**: 错误信息空间 E 是一个**纤维丛**。每个错误类型是底点，每个底点上的纤维是所有可能的错误消息变体。f-string + Unicode 定界符把每条消息固定到纤维中的**正则截面**。Regex 是这个截面的**选择函数**——从底点唯一地选出标准形式。**确定性 = 存在全局连续的截面选择函数 σ: B → E，无奇点。**
 
 #### 四个补丁的数学统一
 
 | 补丁 | 数学结构 | 核心不变量 |
 |------|---------|----------|
 | A: mypy.api | 路径连通性 | 状态空间保持连通，无需复建原点 |
-| B: 双重过滤 | 滤网不动点 | F(F(C)) = F(C) — 约束系统自反 |
-| C: REJECT | 滤子嵌套保序 | S₁⊃S₂⊃S₃ → 不可跳过任何 Sᵢ |
-| D: f-string regex | 纤维丛正则截面 | 错误空间的确定性选择函数 ∃σ: B→E |
+| B: 双重过滤 + B.1 时空硬限 | 滤网不动点 + 紧致化 | F(F(C))=F(C) + 执行时间紧致化 (timeout 紧化非紧致执行空间) |
+| C: 按成本加权 + REJECT | 滤子嵌套保序 + 资源分配对齐 | S₁⊃S₂⊃S₃ 且 cost(filter) ∝ 验证价值 |
+| D: f-string + Unicode 定界符 | 纤维丛全局正则截面 | 截面选择函数 σ: B→E 无奇点 (无子串冲突) |
 
 ### V7.2 改动清单
 
 | 文件 | 改动 | 行数 |
 |------|------|------|
-| `core/track_c.py` | `_do_plan()` prompt — Test-First + f-string assert + 声明式约束 (补丁 B+D) | +15 |
+| `core/track_c.py` | `_do_plan()` prompt — Test-First + ⊢定界符 + 声明式约束 (补丁 B+D) | +18 |
 | `core/execution/sandbox.py` | +`_check_mypy(code)` — `mypy.api.run()` 进程内调用 (补丁 A) | +30 |
-| `core/execution/sandbox.py` | +`_run_restricted(code, test_cases)` — RestrictedPython (Layer 3) | +40 |
-| `core/execution/sandbox.py` | `run()` — 三层滤网顺序 + 预算 REJECT + test_cases 双重过滤 (补丁 B+C) | +15 |
-| `core/execution/error_mapper.py` | +`_extract_from_assertion(msg)` — f-string 正则提取 (补丁 D) | +8 |
+| `core/execution/sandbox.py` | +`_run_restricted(code, test_cases)` — RestrictedPython + Process timeout=3s (补丁 B.1) | +50 |
+| `core/execution/sandbox.py` | `run()` — 三层滤网顺序 + 按成本加权 + REJECT + test_cases 双重过滤 (补丁 B+C) | +20 |
+| `core/execution/error_mapper.py` | +`_extract_from_assertion(msg)` — ⊢定界符正则提取 (补丁 D) | +8 |
 | `core/track_c.py` | V8 铺垫: `_orchestrate_one` +`budget_slice`, +`retry_policy` 注入点 | +8 |
-| `tests/unit/test_v7_2_layered_execution.py` | 分层 + 双重过滤 + REJECT + 正则提取 | +40 |
+| `tests/unit/test_v7_2_layered_execution.py` | 分层 + 双重过滤 + REJECT + 正则提取 + 超时 | +45 |
 
-**总计: ~156 行, 4 文件。**
+**总计: ~179 行, 4 文件。**
 
 ### 验收标准
 
