@@ -7,9 +7,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from core.contracts.registry import COMPONENT_REGISTRY
 from core.contracts.tool import ToolResult, ToolProtocol
 
 
+@COMPONENT_REGISTRY.register("tool", "sandbox_python")
 class SandboxPythonTool(ToolProtocol):
     """Tool implementation: execute Python code in sandbox and return result.
 

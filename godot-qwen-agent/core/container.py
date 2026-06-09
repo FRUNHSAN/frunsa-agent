@@ -57,6 +57,7 @@ class Container:
         # ── Pre-load all registered components before sealing ──
         import core.adapters.keyword_chunker  # noqa: triggers @register_component
         import core.adapters.semantic_chunker  # noqa: triggers @register_component
+        import core.execution.sandbox_tool     # noqa: V7.2 — register sandbox_python
 
         # ── Mock MCP tools (always available for demo) ──
         try:

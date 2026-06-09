@@ -553,9 +553,10 @@ class TrackCEngine:
                 f"  （拆解为 {min_steps}-5 步，每步包含 prompt 和 tool 字段。\n"
                 f"  可选字段 produces: 本步骤产出的数据标签（如 'paper_list', 'code_v1'）。\n"
                 f"  可选字段 needs: 本步骤需要的前序数据标签。标签命名必须一致。\n"
-                f"  V7.2 Test-First 契约: 如果步骤涉及代码生成(tool=sandbox_python)，\n"
-                f"  必须先声明 test_cases。每个 test case 包含 input(输入参数) 和\n"
-                f"  expected(期望输出)。断言格式必须严格使用特殊定界符:\n"
+                f"  V7.2: 如果步骤涉及代码生成，必须设置 tool=\"sandbox_python\"\n"
+                f"  且 intent_type=\"EXECUTABLE\"，并先声明 test_cases。\n"
+                f"  每个 test case 包含 input(输入参数) 和 expected(期望输出)。\n"
+                f"  断言格式必须严格使用特殊定界符:\n"
                 f'  assert func(input) == expected, f"⊢EXPECTED⊢{{expected}}⊢ACTUAL⊢{{actual}}"\n'
                 f"  test_cases 只能包含 assert 语句。禁止 import/class/for/while/I/O。\n"
                 f"  可选字段 intent_type: EXECUTABLE(需物理验证)|PSEUDOCODE(仅语法)|DEMONSTRATION(纯展示)。\n"
