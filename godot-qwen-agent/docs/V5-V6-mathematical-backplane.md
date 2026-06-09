@@ -391,13 +391,42 @@ Planning LLM 的 FULL_DAG 格式扩展：
 
 ```python
 def _compute_parallel_depth(steps: list[dict]) -> int:
-    """BFS level assignment on the dependency DAG.
+    """Kahn's algorithm with cycle detection → BFS level assignment.
     
-    L(s) = 0 if depends_on is empty
-           else max(L(dep) for dep in depends_on) + 1
+    Step 1: Sanitize indices (filter out-of-bounds, remove self-loops).
+    Step 2: Kahn topological sort — if visited < n, cycle detected → fallback to depth=1.
+    Step 3: BFS level assignment on the verified DAG.
     
-    Returns max number of steps at any level (maximal safe concurrency).
+    Mathematical fallback: a cyclic directed graph has no topological ordering.
+    The only safe physical default is full sequential (depth=1). This is graph
+    theory, not a heuristic.
     """
+    n = len(steps)
+    
+    # ── 1. Sanitize: filter out-of-bounds indices and self-loops ──
+    for i, step in enumerate(steps):
+        raw = step.get("depends_on", [])
+        step["depends_on"] = [d for d in raw if 0 <= d < n and d != i]
+    
+    # ── 2. Cycle detection (Kahn's algorithm) ──
+    in_degree = [len(s.get("depends_on", [])) for s in steps]
+    queue = [i for i, d in enumerate(in_degree) if d == 0]
+    visited = 0
+    while queue:
+        node = queue.pop(0)
+        visited += 1
+        for i, s in enumerate(steps):
+            if node in s.get("depends_on", []):
+                in_degree[i] -= 1
+                if in_degree[i] == 0:
+                    queue.append(i)
+    
+    if visited < n:
+        # Cycle detected — LLM hallucination. Fallback to full sequential.
+        # X-Ray must emit: [WARN] DAG: cycle detected → seq
+        return 1
+    
+    # ── 3. BFS level assignment on verified DAG ──
     levels: dict[int, int] = {}
     for i, step in enumerate(steps):
         deps = step.get("depends_on", [])
@@ -406,7 +435,6 @@ def _compute_parallel_depth(steps: list[dict]) -> int:
         else:
             levels[i] = max(levels.get(d, 0) for d in deps) + 1
     
-    # Count steps per level
     from collections import Counter
     level_counts = Counter(levels.values())
     return max(level_counts.values()) if level_counts else 1
@@ -489,16 +517,18 @@ d_max⁰ = P₉₅({cos_dist(a,b) : (a,b) ∈ bad_pairs})      // 最差匹配�
 
 四象限基准 QA 必须覆盖 V5.3 的完整 (drift, clarity) 状态空间。共 8-12 对，每象限 2-3 对。**这套锚点永不改变**——它们划定物理边界，防止距离映射越界。
 
-**Tier 2 — 会话增益（动态，EMA 追踪）**
+**Tier 2 — 会话增益（动态，贝叶斯平滑）**
 
-不更新锚点，而是追踪当前会话的嵌入方差，调整下游消费者对距离的敏感度：
+不更新锚点，而是追踪当前会话的嵌入方差，调整下游消费者对距离的敏感度。采用贝叶斯平滑（共轭先验），利用伪计数 α 实现零硬编码的冷启动阻尼：
 
 ```
-σ²_embed(t) = EMA(σ²_embed(t-1), Var({emb_i : i ∈ last 5 rounds}))
-gain(t) = clamp(σ²_embed(t) / σ²_embed⁰, 0.5, 2.0)
+σ²_smoothed(n) = (α · σ²_embed⁰ + n · σ²_session(n)) / (α + n)
+gain(n) = clamp(σ²_smoothed(n) / σ²_embed⁰, 0.5, 2.0)
 ```
 
-其中 `σ²_embed⁰` = 基准 QA 集的嵌入方差。gain < 1 意味着当前会话的嵌入聚集度比基准更紧密（狭窄领域），gain > 1 意味着更发散（宽泛探索）。
+其中 `σ²_embed⁰` = 基准 QA 集的嵌入方差，`n` = 当前轮次，`α` = 先验伪计数（推荐 α=3）。
+
+**数学性质**：当 n=1 时，session 权重仅占 25%，先验主导，自然压制冷启动噪声。n 增大时 session 方差逐渐接管。无需 `if round < 3` 的硬编码分支——纯靠数学渐近性实现平滑。
 
 增益不改变 Wasserstein 距离本身，而是作为 Critic 的**敏感度系数**注入：
 
@@ -512,6 +542,7 @@ gain(t) = clamp(σ²_embed(t) / σ²_embed⁰, 0.5, 2.0)
 如果用户连续 5 轮输入乱码:
   滑动窗口: d_min 被更新到噪声簇 → 下一轮清晰输入被判为"远离基准" → 基准污染 ❌
   双层协议: 锚点不变，gain 短暂飙升 → 下一轮清晰输入 gain 回落 → 自动恢复 ✓
+  贝叶斯平滑: 伪计数 α 保证冷启动时 gain≈1.0，不会因样本不足剧烈震荡 ✓
 ```
 
 ### 启动流程
@@ -592,6 +623,17 @@ f_fused = min(1.0, f_fused + explore_bias)   # 仅 Planning 感知
 θ = max(0.50, θ - compromise_bias)            # 仅 Critic 感知
 ```
 
+**缺失值即最坏情况 (Minimax Fallback)**：
+
+```python
+# repl.py: 首轮或无历史 → 最大熵假设
+last_drift = meta_snapshot.get("last_raw_drift")
+if last_drift is None:
+    last_drift = 1.0  # 零信息下，假设意图混沌而非能力穷尽
+```
+
+**物理意义**：首轮 `drift=None` 视为 `1.0` 与路由器的冷启动探针（首轮必选 Track C）是同构的 Minimax 推论。假设"能力穷尽"（目标清晰但做不到）毫无依据——首轮没有历史证明目标清晰。假设"意图矛盾"（目标可能是混沌的）符合零信息时的最大熵原理。`1.0` 不是魔法数——它是 cosine distance 在 `[0, 2]` 归一化空间中的最坏情况端点。
+
 **关键原则：快照注入，不是实时引用**
 
 ```python
@@ -645,6 +687,22 @@ Track C 不知道 `meta_adapt` 对象的存在——它只接收两个原始 flo
 | Wasserstein 校准 | 仅静态 QA 对 | 静态锚点 (防污染) + EMA 增益 (适应领域) |
 | Path 1 联锁 | 单一 `relax_bias` (标量耦合) | `explore_bias` ⟂ `compromise_bias` (张量解耦) |
 
+---
+
+## 故障安全与 X-Ray 遥测契约
+
+数学模型假设输入合法，工程实现必须假设输入被污染。所有 Fallback 值**复用系统已有的中性默认值**，不发明新硬编码。
+
+| 组件失效场景 | 降级策略 (Fail-Safe) | Fallback 值来源 | X-Ray 遥测标记 |
+|:--|:--|:--|:--|
+| LLM 输出非法 DAG (环/越界) | Kahn 环检测 → `parallel_depth` 强制降为 1 (全串行) | 图论必然：含环图无拓扑排序 | `[WARN] DAG: cycle → seq` |
+| WassersteinProxy 校准失败/超时 | Fallback 到 `uncalibrated()` raw cosine distance, `session_gain` 锁死 1.0 | 已有：`WassersteinProxy.uncalibrated()` | `[WARN] W-Proxy: uncalibrated` |
+| TrackingError e(t) 计算异常 | e(t) 默认置为 0.50 (死区中心), `g(e_t)=0`, θ 保持 0.75 | 已有：`TrackingErrorEstimator()` 初始值 | `[WARN] e(t) sensor: blind` |
+| Clarity LLM 调用超时 | clarity 默认置为 0.50 (中性, 不触发清醒压制, 走 OR 逻辑) | 已有：`assess_clarity()` except 块 | `[WARN] clarity: timeout` |
+| SemanticDrift embedding 异常 | raw_drift 默认置为 0.0 (死区, 不触发分支探索) | 已有：`raw_drift = 0.0` except 块 | `[WARN] drift sensor: blind` |
+
+**设计原则**：传感器失明时，执行器以"最安全"姿态运行（全串行、中性阈值、零偏置）。X-Ray 必须一眼看出哪个传感器在盲飞——运维人员不应靠猜来定位失效组件。
+
 ### Phase C — V6.1+ 远景
 
 1. **跨会话模式发现** — 行为模式在 ≥3 个会话中被同类行为选中 → 固化到用户画像
@@ -671,6 +729,7 @@ Track C 不知道 `meta_adapt` 对象的存在——它只接收两个原始 flo
 | P8 | **clarity > 0.80 清醒压制**: 高 clarity + 高 drift = 有意的非连续性，不是混乱。min(f_drift, 0.20)。 | 防假阳性 EXPLORE |
 | P9 | **saturation floor = 0.50**: θ 在任何条件下不低于 0.50。零信息（硬币级别）的决策不配从引擎输出。 | 防脑死亡 |
 | P10 | **关键词归零**: 控制回路中不允许字符串匹配。所有门控必须是数学信号流。 | V5.3 核心承诺 |
+| P11 | **执行期状态冻结 (Execution-time State Freeze)**: Track C 的 `run()` 一旦接收 primitive 类型的信号快照（f_fused, explore_bias 等），在整个 Planning → Orch → Critic 执行生命周期内（~30s），**严禁内部模块再次读取或感知外部状态机**（MetaAdapt, TrackingError）。控制信号必须在 t₀ 时刻锁死。 | 防单次执行周期内的相位撕裂 |
 
 ### V6 架构不变量
 
@@ -680,6 +739,7 @@ Track C 不知道 `meta_adapt` 对象的存在——它只接收两个原始 flo
 | A2 | **观测器不 import 引擎**: semantic_trust 不引用 track_c/branch_count/theta/EXPLORE。 | 单向依赖 |
 | A3 | **clarity 是原始 float**: 模块间通信只用 primitive。零结构耦合。 | 接口最小化 |
 | A4 | **ThreadPoolExecutor 用 with 语句**: clarity LLM 调用的线程池生命周期受 with 保护。资源泄漏不可接受。 | V5.3 耦合修复 |
+| A5 | **降级契约显式化 (Explicit Fail-Safe Contract)**: 所有数学组件失效时的 Fallback 值，必须且只能使用系统已有的中性默认值（e(t)=0.50, clarity=0.50, depth=1, uncalibrated proxy）。**严禁为降级路径发明新的硬编码常数。** X-Ray 必须输出 `[WARN]` 遥测标记。 | 传感器失明时，执行器不发生灾难性抽搐 |
 
 ---
 
