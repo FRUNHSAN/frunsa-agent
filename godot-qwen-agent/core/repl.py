@@ -954,10 +954,9 @@ class Repl:
                 f"Track {route} ({reason}) "
                 f"[V5: e(t)={e_t:.2f} sigma2={trust_var:.3f} trust={trust:.2f}]")
             if route == "C":
-                # V7 Phase 1: Streaming synthesis — stop live, stream tokens
+                # V7 Phase 1: Streaming synthesis — pause live, stream tokens
                 if live:
-                    xray.render_live(live)  # Final X-Ray snapshot before streaming
-                    live.stop()
+                    live.stop()  # Release terminal for streaming
                 import sys as _sys
                 _sys.stdout.write('\n[agent] ')
                 _sys.stdout.flush()
