@@ -18,7 +18,7 @@ from __future__ import annotations
 import re
 
 # ── Verbose → max sentences ──
-VERBOSE_SENTENCE_LIMITS = {"HIGH": 16, "MEDIUM": 8, "LOW": 4, "MINIMAL": 2}
+VERBOSE_SENTENCE_LIMITS = {"HIGH": 24, "MEDIUM": 12, "LOW": 6, "MINIMAL": 2}
 
 # ── Verbose → max characters (semantic: finds last 。！？ before limit) ──
 VERBOSE_CHAR_LIMITS = {"HIGH": 1600, "MEDIUM": 600, "LOW": 200, "MINIMAL": 80}

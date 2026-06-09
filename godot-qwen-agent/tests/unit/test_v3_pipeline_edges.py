@@ -19,12 +19,12 @@ class TestOutputPipelineEdges:
         clean, penalty = p.process(raw)
         assert clean.count("。") <= 2
 
-    def test_low_truncates_to_three_sentences(self):
+    def test_low_truncates_to_six_sentences(self):
         bp = MockBP({"response_verbose_level": "LOW", "tone_style": "WARM"})
         p = OutputPipeline(bp)
-        raw = "一。二。三。四。五。"
+        raw = "一。二。三。四。五。六。七。"  # 7 sentences → truncated to 6
         clean, _ = p.process(raw)
-        assert clean.count("。") <= 4  # LOW: 4 sentences
+        assert clean.count("。") <= 6  # LOW: 6 sentences (V6.3 bump)
 
     def test_high_no_truncation(self):
         bp = MockBP({"response_verbose_level": "HIGH", "tone_style": "WARM"})
