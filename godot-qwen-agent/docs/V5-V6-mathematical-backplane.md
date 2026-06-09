@@ -1,8 +1,8 @@
 # V5 → V6 数学背板：从伪自适应到随机最优控制
 
 **日期:** 2026-06-09
-**状态:** V5.3 封板 | V6 核心落地 | Orch DAG + Wasserstein 校准待实施
-**基线:** v5.0-bang-bang-baseline → 当前 HEAD
+**状态:** V5.3 + V6 封板 | V7 规划中 — 混合自动机
+**基线:** v5.0-bang-bang-baseline → V6 engine landing
 
 ---
 
@@ -767,3 +767,420 @@ Track C 不知道 `meta_adapt` 对象的存在——它只接收两个原始 flo
 - ✅ 仅启用的强信号路径：追问 + 技术术语 + 延迟 > 8s → 成长需求 +12%
 - ✅ 2 轮无反馈 → 自动衰减至基准值
 - ✅ 自标定：μ、σ 由压力历史实时计算，不手动调参
+
+---
+
+## 十一、V7：契约空间的物理扩展 — 从 S 到 S × Q
+
+### 架构纠偏：物理反馈不是替代品，是选择压力的新维度
+
+```
+❌ 原 V7 草稿: 物理 Critic "一票否决" → 物理替代语义 → 生硬层级关系
+✅ 修正后 V7:   物理反馈 → 自适应契约的新信号源 → 乘法门控融合
+```
+
+**核心身份守恒**：本项目的核心不是"控制回路"，是**自适应契约**——LLM 变异 → 选择压力 → 契约保留。V5-V6 的选择压力只来自用户行为（e(t), drift, clarity）。V7 将选择压力扩展为双源：
+
+```
+选择压力 = 用户行为选择 (连续) + 物理环境选择 (离散)
+          ↓                          ↓
+    语义反馈 (e(t), drift)      物理反馈 (q ∈ Q)
+          ↓                          ↓
+          └──────── 自适应契约 ────────┘
+                    ↓
+         trust_ema, σ², repair, renegotiate
+```
+
+**物理失败（COMPILE_ERR）等价于一次高权重的"负向选择事件"，触发契约的 repair 机制——不是绕过契约直接熔断。**
+
+---
+
+### 数学跃迁：契约空间的维数扩展
+
+```
+V5-V6: 契约空间 = S ⊂ ℝ^384  (纯语义流形)
+       选择压力: y_semantic → e(t), drift, clarity
+       控制:      u = K(y_semantic)
+
+V7:    契约空间 = S × Q       (语义 + 物理)
+       Q = {PASS, COMPILE_ERR, TYPE_MISMATCH, RUNTIME_ERR, TIMEOUT, SANDBOX_VIOLATION}
+       选择压力: y_semantic + q_physical → e(t), drift, clarity + physical_events
+       控制:      u = K(y_semantic, q_physical)
+```
+
+**核心不变性**：控制面的数学公式一行都不废。`f_fused = Φ(drift, clarity)` 仍然驱动 Planning。`θ = f_drift × g(e_t)` 仍然驱动 Critic。物理反馈是**叠加**在现有控制面上的新信号维度，不是替代。
+
+---
+
+### 三个执行器的物理增强（同构映射）
+
+| 执行器 | V5-V6 (纯语义 S) | V7 (S × Q) | 增强方式 |
+|--------|-----------------|-----------|---------|
+| **Planning** | `f_fused = Φ(drift, clarity)` → n | 叠加 `fix_hint` 约束 | 物理反馈作为 Planning 的负样本锚点——"上次这么写编译不过，换个写法" |
+| **Orch** | `Sᵢⱼ` 语义相似度 → DAG → `parallel_depth` | 叠加 `resistance_weight[tool]` | 物理工具比语义工具具有更高的代价权重——DAG 优化从"最小化语义依赖"变成"最小化 语义依赖 × 物理代价" |
+| **Critic** | `θ = f_drift × g(e_t)` | `(θ_semantic, q_physical)` 双轨乘法门控 | 不是"物理替代语义"，是 `θ AND q`——两者相乘 |
+
+---
+
+### Critic 的双轨融合（乘法门控，不是一票否决）
+
+```
+Final_Pass = (θ_semantic > threshold) AND (q_physical != FAIL_FATAL)
+
+规则：
+  q = PASS                → 语义 Critic 正常工作，和 V6 一致
+  q = FAIL_RETRYABLE      → q 报告"不对"，ErrorMapper 介入判断"错在哪" → 局部重试
+  q = FAIL_FATAL          → 刚性契约 #5，直接终止，不可协商
+
+FAIL_RETRYABLE: COMPILE_ERR, TYPE_MISMATCH, RUNTIME_ERR
+FAIL_FATAL:     SANDBOX_VIOLATION, OS_ACCESS, NETWORK_ACCESS
+```
+
+**为什么是乘法门控而不是一票否决**：用户想要一段伪代码演示概念——LLM 生成伪代码，编译器当然报错，但用户满意。物理"一票否决"会把正确的伪代码拦截下来。乘法门控：`θ_semantic` 高（用户意图满足）+ `q = FAIL_RETRYABLE`（可预期的编译错误）= 仍然通过。只有 `FAIL_FATAL`（沙箱越狱）才无条件熔断。
+
+---
+
+### 刚性契约 #5：物理安全红线
+
+V5 确立了 4 条语义/交互刚性契约。V7 新增第 5 条：
+
+| # | 刚性契约 | 含义 | 体现 |
+|---|---------|------|------|
+| 5 | **物理安全红线** | 任何试图突破沙箱隔离、执行未授权副作用的操作，无视当前 trust_ema 多高，立刻触发 FATAL_FAIL | `SandboxExecutor` 的所有执行在 RestrictedPython + 禁用 builtins 的隔离环境中运行 |
+
+---
+
+### V7.1 MVP：代码级物理传感器
+
+不搞 Docker，只用三种零成本静态/受限检测：
+
+| 层次 | 技术 | 输出 `q` | 成本 | 风险 |
+|------|------|---------|------|------|
+| AST 语法检查 | `ast.parse(code)` | `COMPILE_ERR` / `PASS` | ~1ms | 零 |
+| Mypy 类型推断 | `subprocess(['mypy', tmpfile])` | `TYPE_MISMATCH` / `PASS` | ~500ms | 零 |
+| 受限沙箱执行 | `RestrictedPython` + 安全 builtins | `RUNTIME_ERR` / `PASS` | ~100ms | 内存隔离 |
+
+---
+
+### 防御性工程设计四原则 (Defensive Engineering Axioms)
+
+数学框架（`θ AND q` 乘法门控）保持不变。以下原则仅在工程实现层加装防御装甲。
+
+#### 原则 A：断言式验证取代帧快照 (Assertion over Introspection)
+
+**防御的致命伤**：Traceback `f_locals` 在第三方库和复杂表达式前是黑盒，极易造成 Context 污染。
+
+**设计**：放弃在 Traceback 中"刨变量"。Planning 在生成代码时**同时生成 test_cases**：
+
+```json
+{
+  "prompt": "写一个函数返回第k大元素",
+  "tool": "sandbox_python",
+  "test_cases": [
+    {"input": "[3,1,4,1,5], k=2", "expected": 4},
+    {"input": "[3,1,4,1,5], k=10", "expected": "IndexError or None"}
+  ]
+}
+```
+
+沙箱执行每个 test case，比对预期与实际输出。ErrorMapper 报告**确定性的断言差异**：
+
+```
+✗ test_case[1]: input=([3,1,4,1,5], k=10), expected=None, got=IndexError at line 5
+  fix_hint: "add bounds check: if k >= len(arr): return None"
+```
+
+**降级策略**：若 `test_cases` 为空（Planning 未生成），ErrorMapper 退化为只提取 Traceback 最后两行 + 原始代码。**宁可少信息，绝不给脏信息。**
+
+#### 原则 B：沙箱天然无状态 (Stateless Sandbox MVP)
+
+**防御的致命伤**：局部重试在有状态环境中导致"幽灵副作用"——重试时脏数据叠加，越改越错。
+
+**设计**：V7.1 的 `SandboxExecutor` 强制无状态。每次 `run(code, test_cases)` 均在独立的进程/内存空间中执行，仅支持纯函数式代码验证。不存在跨执行的"全局结果列表"。
+
+**边界**：跨执行的有状态任务（需 `snapshot()` / `rollback()` API）推迟至 V7.2 (StatefulSandbox) 解决。V7.1 不碰有状态执行。
+
+#### 原则 C：基于意图的契约豁免 (Intent-Driven Contract Override)
+
+**防御的致命伤**：物理法则的绝对权威扼杀语义空间的探索性——伪代码、破坏性测试被物理 Critic 错误拦截。
+
+**设计**：Planning 根据 V5 clarity 传感器信号，为每个 Step 标注 `intent_type`。DualTrackCritic 依此决定是否执行物理检查：
+
+| intent_type | 物理 Critic 行为 | 典型场景 |
+|------------|-----------------|---------|
+| `EXECUTABLE` | 全量物理验证 (AST + Mypy + 沙箱) | "写一个快排函数" |
+| `PSEUDOCODE` | 仅 AST 语法检查，跳过执行 | "给我一段伪代码演示逻辑" |
+| `DEMONSTRATION` | 跳过所有物理检查 | "C语言写IE6前端"——纯展示 |
+| `DESTRUCTIVE_TEST` | 仅 AST，跳过执行，触发日志警告 | "写一个内存溢出的脚本测试监控" |
+
+**和 V5.3 的同构**：`clarity=1.00` → `EXECUTABLE`。`clarity=0.00` → `DEMONSTRATION`。Planning LLM 拿到 clarity 后自然能为每个 step 标注正确的意图类型。这不是硬编码规则——是 clarity 传感器的下游推论。
+
+#### 原则 D：物理预算与分层执行 (Physical Budget & Layered Execution)
+
+**防御的致命伤**：物理操作比文本生成慢数个数量级。5 个物理节点 + 3 次局部重试 → 延迟从秒级膨胀到分钟级。
+
+**设计**：引入全局 `PhysicalBudget`（默认 `max_physical_executions = 5` per Track C 循环）。预算耗尽即熔断，返回半成品 + `[WARN] physical budget exhausted`。
+
+分层计费机制：
+
+| 层级 | 操作 | 成本 | 计费规则 |
+|------|------|------|---------|
+| Layer 1 | AST 语法检查 | ~1ms | **免费**，永远执行（捕获 80% 低级错误） |
+| Layer 2 | Mypy 类型推断 | ~500ms | 计费 1 单位，预算不足时可跳过 |
+| Layer 3 | 沙箱执行 | ~100ms+ | 计费 1 单位，预算不足时可跳过 |
+
+预算分配由 V6.1 DAG 拓扑控制：**高层级节点优先获得预算**。同一层级的节点共享剩余预算。
+
+---
+
+### MCP 工具的原生兼容性
+
+V7 的物理 Critic 不是为 Python 代码执行专门设计的——它是为**所有产生确定性成功/失败反馈的工具类型**设计的。MCP 工具恰好是物理反馈最丰富的来源。
+
+**原理**：ToolEngine 的 USB 接口（`COMPONENT_REGISTRY.get("tool", name)`）对所有工具类型一视同仁。每个工具的 `ToolResult` 都有 `success: bool` 和 `error: str`——这就是 `q_physical` 的天然载体。
+
+| V7 组件 | Python 沙箱 | MCP 工具 | 统一性 |
+|---------|-----------|---------|--------|
+| **SandboxExecutor** | AST + mypy + RestrictedPython | **不适用**——隔离由 MCP server 进程保证 | MCP 工具的沙箱 = 操作系统进程边界 |
+| **ErrorMapper** | 断言差异 → fix_hint | `ToolResult.error` → fix_hint | MCP 工具已返回结构化错误，比 Python traceback 更干净 |
+| **DualTrackCritic** | `θ AND q` | `θ AND q`——完全相同 | 读取 `tool.success`，零额外适配 |
+
+**阻力场对 MCP 工具更关键**：
+
+```python
+RESISTANCE_WEIGHTS = {
+    "sandbox_python":          2,    # 安全：内存隔离
+    "mcp__filesystem_read":    5,    # 低风险：只读
+    "mcp__filesystem_write":  50,    # 中风险：写入
+    "mcp__database_query":    30,    # 中风险：查询
+    "mcp__database_write":   100,    # 高风险：修改数据
+}
+```
+
+MCP 工具比 Python 沙箱更需要阻力场——沙箱是内存隔离的，MCP 工具直接触碰真实文件系统和数据库。V7 的 DAG 优化（`min Σ cost(Tᵢ) × resistance_weight`）天然倾向于选择安全的工具路径。
+
+**刚性契约 #5 对 MCP 的意义**：
+
+```
+Python 沙箱:     FAIL_FATAL = SANDBOX_VIOLATION
+MCP filesystem:  FAIL_FATAL = 尝试访问 /etc/passwd 或 ~/.ssh
+MCP database:    FAIL_FATAL = DROP TABLE 或 DELETE WITHOUT WHERE
+```
+
+当前系统已接入 MCP（`[🔌 MCP] npx → 注册 14 个工具`），但唯一的安全防线是 ActionPipeline 的 backlash 计数。V7 的双轨 Critic + 阻力场 + 物理预算给 MCP 工具加上了三重保护——而这些保护对 MCP 工具的影响比 Python 沙箱更大，因为 MCP 工具操作的是**真实资源**。
+
+---
+
+### RAG 的原生兼容性：语义检索与物理验证的闭环
+
+RAG 不需要物理 Critic 的直接验证——检索质量的评判是语义 Critic（`θ_semantic`）的职责。但 RAG 和物理 Critic 形成互补闭环。
+
+**三个角色**：
+
+| 角色 | 方向 | 机制 |
+|------|------|------|
+| **上下文供给者** | RAG → Sandbox | Planning 前检索 API 文档 → LLM 生成正确代码 → 物理 Critic 需拦截的错误减少 |
+| **修复触发器** | Sandbox → RAG | `AttributeError: to_csvv` → ErrorMapper 触发 `RAG.search("pandas to_csv")` → 检索到正确 API → Planning 用精确参考重写 |
+| **阻力梯度锚点** | DAG | `rag_search: weight=1`（最低）→ DAG 优化天然优先 RAG 后沙箱 |
+
+**闭环示例**：
+
+```
+1. Planning: "写一个保存 DataFrame 的函数"
+2. RAG 检索 "pandas DataFrame to_csv" → 返回正确签名
+3. Planning 生成: df.to_csv('output.csv')
+4. Sandbox: PASS ── RAG 预防了错误
+```
+
+```
+1. Planning: "写一个保存 DataFrame 的函数"  (无 RAG)
+2. 生成: df.to_csvv('output.csv')  ← 多了一个 v
+3. Sandbox: AttributeError
+4. RAG.search("pandas DataFrame to_csv correct method") → "to_csv, not to_csvv"
+5. ErrorMapper.fix_hint = "rename to_csvv → to_csv"
+6. Planning 重试 → PASS ── RAG 修复了错误
+```
+
+**分工边界**：
+
+| | 语义 Critic (θ) | 物理 Critic (q) |
+|---|---|---|
+| **RAG 检索结果** | ✓ 评判"相关吗？" | — 不介入（相关性是连续的，不是 0/1） |
+| **生成代码** | ✓ 评判"说得通吗？" | ✓ 评判"能跑吗？" |
+| **fix_hint 来源** | LLM 语义推断 | **RAG 检索 + 断言差异**（不是 traceback 帧快照） |
+
+**阻力场中的 RAG**：`rag_search: weight=1`（最低，只读，安全）。不计入物理预算。DAG 优化自动倾向于先用 RAG 获取精确上下文，再用沙箱验证——最小化总体代价。
+
+---
+
+### 循环拓扑化：Agent ↔ Environment 的自适应关系
+
+V5 形式化了 **Agent ↔ Human 的自适应（自适应契约）**。缺失的另一半是 **Agent ↔ Environment 的自适应（循环拓扑）**。两者放在一起，才是一个完整的控制论智能体。
+
+#### 二元性
+
+```
+自适应契约 (Agent ↔ Human):    语义流形 S 上的连续自适应
+                              信号: drift, clarity, e(t), trust_ema
+                              范畴: 契约态射 — "关系如何演化"
+
+循环拓扑 (Agent ↔ Environment): 物理范畴 Q 上的离散自适应
+                              信号: PASS, COMPILE_ERR, TEST_FAIL
+                              范畴: 循环态射 — "执行如何演化"
+```
+
+#### 耦合动力系统
+
+```
+层 1 (语义, 连续):  dx/dt = f(x, u_semantic)     x ∈ S ⊂ ℝ^384
+层 2 (物理, 离散):   q_{k+1} = δ(q_k, exec(a_k))  q ∈ Q (有限集)
+
+耦合项:
+  PhysicalBudget = base × clamp(0.30/max(trust_ema,0.10), 0.5, 2.0)
+  trust_ema      = EMA(trust, {human_feedback, compile_result, test_result, ...})
+```
+
+信任低 → budget 高（物理补偿语义）。信任高 → budget 低（语义已可靠）。这是和 V5 "信任低 → conservative" 同向的阻尼。
+
+#### 三种循环拓扑（1-态射的组合）
+
+| 拓扑 | 结构 | 适用场景 |
+|------|------|---------|
+| **串行组合** (∘) | A → B → C，输出 = 下一环输入 | 简单任务，无分支 |
+| **并行扇出** (∥) | A → (B₁ ∥ B₂ ∥ B₃) → C | 多分支探索 (V6.1) |
+| **反馈环** (μ) | A → B → 判决 → A | retry 逻辑 (V7 的物理重试) |
+
+#### 高阶结构：2-范畴视角
+
+```
+对象 (0-cell):  状态 — 语义快照 s ∈ S, 物理事实 q ∈ Q
+1-态射:         循环 — 一个拓扑封闭的执行单元
+2-态射:         重试 — 从一个 1-态射的失败实例到另一个 1-态射的穿梭
+```
+
+V6.1 的 DAG 拓扑是 1-范畴（步骤 = 对象，依赖 = 态射）。循环拓扑是 2-范畴——不仅在步骤间穿梭，还在**同一个步骤的不同尝试之间**穿梭。
+
+#### 循环的抽象接口
+
+每个 Loop 拥有：
+- **控制参数** — 继承 V5-V6 的 f_fused, θ, parallel_depth（语义侧） + PhysicalBudget, resistance_weight（物理侧）
+- **终止条件** — max_retries, deadline, quality_threshold
+- **状态隔离** — P11 的推广：跨 Loop 只通过不可变快照通信，不共享可变状态
+- **预算追踪** — 每消耗一次物理执行，全局 PhysicalBudget -
+
+#### 缺陷与解药
+
+| 缺陷 | 严重度 | 解药 |
+|------|--------|------|
+| **循环爆炸**: n 个 step，每个有反馈边 → 搜索空间指数增长 | 中 | PhysicalBudget ≤ 5 硬限制；反馈边只在物理失败时激活；不作为搜索空间的一部分 |
+| **耦合正反馈**: trust↓ → budget↑ → 更多失败 → trust↓ | 高 | 阻尼: `PhysicalBudget = base × clamp(0.30/trust_ema, 0.5, 2.0)`，方向正确（低信任多验证，非恶性循环） |
+| **过度工程**: 简单任务被 Loop 包裹 | 中 | Loop 是 opt-in：只在 `intent_type=EXECUTABLE` 且 `tool ∈ PHYSICAL_TOOLS` 时激活；DEMONSTRATION/PSEUDOCODE 走 V6 纯语义管线 |
+| **不可变快照的内存爆炸**: 物理 Loop 的快照可能是 50MB DataFrame 或图片，每次 deepcopy → 3 次重试 → OOM | 高 | **内容寻址引用代替深拷贝**。沙箱执行 = 纯函数求值，天然引用透明。快照只传递 hash + type + size，数据本体在内容寻址存储中 lazy-load。和原则 B（沙箱天然无状态）同构 |
+
+#### 与 V5-V6 的演化关系
+
+```
+V5:    形式化了"关系如何自适应" (contract = 态射在 S 上的演化)
+V6:    形式化了"步骤如何依赖" (DAG = 1-范畴，步骤 = 对象，依赖 = 1-态射)
+V7:    形式化了"循环如何组合" (Loop = 2-范畴，循环 = 1-态射，重试 = 2-态射)
+
+三者正交，打包在一起 = Agent ↔ Human ↔ Environment 的完整自适应结构
+```
+
+---
+
+### 澄清：Agent Fission ≠ Multi-Agent
+
+项目一直使用"分支""并行探索"等概念，但这在数学上和 Multi-Agent System 完全不同。
+
+| | Agent Fission (V6.1 的 DAG 并行) | 真正的 Multi-Agent |
+|---|---|---|
+| **目标** | 一个用户意图，多个执行路径 | 各自独立的目标函数 |
+| **分裂** | Planning 拆解后并行执行同一目标的不同方向 | Agent 自主决定协作/竞争/独立 |
+| **通信** | 不可变快照单向传递（produces → needs） | 消息传递，协商协议 |
+| **冲突** | 不存在 — 同一目标下的搜索分支 | 可能目标冲突，需要仲裁机制 |
+| **收敛** | DAG 汇聚点（Critic 选最优） | 博弈均衡 / 共识协议 |
+| **数学** | DAG 并行调度 + 偏序 (V6.1) | 博弈论 / 机制设计 / 分布式共识 |
+
+**我们做的是 Speculative Parallelism（推测并行）**——一个 Agent 投射多个可能的执行路径，并行探索，通过 Critic 选最优结果。这更接近 MCTS 的 rollout 阶段（多路径推测 + 回溯选择），而不是 Multi-Agent 的任务分解与协商。
+
+**对 V7 的影响**：Loop 拓扑是**单 Agent 内部的执行反馈结构**。每个 Loop 是一个 1-态射，重试是 2-态射。
+
+**关键洞察：2-范畴的横向合成 = 单 Agent 的展开。**
+
+2-范畴的横向合成（horizontal composition）本身就提供了丰富的组合能力——一个 Agent 不需要分裂成多个 Agent 来获得复杂行为：
+
+```
+串行:     Loop_A ∘ Loop_B            → 一个能力链
+并行:     Loop_A ∥ (B₁ ∥ B₂)         → 推测展开 (V6.1 DAG)
+反馈:     μ(Loop_A ∘ Loop_B)         → 嵌入的自我修正 (V7 物理重试)
+嵌套:     μ(Loop_A ∘ μ(Loop_B))      → 递归展开 (V7.2+)
+```
+
+这和 V6.1 的 DAG 并行（步骤级展开）在范畴论上是同构的——只是从 1-范畴（步骤=对象）升到了 2-范畴（循环=1-态射）。单 Agent 在 2-范畴上的横向展开已经足够覆盖 V6.1 的分支探索 + V7 的物理重试 + 两者之间的任意嵌套组合。
+
+**真正的 Multi-Agent（各自独立的目标函数、协商协议、博弈均衡）是 V8+ 的议题。** 那需要 2-范畴之间的**函子**来描述 Agent 间通信——Agent A 的 Loop 拓扑如何映射到 Agent B 的 Loop 拓扑。V7 只需 2-范畴内部的横向合成。
+
+### 新文件
+
+| 文件 | 职责 | 对应数学 |
+|------|------|---------|
+| `core/execution/sandbox.py` | `SandboxExecutor`: AST + mypy + RestrictedPython → `PhysicalState` | 物理映射 ψ |
+| `core/execution/error_mapper.py` | `ErrorMapper`: traceback → `{error_type, location, variables, fix_hint}` | 重置映射：Q → S |
+| `core/critic/dual_track.py` | `DualTrackCritic`: `(θ_semantic, q) → (pass, retry_hint)` | 乘法门控守卫条件 |
+
+### ErrorMapper：犯罪现场的结构化还原
+
+纯文本 traceback 塞给 LLM = LLM 仍需推断"为什么越界"。ErrorMapper 输出结构化约束：
+
+```json
+{
+  "error_type": "IndexError",
+  "location": "line 5: data[i+1]",
+  "variables": {"i": 10, "len(data)": 8},
+  "constraint_violated": "i+1 >= len(data)",
+  "fix_hint": "ensure i < len(data) - 1 before accessing data[i+1]"
+}
+```
+
+`fix_hint` 注入 Planning prompt 作为负样本约束。`variables` 由沙箱在失败时通过自定义 builtins + trace 钩子捕获。即使只还原 50% 的犯罪现场，也比纯语义 Critic 强一个数量级——因为它来自物理事实，不是概率采样。
+
+### 集成点（复用 V6 基础设施）
+
+1. **ToolEngine**: 沙箱作为 USB 工具注册（`tool: "sandbox_python"`），零侵入 ToolEngine
+2. **Orch step**: `step.get("tool")` 决定路由到物理还是语义——V6.1 已支持
+3. **Critic retry**: `pad.critic_score` + `tool.success` 从 trace_context 读取——ToolEngine 已输出
+
+### 不变性评估
+
+**保留**（跨 V5→V7）:
+- P1 (乘法门控): `θ_semantic AND q_physical`
+- P3 (HardTanh): q_physical 天然是 0/1
+- P6 (自标定): Q 转移概率可由历史估计
+- P9 (θ floor): 0.50 语义底线
+
+**V7 新增**:
+- P12: **物理安全红线 (Rigid Contract #5)**: 沙箱隔离不可绕过。FAIL_FATAL 无视 trust_ema 立即熔断。
+- P13: **ErrorMapped Retry**: 物理失败后的重试必须携带 ErrorMapper 的 fix_hint。禁止空手重试。
+- P14: **乘法门控双轨 Critic**: `Final_Pass = (θ > threshold) AND (q != FAIL_FATAL)`。FAIL_RETRYABLE 允许语义判断"是否是预期的失败"。
+
+### V7.1 验证
+
+```
+输入: "写一个函数，返回列表第k大元素"
+  → Planning: step(tool=sandbox_python)
+  → Sandbox: AST ✓, Mypy ✓, exec([3,1,4,1,5], k=2) → PASS
+  → DualTrackCritic: q=PASS, θ=0.75 → pass ✓
+
+输入: "同上但k=10" (len=5)
+  → Sandbox: exec([3,1,4,1,5], k=10) → RUNTIME_ERR
+  → ErrorMapper: {error:"IndexError", fix_hint:"add k < len(arr) guard"}
+  → DualTrackCritic: q=FAIL_RETRYABLE, θ=0.80 → retry with fix_hint
+  → Planning: 重新生成 + 约束"add bounds check" → 通过 ✓
+
+输入: "写一段伪代码解释快速排序"
+  → Sandbox: exec(pseudocode) → COMPILE_ERR
+  → DualTrackCritic: q=FAIL_RETRYABLE, θ=0.90 (语义高分——用户要的就是伪代码)
+  → Final_Pass = θ>0.70 AND q!=FAIL_FATAL → pass ✓
+  // 乘法门控避免了伪代码被编译器错误拦截
+```
