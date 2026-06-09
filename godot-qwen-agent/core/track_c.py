@@ -181,6 +181,35 @@ def _dynamic_output_mult(branch_count, raw_drift):
     return mult
 
 
+# ── V7.3: Resistance-field DAG ─────────────────────────────────────────
+
+RESISTANCE_WEIGHTS: dict[str, float] = {
+    # Pure semantic (zero side effects)
+    "":                            0.0,   # no tool — text generation only
+    "search_web":                  0.1,   # read-only, public data
+    "rag_search":                  0.1,   # read-only, local data
+    # Code execution (memory-isolated)
+    "sandbox_python":              2.0,
+    # MCP: filesystem
+    "mcp__filesystem_read":        5.0,   # read-only, real files
+    "mcp__filesystem_write":      50.0,   # WRITE to real filesystem — high risk
+    "mcp__filesystem_delete":    100.0,   # DELETE — extreme risk
+    # MCP: database
+    "mcp__database_query":        30.0,   # SELECT only
+    "mcp__database_write":       100.0,   # INSERT/UPDATE/DELETE
+    # MCP: network
+    "mcp__network_fetch":         10.0,   # outbound HTTP
+    "mcp__network_api":           40.0,   # authenticated API calls
+}
+
+
+def _resistance_weight(tool_name: str) -> float:
+    """Look up resistance weight with graceful degradation."""
+    if not tool_name:
+        return 0.0
+    return RESISTANCE_WEIGHTS.get(tool_name, 0.0)
+
+
 # ── V6.1: DAG Topology Engine ────────────────────────────────────────
 
 def _extract_step_fields(text: str, step: dict) -> None:
@@ -204,18 +233,26 @@ def _extract_step_fields(text: str, step: dict) -> None:
         pass  # LLM didn't output structured JSON — fields absent, no crash
 
 
-def _build_dag_and_depth(steps: list[dict]) -> tuple[list[dict], int]:
+def _build_dag_and_depth(steps: list[dict],
+                         resistance_weights: dict[str, float] | None = None
+                         ) -> tuple[list[dict], int, float]:
     """Build DAG from step tags + indices, compute maximal safe parallel depth.
+
+    V6.1: Kahn cycle detection + BFS level assignment.
+    V7.3: Resistance-field stable sort — within each BFS fiber, reads are
+          sorted by resistance ascending; writes keep original Planning order
+          (causality preservation — Red-Team #3).
 
     Resolution order:
       1. Match produces/needs tags (deterministic string equality)
       2. Fall back to depends_on indices for unmatched needs
       3. Resolve transitive dependencies for tags
 
-    Returns (steps_with_deps, parallel_depth).
+    Returns (steps_with_deps, parallel_depth, max_resistance).
     parallel_depth = 1 if cycle detected (graph theory: no topological order exists).
     """
     n = len(steps)
+    rw = resistance_weights or {}
 
     # ── 1. Build tag-to-index map ──
     tag_to_idx: dict[str, int] = {}
@@ -262,7 +299,7 @@ def _build_dag_and_depth(steps: list[dict]) -> tuple[list[dict], int]:
 
     if visited < n:
         # Cycle detected — LLM hallucination. Safe fallback: full sequential.
-        return steps, 1
+        return steps, 1, 0.0
 
     # ── 5. BFS level assignment on verified DAG ──
     levels: dict[int, int] = {}
@@ -277,7 +314,40 @@ def _build_dag_and_depth(steps: list[dict]) -> tuple[list[dict], int]:
     level_counts = Counter(levels.values())
     max_depth = max(level_counts.values()) if level_counts else 1
 
-    return steps, max_depth
+    # ── 6. V7.3: Resistance-field stable sort per BFS fiber ──
+    # Red-Team #3: Causality preservation — writes keep original order.
+    # Reads are sorted by resistance ascending. Merge: reads → writes.
+    # Mathematical: sheaf R defined only on V_read; V_write is discrete.
+    if rw:
+        level_groups: dict[int, list[dict]] = {}
+        for i, s in enumerate(steps):
+            level_groups.setdefault(levels.get(i, 0), []).append(s)
+
+        for level, level_steps in level_groups.items():
+            # Split fiber into writes (causal) and reads (resistance-sortable)
+            writes = [s for s in level_steps
+                      if s.get("tool", "").endswith(
+                          ("_write", "_delete", "_insert", "_update"))]
+            reads = [s for s in level_steps if s not in writes]
+
+            # Reads: sort by resistance ascending (gradient descent on potential w)
+            reads.sort(key=lambda s: rw.get(s.get("tool", ""), 0.0))
+
+            # Merge: reads first (scout), writes last (commit)
+            level_groups[level] = reads + writes
+
+        # Reconstruct steps list from sorted level groups (in level order)
+        sorted_steps: list[dict] = []
+        for level in sorted(level_groups.keys()):
+            sorted_steps.extend(level_groups[level])
+        steps[:] = sorted_steps
+
+    # ── 7. Max resistance = global section of sheaf R ──
+    max_resistance = max(
+        (rw.get(s.get("tool", ""), 0.0) for s in steps),
+        default=0.0)
+
+    return steps, max_depth, max_resistance
 
 
 # ── Safe async bridge (暗礁 1: event loop bomb) ──────────────────────
@@ -468,9 +538,12 @@ class TrackCEngine:
             return final, output_mult
 
         # ── FULL_DAG: build DAG topology, compute parallel_depth ──
-        plan_with_deps, parallel_depth = _build_dag_and_depth(plan_result)
+        plan_with_deps, parallel_depth, max_resistance = (
+            _build_dag_and_depth(plan_result, RESISTANCE_WEIGHTS))
         self._emit("🔀 Track C Planning",
-            f"FULL_DAG: {len(plan_result)} 步, DAG depth={parallel_depth} ({time.time()-t0:.1f}s)")
+            f"FULL_DAG: {len(plan_result)} 步, depth={parallel_depth}"
+            f"{', maxR=' + str(max_resistance) if max_resistance > 0 else ''}"
+            f" ({time.time()-t0:.1f}s)")
 
         # ── V7.2 Phase 1: PhysicalBudget (DAG上的联络) ──
         from core.critic.dual_track import PhysicalBudget as _PhysicalBudget

@@ -52,7 +52,7 @@ class TestDAGBuilderTagResolution:
             {"prompt": "查B", "produces": "b"},
             {"prompt": "对比", "needs": "a"},
         ]
-        _, depth = _build_dag_and_depth(steps)
+        _, depth, _ = _build_dag_and_depth(steps)
         assert depth == 2  # 2 at level 0, 1 at level 1
 
     def test_sequential_chain_serial(self):
@@ -62,7 +62,7 @@ class TestDAGBuilderTagResolution:
             {"prompt": "实现", "needs": "d", "produces": "c"},
             {"prompt": "测试", "needs": "c"},
         ]
-        _, depth = _build_dag_and_depth(steps)
+        _, depth, _ = _build_dag_and_depth(steps)
         assert depth == 1
 
     def test_hybrid_dag(self):
@@ -73,7 +73,7 @@ class TestDAGBuilderTagResolution:
             {"prompt": "C", "needs": "a"},
             {"prompt": "D", "needs": "b"},
         ]
-        _, depth = _build_dag_and_depth(steps)
+        _, depth, _ = _build_dag_and_depth(steps)
         assert depth == 2  # 2 at level 0, 2 at level 1
 
     def test_tag_not_matched_falls_back(self):
@@ -82,12 +82,12 @@ class TestDAGBuilderTagResolution:
             {"prompt": "A", "needs": "nonexistent"},
             {"prompt": "B"},
         ]
-        _, depth = _build_dag_and_depth(steps)
+        _, depth, _ = _build_dag_and_depth(steps)
         assert depth == 2  # Both independent
 
     def test_empty_steps(self):
         steps = []
-        _, depth = _build_dag_and_depth(steps)
+        _, depth, _ = _build_dag_and_depth(steps)
         assert depth == 1  # Safe default
 
 
@@ -101,7 +101,7 @@ class TestDAGBuilderIndexFallback:
             {"prompt": "A", "depends_on": []},
             {"prompt": "B", "depends_on": [0]},
         ]
-        _, depth = _build_dag_and_depth(steps)
+        _, depth, _ = _build_dag_and_depth(steps)
         assert depth == 1
 
     def test_depends_on_oob_sanitized(self):
@@ -110,14 +110,14 @@ class TestDAGBuilderIndexFallback:
             {"prompt": "A", "depends_on": [5]},  # OOB
             {"prompt": "B", "depends_on": [0]},
         ]
-        _, depth = _build_dag_and_depth(steps)
+        _, depth, _ = _build_dag_and_depth(steps)
         assert depth == 1
 
     def test_self_loop_sanitized(self):
         steps = [
             {"prompt": "A", "depends_on": [0]},  # self-loop
         ]
-        _, depth = _build_dag_and_depth(steps)
+        _, depth, _ = _build_dag_and_depth(steps)
         assert depth == 1  # No crash, isolated step
 
     def test_tag_and_index_combined(self):
@@ -127,7 +127,7 @@ class TestDAGBuilderIndexFallback:
             {"prompt": "B", "depends_on": [0]},
             {"prompt": "C", "needs": "a", "depends_on": [1]},
         ]
-        _, depth = _build_dag_and_depth(steps)
+        _, depth, _ = _build_dag_and_depth(steps)
         # A→B→C chain: depth=1
         assert depth == 1
 
@@ -142,7 +142,7 @@ class TestDAGBuilderCycleDetection:
             {"prompt": "A", "produces": "a", "needs": "b"},
             {"prompt": "B", "produces": "b", "needs": "a"},
         ]
-        _, depth = _build_dag_and_depth(steps)
+        _, depth, _ = _build_dag_and_depth(steps)
         assert depth == 1  # Cycle → fallback sequential
 
     def test_direct_cycle_index(self):
@@ -150,7 +150,7 @@ class TestDAGBuilderCycleDetection:
             {"prompt": "A", "depends_on": [1]},
             {"prompt": "B", "depends_on": [0]},
         ]
-        _, depth = _build_dag_and_depth(steps)
+        _, depth, _ = _build_dag_and_depth(steps)
         assert depth == 1  # Cycle → fallback sequential
 
     def test_indirect_cycle(self):
@@ -160,7 +160,7 @@ class TestDAGBuilderCycleDetection:
             {"prompt": "B", "produces": "b", "needs": "a"},
             {"prompt": "C", "produces": "c", "needs": "b"},
         ]
-        _, depth = _build_dag_and_depth(steps)
+        _, depth, _ = _build_dag_and_depth(steps)
         assert depth == 1  # Cycle → fallback sequential
 
     def test_no_cycle_but_complex_dag(self):
@@ -171,7 +171,7 @@ class TestDAGBuilderCycleDetection:
             {"prompt": "C", "needs": "a"},
             {"prompt": "D", "needs": "b"},
         ]
-        _, depth = _build_dag_and_depth(steps)
+        _, depth, _ = _build_dag_and_depth(steps)
         # 2 at level 0, 2 at level 1
         assert depth == 2
 
@@ -187,10 +187,10 @@ class TestDAGBuilderEmpty:
             {"prompt": "B"},
             {"prompt": "C"},
         ]
-        _, depth = _build_dag_and_depth(steps)
+        _, depth, _ = _build_dag_and_depth(steps)
         assert depth == 3  # All independent, all at level 0
 
     def test_single_step(self):
         steps = [{"prompt": "A"}]
-        _, depth = _build_dag_and_depth(steps)
+        _, depth, _ = _build_dag_and_depth(steps)
         assert depth == 1
