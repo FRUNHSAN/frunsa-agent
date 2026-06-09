@@ -517,14 +517,16 @@ class Repl:
                      clarity: float = 0.5,
                      session_gain: float = 1.0,
                      explore_bias: float = 0.0,
-                     compromise_bias: float = 0.0):
-        """Track C: full engine pipeline. V6.3: returns (response, output_capacity_mult)."""
+                     compromise_bias: float = 0.0,
+                     stream_callback=None):
+        """Track C: full engine pipeline. V7 Phase 1: streaming synthesis."""
         from core.track_c import TrackCEngine
         engine = self._get_track_c_engine()
         return engine.run(user, system, self.round_count,
                           trust=trust, e_t=e_t, raw_drift=raw_drift,
                           clarity=clarity, session_gain=session_gain,
-                          explore_bias=explore_bias, compromise_bias=compromise_bias)
+                          explore_bias=explore_bias, compromise_bias=compromise_bias,
+                          stream_callback=stream_callback)
 
     def _get_track_c_engine(self):
         """Lazy-init Track C engine with real CloudLLM backend."""
@@ -559,6 +561,7 @@ class Repl:
                 critic_engine=critic,
                 adapter=adapter,
                 bus=self.c.bus,
+                stream_llm=self.c.cloud_llm,  # V7 Phase 1: streaming synthesis
             )
         return self._track_c_engine
 
@@ -951,10 +954,19 @@ class Repl:
                 f"Track {route} ({reason}) "
                 f"[V5: e(t)={e_t:.2f} sigma2={trust_var:.3f} trust={trust:.2f}]")
             if route == "C":
-                full_response, cog_mult = self._run_track_c(user, system, xray, live,
+                # V7 Phase 1: Streaming synthesis — stream tokens in real-time
+                import sys as _sys
+                _sys.stdout.write('\n')
+                _sys.stdout.flush()
+                full_response, cog_mult = self._run_track_c(
+                    user, system, xray, live,
                     trust=trust, e_t=e_t, raw_drift=raw_drift,
                     clarity=clarity, session_gain=session_gain,
-                    explore_bias=explore_bias, compromise_bias=compromise_bias)
+                    explore_bias=explore_bias, compromise_bias=compromise_bias,
+                    stream_callback=lambda t: (_sys.stdout.write(t), _sys.stdout.flush()),
+                )
+                _sys.stdout.write('\n')
+                _sys.stdout.flush()
                 # V6: Cognitive depth → dynamic output capacity
                 if cog_mult > 1.0:
                     pl = self.c.output_pipeline
@@ -973,10 +985,20 @@ class Repl:
                 self._update_live(xray, live)
 
             # ── Output pipeline ──
-            orig_len = len(full_response)
-            full_response, penalty = self.c.output_pipeline.process(full_response.strip())
-            if penalty:
-                trust = max(0.0, trust - penalty)
+            # V7 Phase 1: streaming mode skips truncation (LLM self-regulates)
+            # Still apply markdown stripping + sycophancy detection
+            if route == "C":
+                orig_len = len(full_response)
+                clean = self.c.output_pipeline._strip_markdown(full_response.strip())
+                penalty = self.c.output_pipeline._detect_sycophancy(clean)
+                full_response = clean
+                if penalty:
+                    trust = max(0.0, trust - penalty)
+            else:
+                orig_len = len(full_response)
+                full_response, penalty = self.c.output_pipeline.process(full_response.strip())
+                if penalty:
+                    trust = max(0.0, trust - penalty)
             self.c.bus.emit("输出管道", f"截断/清洗: {orig_len}->{len(full_response)} 字符")
 
             # ── V5: Execution feedback (truncation ratio -> e(t) compensation) ──

@@ -329,12 +329,14 @@ class TrackCEngine:
         critic_engine,
         adapter=None,  # GenerationAdapter for synthesis fallback
         bus=None,  # XRayBus for observability
+        stream_llm=None,  # V7 Phase 1: raw LLM client for streaming synthesis
     ) -> None:
         self._planning = planning_engine
         self._orch = orch_engine
         self._critic = critic_engine
         self._adapter = adapter
         self._bus = bus
+        self._stream_llm = stream_llm
 
     def _emit(self, stage: str, detail: str) -> None:
         if self._bus:
@@ -352,7 +354,8 @@ class TrackCEngine:
             clarity: float = 0.5,
             session_gain: float = 1.0,
             explore_bias: float = 0.0,
-            compromise_bias: float = 0.0):
+            compromise_bias: float = 0.0,
+            stream_callback=None):  # V7 Phase 1: callable(token_str) per chunk
         """Execute Track C pipeline. Returns (response_text, output_capacity_mult).
 
         V5.3: Dual-sensor fusion — raw semantic drift (cross-round) + LLM clarity
@@ -417,7 +420,10 @@ class TrackCEngine:
             pad = Scratchpad(max_retries=0)
             pad.plan = plan_result
             pad.critic_score = 1.0  # No critic — assume satisfaction
-            final = self._synthesize(user, system, pad)
+            if stream_callback:
+                final = self._stream_and_collect(user, system, pad, stream_callback)
+            else:
+                final = self._synthesize(user, system, pad)
             self._emit("🔀 Track C 合成", f"完成 ({time.time()-t0:.1f}s)")
             return final, output_mult
 
@@ -459,7 +465,10 @@ class TrackCEngine:
 
         # ── Phase 4: Synthesize final response ──
         self._emit("🔀 Track C 合成", "⏳ 合成最终回复...")
-        final = self._synthesize(user, system, pad)
+        if stream_callback:
+            final = self._stream_and_collect(user, system, pad, stream_callback)
+        else:
+            final = self._synthesize(user, system, pad)
         self._emit("🔀 Track C 合成", f"完成 ({time.time()-t0:.1f}s)")
         return final, output_mult
 
@@ -631,11 +640,8 @@ class TrackCEngine:
 
     # ── Synthesis ───────────────────────────────────────────────────
 
-    def _synthesize(self, user: str, system: str, pad: Scratchpad) -> str:
-        """Build final response from all step results + critique.
-
-        Uses the injected GenerationAdapter for LLM synthesis.
-        """
+    def _build_synthesis_prompt(self, user: str, system: str, pad: Scratchpad) -> str:
+        """Build the synthesis prompt. Shared by _synthesize and _synthesize_stream."""
         parts = [
             f"用户问题: {user}",
             f"分析结果: {pad.truncated_for_critic()}",
@@ -643,7 +649,14 @@ class TrackCEngine:
         ]
         if pad.retry_count > 0:
             parts.append(f"(经过 {pad.retry_count} 次重试后通过)")
-        prompt = f"{system}\n\n" + "\n".join(parts) + "\n请基于以上内容生成最终回复。"
+        return f"{system}\n\n" + "\n".join(parts) + "\n请基于以上内容生成最终回复。"
+
+    def _synthesize(self, user: str, system: str, pad: Scratchpad) -> str:
+        """Build final response from all step results + critique.
+
+        Uses the injected GenerationAdapter for LLM synthesis.
+        """
+        prompt = self._build_synthesis_prompt(user, system, pad)
 
         if self._adapter:
             from core.contracts import GenerationResult
@@ -653,3 +666,33 @@ class TrackCEngine:
             return str(result)
         # Last resort: return concatenated results
         return "\n\n".join(pad.step_results[-3:])
+
+    def _stream_and_collect(self, user: str, system: str, pad: Scratchpad,
+                            callback) -> str:
+        """Stream synthesis tokens through callback, return full text."""
+        parts: list[str] = []
+        for chunk in self._synthesize_stream(user, system, pad):
+            parts.append(chunk)
+            try:
+                callback(chunk)
+            except Exception:
+                pass  # Display failure must not crash synthesis
+        return "".join(parts)
+
+    def _synthesize_stream(self, user: str, system: str, pad: Scratchpad):
+        """V7 Phase 1: Stream synthesis tokens via raw LLM client.
+
+        Yields str chunks. Falls back to non-streaming _synthesize if
+        no stream_llm is available.
+        """
+        if self._stream_llm is None:
+            yield self._synthesize(user, system, pad)
+            return
+
+        prompt = self._build_synthesis_prompt(user, system, pad)
+        try:
+            for chunk in self._stream_llm.generate_stream(prompt):
+                yield chunk
+        except Exception:
+            # Fallback: generate synchronously
+            yield self._synthesize(user, system, pad)
