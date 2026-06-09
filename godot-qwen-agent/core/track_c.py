@@ -28,16 +28,20 @@ MIN_PLAN_STEPS = 3  # Minimum plan steps before retry (configurable via env)
 def _extract_code(text: str) -> str:
     """π: S → C — extract Python code block from Orch synthesis output.
 
-    Tries ```python fence first, then def/class detection as fallback.
-    Returns empty string if no code block found (→ FORMAT_ERROR, no budget).
+    Tries: 1) fenced block, 2) def/class block, 3) any text that looks like code.
+    Returns empty string if no code found (→ FORMAT_ERROR, no budget).
     """
     import re
-    # Try fenced code block
-    m = re.search(r'```(?:python|py)?\s*\n(.*?)```', text, re.DOTALL)
+    # Try fenced code block (with or without closing fence)
+    m = re.search(r'```(?:python|py)?\s*\n(.*?)(?:```|$)', text, re.DOTALL)
+    if m and len(m.group(1).strip()) >= 10:
+        return m.group(1).strip()
+    # Fallback: find def/class with body (any indented continuation lines)
+    m = re.search(r'((?:def|class)\s+\w+[^\n]*\n(?:\s{2,}[^\n]+\n?)+)', text)
     if m:
         return m.group(1).strip()
-    # Fallback: find def or class followed by indented lines
-    m = re.search(r'((?:def|class)\s+\w+[^\n]*\n(?:\s+[^\n]+\n?)+)', text)
+    # Last resort: any def/class line with trailing content
+    m = re.search(r'((?:def|class)\s+\w+[^\n]+\n.{10,}?(?:\n\n|\n$|$))', text, re.DOTALL)
     if m:
         return m.group(1).strip()
     return ""
@@ -672,7 +676,10 @@ class TrackCEngine:
 
             # Step 1.5: Fail-Fast — don't waste budget on non-code
             if not code or len(code) < 10:
-                self._emit("🔧 物理验证", "FORMAT_ERROR: code < 10 chars, semantic retry")
+                # Emit what we got for debugging
+                preview = result_text[:200].replace('\n', ' ')
+                self._emit("🔧 物理验证",
+                    f"FORMAT_ERROR: code={len(code)}chars, result_preview={preview}")
                 return result_text + "\n[FORMAT_ERROR: 必须使用 ```python 包裹代码]"
 
             # Determine degraded mode (Step 4: entropy penalty)
