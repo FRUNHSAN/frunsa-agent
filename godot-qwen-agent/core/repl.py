@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import threading
 import time
 from datetime import datetime
+
+import numpy as _np
 
 from core.container import Container
 from core.contracts.blueprint_schema import BLUEPRINT_SCHEMA
@@ -138,7 +141,12 @@ class Repl:
         self._exec_reflex_active: bool = False
         # ── V6: Semantic drift tracking (Path 2 sensor) ──
         self._prev_user_emb = None       # Previous round's user embedding
+        self._embedding_window: list = []   # V6.2: last N user embeddings for session variance
         self._drift_history: list[float] = []  # Drift values for Z-score baseline
+        # V6.2: WassersteinProxy — calibrated async at startup
+        from core.adapters.wasserstein_proxy import WassersteinProxy
+        self._wasserstein = WassersteinProxy.uncalibrated()
+        self._w_calibration_started: bool = False
         # Embedding model loads lazily on first _route_task() or _classify_command() call
 
     # ── V5 Status dashboard ──
@@ -444,16 +452,47 @@ class Repl:
             except Exception:
                 pass
 
+    def _start_wasserstein_calibration(self, embed_model) -> None:
+        """V6.2: Async background WassersteinProxy calibration.
+
+        Encodes benchmark QA pairs and runs calibrate() in a daemon thread.
+        Falls back silently on any error — calibration is best-effort.
+        """
+        import threading
+        from core.adapters.benchmark_qa import get_perfect_text_pairs, get_bad_text_pairs
+
+        def _run():
+            try:
+                perfect_text = get_perfect_text_pairs()
+                bad_text = get_bad_text_pairs()
+                perfect_embs = [
+                    (embed_model.encode([q])[0], embed_model.encode([a])[0])
+                    for q, a in perfect_text
+                ]
+                bad_embs = [
+                    (embed_model.encode([q])[0], embed_model.encode([a])[0])
+                    for q, a in bad_text
+                ]
+                self._wasserstein.calibrate(perfect_embs, bad_embs)
+                import sys
+                print("  [W-Proxy] calibrated OK", file=sys.stderr)
+            except Exception as e:
+                import sys
+                print(f"  [WARN] W-Proxy: calibration failed ({e})", file=sys.stderr)
+
+        threading.Thread(target=_run, daemon=True).start()
+
     def _run_track_c(self, user: str, system: str, xray: XRay, live=None,
                      trust: float = 0.5, e_t: float = 0.5,
                      raw_drift: float = 0.0,
-                     clarity: float = 0.5):
-        """Track C: full engine pipeline. V5.3: returns (response, output_capacity_mult)."""
+                     clarity: float = 0.5,
+                     session_gain: float = 1.0):
+        """Track C: full engine pipeline. V6.2: returns (response, output_capacity_mult)."""
         from core.track_c import TrackCEngine
         engine = self._get_track_c_engine()
         return engine.run(user, system, self.round_count,
                           trust=trust, e_t=e_t, raw_drift=raw_drift,
-                          clarity=clarity)
+                          clarity=clarity, session_gain=session_gain)
 
     def _get_track_c_engine(self):
         """Lazy-init Track C engine with real CloudLLM backend."""
@@ -704,45 +743,74 @@ class Repl:
             # 1a. Fast Path: embedding-based emotional/state signals (~30ms)
             dim, score = None, 0.0
             clarity = 0.5  # default neutral (no LLM available)
-            _clarity_future = None
             if USE_SEMANTIC and sem:
                 try:
                     sig = sem.detect(user)
                 except Exception:
                     sig = {"dimension": None, "score": 0.0, "all_scores": {}}
                 dim, score = sig["dimension"], sig["score"]
-
-                # 1b. Reasoning Path: LLM clarity → thread pool (I/O-bound, releases GIL)
-                #     Submit future NOW so API call overlaps with drift computation below.
-                import concurrent.futures
-                _pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-                _clarity_future = _pool.submit(sem.assess_clarity, user)
             if dim:
                 self.c.bus.emit("语义感知", f"{dim}={score:.3f}")
                 self._update_live(xray, live)
 
-            # 1c. Historical Path: semantic drift via cosine distance (~30ms, no API)
-            #     Runs on main thread WHILE clarity LLM call is in flight (I/O overlap).
-            import numpy as _np
+            # 1b + 1c: Reasoning Path (LLM clarity, ~1s) + Historical Path (drift, ~30ms)
+            #          Run concurrently: submit clarity to thread pool, compute drift on
+            #          main thread while LLM API call is in flight (I/O releases GIL).
             raw_drift = 0.0
-            if len(user.strip()) > 3:
-                try:
-                    m, _, _ = _get_command_model()
-                    cur_emb = m.encode([user])[0]
-                    if self._prev_user_emb is not None:
-                        cos_sim = float(_np.dot(cur_emb, self._prev_user_emb)
-                                        / (_np.linalg.norm(cur_emb) * _np.linalg.norm(self._prev_user_emb) + 1e-8))
-                        raw_drift = 1.0 - cos_sim
-                    self._prev_user_emb = cur_emb
-                except Exception:
-                    pass  # Embedding model unavailable → raw_drift stays 0
-
-            # Barrier: collect clarity result (may already be done if API was fast)
-            if _clarity_future is not None:
-                clarity = _clarity_future.result(timeout=5.0)
+            _cur_emb = None  # V6.2: saved for window+gain after both branches
+            if USE_SEMANTIC and sem:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _pool:
+                    _future = _pool.submit(sem.assess_clarity, user)
+                    # ── Drift computation runs WHILE clarity LLM is in flight ──
+                    if len(user.strip()) > 3:
+                        try:
+                            m, _, _ = _get_command_model()
+                            cur_emb = m.encode([user])[0]
+                            _cur_emb = cur_emb  # V6.2: save for window
+                            if self._prev_user_emb is not None:
+                                cos_sim = float(_np.dot(cur_emb, self._prev_user_emb)
+                                                / (_np.linalg.norm(cur_emb) * _np.linalg.norm(self._prev_user_emb) + 1e-8))
+                                raw_drift = 1.0 - cos_sim
+                            self._prev_user_emb = cur_emb
+                        except Exception:
+                            pass  # Embedding model unavailable → raw_drift stays 0
+                    # Barrier: collect clarity (with guarantees cleanup)
+                    clarity = _future.result(timeout=5.0)
                 self.c.bus.emit("观测器", f"clarity={clarity:.2f}")
                 self._update_live(xray, live)
-                _pool.shutdown(wait=False)
+            else:
+                # No semantic engine — just compute drift
+                if len(user.strip()) > 3:
+                    try:
+                        m, _, _ = _get_command_model()
+                        cur_emb = m.encode([user])[0]
+                        _cur_emb = cur_emb  # V6.2: save for window
+                        if self._prev_user_emb is not None:
+                            cos_sim = float(_np.dot(cur_emb, self._prev_user_emb)
+                                            / (_np.linalg.norm(cur_emb) * _np.linalg.norm(self._prev_user_emb) + 1e-8))
+                            raw_drift = 1.0 - cos_sim
+                        self._prev_user_emb = cur_emb
+                    except Exception:
+                        pass
+
+            # ── V6.2: Session embedding window → variance → gain ──
+            if _cur_emb is not None:
+                self._embedding_window.append(_cur_emb)
+                if len(self._embedding_window) > 15:
+                    self._embedding_window.pop(0)
+                # Async background calibration (first-round trigger)
+                if not self._w_calibration_started:
+                    self._w_calibration_started = True
+                    self._start_wasserstein_calibration(m)
+
+            session_gain = 1.0
+            if len(self._embedding_window) >= 2:
+                emb_stack = _np.stack(self._embedding_window)
+                session_var = float(_np.var(emb_stack, axis=0).mean())
+                session_gain = self._wasserstein.compute_session_gain(
+                    session_var, n_rounds=len(self._embedding_window))
+            self.c.bus.emit("观测器", f"w-gain={session_gain:.2f}")
+            self._update_live(xray, live)
 
             # ── Phase 9: pending consent proposals ──
             if self.pending_consent:
@@ -845,7 +913,7 @@ class Repl:
             if route == "C":
                 full_response, cog_mult = self._run_track_c(user, system, xray, live,
                     trust=trust, e_t=e_t, raw_drift=raw_drift,
-                    clarity=clarity)
+                    clarity=clarity, session_gain=session_gain)
                 # V6: Cognitive depth → dynamic output capacity
                 if cog_mult > 1.0:
                     pl = self.c.output_pipeline

@@ -115,9 +115,18 @@ def _critic_factors(raw_drift, e_t):
     return f, g
 
 
-def _critic_threshold(f, g):
-    """Multiplicative gating. θ drops only when user changed topic AND strategy fails."""
-    return max(0.50, 0.75 - 0.25 * f * g)
+def _critic_threshold(f, g, session_gain: float = 1.0):
+    """Multiplicative gating. θ drops only when user changed topic AND strategy fails.
+
+    V6.2: session_gain from Wasserstein Bayesian smoothing provides domain-adaptive
+    sensitivity. Wide domain (gain>1) → θ slightly relaxed. Narrow domain (gain<1) →
+    θ slightly tightened. Effect bounded at ±0.05 — gain is subordinate to the
+    primary f×g gating.
+    """
+    base = max(0.50, 0.75 - 0.25 * f * g)
+    # Domain-adaptive sensitivity: ±0.05 max adjustment
+    theta = base - 0.05 * (session_gain - 1.0)
+    return max(0.50, min(0.75, theta))
 
 
 def _dynamic_output_mult(branch_count, raw_drift):
@@ -340,13 +349,18 @@ class TrackCEngine:
     def run(self, user: str, system: str, round_count: int = 0,
             trust: float = 0.5, e_t: float = 0.5,
             raw_drift: float = 0.0,
-            clarity: float = 0.5):
+            clarity: float = 0.5,
+            session_gain: float = 1.0):
         """Execute Track C pipeline. Returns (response_text, output_capacity_mult).
 
         V5.3: Dual-sensor fusion — raw semantic drift (cross-round) + LLM clarity
         (in-round) jointly drive Planning branch_count via compute_dual_sensor_f.
         Critic threshold remains drift-only (preserves sensitivity to semantic
         space instability even during lucid topic switches).
+
+        V6.2: session_gain from Wasserstein Bayesian smoothing adjusts Critic
+        sensitivity — wide domain (gain>1) slightly relaxes, narrow (gain<1)
+        slightly tightens. Max effect ±0.05 on θ.
 
         Flow: Planning → {DIRECT: Synthesis} | {FULL_DAG: Orch → Critic → (retry?) → Synthesize}
         """
@@ -358,7 +372,7 @@ class TrackCEngine:
         branch_count = _path2_branch_count(f_fused)
         # Critic: drift-only (not fused) — keeps sensitivity to semantic space instability
         f_drift, g = _critic_factors(raw_drift, e_t)
-        theta = _critic_threshold(f_drift, g)
+        theta = _critic_threshold(f_drift, g, session_gain)
         output_mult = _dynamic_output_mult(branch_count, raw_drift)
         mode = "EXPLORE" if branch_count >= 3 else "BALANCED" if branch_count >= 2 else "EXPLOIT"
         # 🧊 = lucid suppression active: high clarity killed a drift spike
