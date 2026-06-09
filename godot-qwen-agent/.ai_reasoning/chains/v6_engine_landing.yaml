@@ -1,0 +1,105 @@
+chain_id: v6_engine_landing
+title: "V6 引擎落地 — V5 控制面在引擎层的完全体：DAG拓扑 + Wasserstein校准 + 偏置张量裂变"
+created_at: "2026-06-09"
+status: active
+context: |
+  V5 建立了四条控制面（Path 1/2/3 + 路由），但执行层（Planning/Orch/Critic）
+  的参数仍由硬编码或单一标量驱动。V5.3 将 Path 2 升级为 drift⊕clarity 双传感器
+  融合，但 Orch 的全并行 gather 和 Critic 的静态阈值仍未与 V5 控制面联锁。
+  Path 1（meta_adapt）的状态完全不流入 Track C。
+
+  V6 的唯一使命：把 V5 的控制面蓝图物理化到引擎层。不是新大版本，是"最后一公里"。
+
+decision: |
+  V6.1 — Orchestration DAG 拓扑相变:
+    废除 LLM 决定 parallel_depth（结构幻觉）。Planning LLM 输出 produces/needs
+    标签（事实提取），Orch 引擎在本地执行 Kahn 环检测 + BFS 层级分配 →
+    parallel_depth → asyncio.Semaphore(parallel_depth)。LLM 是证人，不是法官。
+
+  V6.2 — WassersteinProxy 混合校准:
+    双层协议：Tier 1 四象限静态 QA 锚点（永不改变，防基准污染），Tier 2
+    贝叶斯平滑 session_gain（α=3 伪计数，零硬编码冷启动阻尼）。
+    gain ∈ [0.5, 2.0]，效果 ±0.05 永远从属于 f×g 乘法门控。
+
+  V6.3 — Path 1 ↔ Track C 偏置张量裂变:
+    废除单一 relax_bias 标量。meta_adapt.is_relaxed + last_raw_drift 判定
+    失败根因：drift>0.5 → 意图矛盾 → explore_bias=0.20（Planning 广搜）；
+    drift≤0.5 → 能力穷尽 → compromise_bias=0.05（Critic 降标准）。
+    Minimax Fallback: drift=None → 1.0（零信息最大熵 = 假设混沌）。
+    P11 执行期状态冻结：所有信号快照在 t₀ 锁死，原生 float 注入，无对象引用。
+
+rationale: |
+  ### V6.1: 事实提取 vs 控制决策
+
+  LLM 擅长语义命名（produces: "paper_list"），不擅长数值索引（depends_on: [3]）。
+  标签匹配是确定性字符串相等 → 零概率误匹配空间。
+  Kahn 环检测 + BFS 层级分配 → 图论必然：含环图无拓扑排序，唯一安全 fallback = depth=1。
+  这不是"选了个数字"，是图论定理。
+
+  ### V6.2: 贝叶斯伪计数 vs 硬编码 if-round<N
+
+  σ²_smoothed = (α·σ²_base + n·σ²_session)/(α + n) 自带渐近性质：
+  n=1 → session 权重 25%，n→∞ → session 主导。不需要 if round < 3。
+  双层协议：锚点防污染（永不改变），增益适应领域（EMA 追踪）。
+  Mahalanobis + Ledoit-Wolf 被否决 — 384 维 × 5-10 样本 → 矩阵病态 → 距离震荡。
+
+  ### V6.3: 标量耦合陷阱
+
+  relax_bias=+0.15 同时推高 Planning（explore）和拉低 Critic（compromise）→ 控制耦合。
+  能力穷尽（低 drift）：目标清晰但做不到 → 不应搜索更多，应降标准。
+  意图矛盾（高 drift）：目标畸形 → 应搜索更多解读，不应降标准。
+  两个正交维度被压进一个标量 → 系统性信号错配。
+  裂变后两个偏置各自驱动各自的执行器，零串扰。
+
+  ### 代码块感知截断
+
+  _truncate_sentences 在代码块（``` fences）内不计句子。代码注释、docstring、
+  方法链的换行符不是语义句子边界。修复后 HIGH=24 句基础 + 1.8x 认知深度 = 43 句有效。
+
+evidence:
+  - core/track_c.py: _build_dag_and_depth (Kahn+BFS) + _CRITIC_SEMAPHORE
+  - core/track_c.py: _critic_threshold(f, g, session_gain, explore_bias, compromise_bias)
+  - core/track_c.py: _extract_step_fields (produces/needs/depends_on 解析)
+  - engines/orchestration/interface.py: OrchestrationContext +parallel_depth
+  - engines/orchestration/llm.py: Semaphore(parallel_depth) + 移除 LLM parallel_depth
+  - core/adapters/wasserstein_proxy.py: _baseline_variance + compute_session_gain
+  - core/adapters/benchmark_qa.py: 10+8 对四象限 QA
+  - core/adapters/output_pipeline.py: 代码块感知句子计数
+  - core/repl.py: _compute_bias_tensor + _start_wasserstein_calibration
+  - tests/unit/test_v6_1_dag_topology.py: 19 测试全绿
+  - tests/unit/test_v6_2_wasserstein_gain.py: 16 测试全绿
+  - tests/unit/test_v6_3_bias_tensor.py: 13 测试全绿
+  - Session 77: 代码块感知截断生效，输出完整
+
+alternatives:
+  - "f_fused → parallel_depth 标量映射" — 被 V6.1 致命反例废除（三篇独立论文 → 应并行但 f_fused≈0 → 标量映射判串行）
+  - "LLM 输出 depends_on 整数索引" — 被废除（LLM 结构性幻觉：越界索引、循环依赖、漏标依赖）
+  - "Mahalanobis + Ledoit-Wolf" — 被否决（384 维 × 5-10 样本 → 矩阵病态，过度工程）
+  - "单一 relax_bias 标量" — 被废除（控制耦合：能力穷尽和意图矛盾被同一种偏置处理）
+  - "句子限制继续加数字" — 被废除（代码块感知是结构修复，不是参数调优）
+
+anti_patterns:
+  - "LLM 直接输出控制参数（parallel_depth）" — 结构幻觉，LLM 不懂系统并发约束
+  - "用认知标量（f_fused）驱动拓扑决策（parallel_depth）" — 信号错配，认知确定性 ≠ 任务并行度
+  - "标量 relax_bias 同时驱动 Planning 和 Critic" — 控制耦合，失败原因被压缩丢失
+  - "硬编码 if-round<N 解决冷启动" — 贝叶斯伪计数的渐近性质天然提供阻尼
+  - "在代码块内计句子数" — 代码行是结构不是语义，换行符 ≠ 句子边界
+
+future_guidance: |
+  V6 完成了 V5 控制面的引擎层落地。三个引擎现在各自持有独立的充分统计量：
+    Planning: n = branch_count(min(1.0, Φ(d,c) + explore_bias))
+    Orch:     depth = Kahn_BFS(Sᵢⱼ tag 匹配)
+    Critic:   θ = max(0.50, θ₀ - α·f_drift·g - 0.05·(gain-1) - compromise_bias)
+
+  未来 V7+ 方向：
+    1. 流式输出（降低感知延迟）
+    2. 跨会话模式发现（行为模式固化到用户画像）
+    3. TDA 集成（持续同调检测需要新维度的信号）
+    4. Schrödinger Bridge 离散近似（Sinkhorn 算法 token 空间熵正则化）
+
+  任何新增信号源或执行器必须遵守：
+    - 每个引擎持有独立的充分统计量（不共享 σ²）
+    - 控制信号用 HardTanh（不用 sigmoid）
+    - 乘法门控（不加法耦合独立风险因子）
+    - 自标定（不硬编码阈值）
+    - LLM 只声明事实，不输出控制参数

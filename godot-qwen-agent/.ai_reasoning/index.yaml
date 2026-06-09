@@ -13,7 +13,7 @@
 # Schema: schemas/reasoning_chain.schema.json
 
 library_version: 1
-last_updated: "2026-06-09T18:00:00Z"
+last_updated: "2026-06-09T20:00:00Z"
 
 # ── Chains by architectural layer ────────────────────────────────────
 
@@ -364,6 +364,13 @@ chains:
     tags: [v5.3, dual_sensor_fusion, clarity, semantic_drift, planning_branch, critic_threshold, keyword_gate_deletion, dual_engine_observer, lucid_suppression, observe_dont_inject]
     status: active
 
+  - chain_id: v6_engine_landing
+    file: chains/v6_engine_landing.yaml
+    title: "V6 引擎落地 — V5 控制面完全体：DAG拓扑 + Wasserstein校准 + 偏置张量裂变"
+    layer: plan
+    tags: [v6, engine_landing, dag_topology, kahn_algorithm, semaphore, wasserstein_calibration, bayesian_smoothing, bias_tensor, path1_interlock, code_block_aware]
+    status: active
+
   # ── Real LLM Orchestration + Critic Engines ──
   - chain_id: phase_18_real_orch_critic
     file: chains/phase_18_real_orch_critic.yaml
@@ -576,3 +583,13 @@ tag_index:
   dual_engine_observer: [v5_3_dual_sensor_fusion]
   lucid_suppression: [v5_3_dual_sensor_fusion]
   observe_dont_inject: [v5.2_observer_downgrade, v5_3_dual_sensor_fusion]
+  v6: [v6_engine_landing]
+  engine_landing: [v6_engine_landing]
+  dag_topology: [v6_engine_landing]
+  kahn_algorithm: [v6_engine_landing]
+  semaphore: [v6_engine_landing]
+  wasserstein_calibration: [v6_engine_landing]
+  bayesian_smoothing: [v6_engine_landing]
+  bias_tensor: [v6_engine_landing]
+  path1_interlock: [v6_engine_landing]
+  code_block_aware: [v6_engine_landing]
