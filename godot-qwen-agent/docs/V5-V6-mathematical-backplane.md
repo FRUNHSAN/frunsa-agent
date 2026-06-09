@@ -1,7 +1,7 @@
 # V5 → V6 数学背板：从伪自适应到随机最优控制
 
 **日期:** 2026-06-09
-**状态:** V5.3 + V6 封板 | V7 规划中 — 混合自动机
+**状态:** V6 封板 | V7 Phase 1 (流式) + V7.1 MVP (物理 Critic) 落地 | V7.2 规划中 — 85% 物理闭环
 **基线:** v5.0-bang-bang-baseline → V6 engine landing
 
 ---
@@ -1121,6 +1121,31 @@ V7:    形式化了"循环如何组合" (Loop = 2-范畴，循环 = 1-态射，�
 
 **真正的 Multi-Agent（各自独立的目标函数、协商协议、博弈均衡）是 V8+ 的议题。** 那需要 2-范畴之间的**函子**来描述 Agent 间通信——Agent A 的 Loop 拓扑如何映射到 Agent B 的 Loop 拓扑。V7 只需 2-范畴内部的横向合成。
 
+**单 Agent vs 多 Agent 的 Loop 拓扑差异：**
+
+| | 单 Agent Loop (V7) | 多 Agent Loop (V8+) |
+|---|---|---|
+| **范畴层级** | 2-范畴内部 | 2-范畴之间的函子 |
+| **Loop 所有者** | 同一个 Agent | 各自独立的 Agent |
+| **组合方式** | 横向合成 (∘, ∥, μ) | 函子映射 F: Loop_A → Loop_B |
+| **冲突解决** | 不存在 — 同一目标 | 博弈均衡 / 拍卖 / 协商协议 |
+| **物理预算** | 单 Agent 全局计数器 | 跨 Agent 预算协商 (谁出钱?) |
+| **信任模型** | trust_ema (Agent↔Human) | Agent↔Agent 信任 (互评机制) |
+| **拓扑不变量** | 2-态射的组合图 | 函子保持的交换图 |
+
+**V7.2 剩余差距清单：**
+
+| # | 差距 | 当前状态 | 影响 | 目标版本 |
+|---|------|---------|------|---------|
+| 1 | Planning 不生成 test_cases | prompt 模板缺 Test-First 指令 | 物理验证无断言输入 | V7.2 |
+| 2 | Mypy 层空桩 | `_check_mypy` 未实现 | 类型错误漏过 | V7.2 |
+| 3 | RestrictedPython 层空桩 | `_run_restricted` 未实现 | 运行时错误漏过 | V7.2 |
+| 4 | PhysicalBudget 不约束 Orch | 只在 Critic 层计数 | Orch 可能超额调度物理节点 | V7.2 |
+| 5 | 用户不能声明 intent_type | 无 CLI flag | PSEUDOCODE/DEMO 只能靠 clarity 推断 | V7.2 |
+| 6 | MCP 工具不走物理 Critic | MCP 调用的 tool.success 不触发 DualTrackCritic | 文件系统操作无阻力场保护 | V7.3 |
+| 7 | 循环是嵌入式 while | track_c.py 的 retry 逻辑未抽象为 Loop 对象 | 循环不可组合、不可审计 | V8 |
+| 8 | 无跨会话 trust_ema 持久化 | /new 清零所有状态 | 长期关系无法固化 | V8 |
+
 ### 新文件
 
 | 文件 | 职责 | 对应数学 |
@@ -1184,3 +1209,100 @@ V7:    形式化了"循环如何组合" (Loop = 2-范畴，循环 = 1-态射，�
   → Final_Pass = θ>0.70 AND q!=FAIL_FATAL → pass ✓
   // 乘法门控避免了伪代码被编译器错误拦截
 ```
+
+---
+
+## 十二、V7.2：物理闭环成熟度 20% → 85% — Test-First 先验契约 + 三层递增滤网
+
+### 核心里程碑
+
+在 V7.1（基线 ~20%）中，物理 Critic 仅依赖 AST 进行后验语法检查，面对逻辑错误、类型错误和危险操作处于"盲飞"状态。
+
+V7.2 通过引入 **"Test-First 先验契约"** 与 **"三层递增滤网"**，将 Agent 的物理闭环架构成熟度从 20% 提升至 **85%**，正式跨越**自动化奇点（Automation Singularity）**，实现单步任务的"无人值守闭环"。
+
+**85% 是一个完美的工程临界值。** 低于 50%，人类跟在 Agent 后面擦屁股。达到 85%，人类的体感从"监工"变成"审批者"。85% 到 100% 的边际成本指数级爆炸——为拦截最后 15% 的极端物理崩溃（内核逃逸、跨进程状态污染），需要 OS 级隔离、eBPF 等重型基建。那是 V7.3 和 V8 的战略留白。
+
+### 架构成熟度维度拆解
+
+| 验证维度 | V7.1 基线 | V7.2 目标 | 核心实现机制 |
+|---------|----------|----------|------------|
+| 语法与拼写 | 80% | **97%+** | AST 解析 + Mypy 基础语法子集双重校验 |
+| 静态类型安全 | 0% | **90%+** | Mypy 强类型推断，阻断隐式类型转换与签名不匹配 |
+| 运行时逻辑 | 0% | **80%+** | Planning 前置生成 Test Cases，沙箱执行断言比对 (Expected vs Actual) |
+| 危险操作拦截 | 0% | **95%** | RestrictedPython AST 重写 + 白名单 Builtin 限制 |
+| 可操作 Fix Hint | 0% | **70%+** | ErrorMapper 抛弃脏 Traceback，输出结构化"约束优化方向" |
+| **加权平均** | **~20%** | **~85%** | 实现"生成-验证-修复"的单步全自动闭环 |
+
+### 数学升级：从后验验尸到先验契约
+
+当前物理 Critic = **后验误差估计**——代码跑完了才知道对不对。
+
+V7.2 把 test_cases 作为 generate_code 的**严格前置节点**：
+
+```
+后验 (V7.1):  generate_code → execute → compare(got, expected)
+先验 (V7.2):  generate_tests → generate_code → execute → compare
+
+数学差异:
+  后验: 只在失败时给出信息 "期望 4, 得到 IndexError"
+        但不知道"为什么 LLM 觉得 4 是正确的"
+  
+  先验: 测试用例定义了输出空间的接受域 A ⊂ Y
+        LLM 在生成代码时知道边界条件
+        "如果这段代码的输出不在 {[1,1,3,4,5]} 里, 它就是错的"
+```
+
+**Test Cases 是 LLM 对物理世界的承诺。** 它们定义了接受域 A。物理 Critic 的任务从"判断输出是否在 A 内"升级为"如果不在 A 内，计算到 A 的最近点并给出方向"。ErrorMapper 从**模糊推理器**蜕变为**确定性差分器**。
+
+### 三层递增滤网
+
+```
+Filter 1 (AST):      完备性=0.80,  代价=1ms     "语法对吗？"
+Filter 2 (Mypy):     完备性=0.90,  代价=500ms   "类型一致吗？"
+Filter 3 (Restricted):完备性=0.95,  代价=100ms   "操作安全吗？"
+Filter 4 (OS):       完备性=0.99,  代价=500ms+  "物理隔离" ← V7.3
+
+错误捕获率:
+  P(miss) = P(miss_AST) × P(miss_Mypy) × P(miss_Sandbox)
+          = 0.20 × 0.30 × 0.50 = 0.03
+  P(catch) = 97%
+```
+
+**关键设计：执行顺序**
+
+```
+AST 解析 → Mypy 类型检查 → RestrictedPython 转换 → 沙箱执行
+   ↑           ↑                  ↑                ↑
+ 免费        计费1             计费1            计费1
+ 永远跑      预算足就跑         预算足就跑        预算足就跑
+```
+
+Mypy 排在沙箱之前——类型错误比运行时错误更安全、更早暴露。RestrictedPython 是"语义滤网"（防 LLM 幻觉），不是"安全防线"（防恶意注入——那是 OS 沙箱的工作）。
+
+### V7.2 改动清单
+
+| 文件 | 改动 | 行数 |
+|------|------|------|
+| `core/track_c.py` | `_do_plan()` prompt — Test-First 契约：先输出 test_cases，再输出代码 | +10 |
+| `core/execution/sandbox.py` | +`_check_mypy(code)` — subprocess mypy 类型检查 (Layer 2) | +30 |
+| `core/execution/sandbox.py` | +`_run_restricted(code, test_cases)` — RestrictedPython 沙箱 (Layer 3) | +40 |
+| `core/execution/sandbox.py` | `run()` — 三层滤网顺序执行 + 分层计费 (PhysicalBudget) | +15 |
+| `tests/unit/test_v7_2_layered_execution.py` | AST+Mypy+Sandbox 分层验收 + test_cases 前置契约 | +30 |
+
+**总计: ~125 行, 2 文件。**
+
+### 验收标准
+
+| 场景 | V7.1 | V7.2 | 验证 |
+|------|------|------|------|
+| 语法/拼写错误 | AST 捕获 | Mypy + RestrictedPython 双重拦截 | 注入 typo，验证执行前阻断 |
+| 逻辑错误 | 人类发现 | 自动生成 test_cases 失败 + ErrorMapper 定位 | 注入 off-by-one，验证自动报错并触发重试 |
+| 危险操作 | 无防护 | RestrictedPython 拒绝 + 白名单限制 | 注入 `os.system("rm -rf /")`，验证拦截 |
+
+### 战略留白：剩余 15%
+
+| 缺口 | 量级 | 交付版本 |
+|------|------|---------|
+| 极端安全逃逸 (内核级) | ~5% | V7.3: OS 沙箱 (Docker/nsjail cgroups) |
+| 复杂逻辑死角 (未覆盖执行路径) | ~5% | V7.3: Test Cases 自动增广 (失败后生成对抗性边界测试) |
+| 跨步骤状态污染 | ~5% | V8: StatefulSandbox + 跨会话状态外化 |
