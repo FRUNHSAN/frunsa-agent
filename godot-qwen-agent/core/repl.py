@@ -142,6 +142,7 @@ class Repl:
         # ── V6: Semantic drift tracking (Path 2 sensor) ──
         self._prev_user_emb = None       # Previous round's user embedding
         self._embedding_window: list = []   # V6.2: last N user embeddings for session variance
+        self._prev_raw_drift: float | None = None  # V6.3: previous round drift for bias tensor
         self._drift_history: list[float] = []  # Drift values for Z-score baseline
         # V6.2: WassersteinProxy — calibrated async at startup
         from core.adapters.wasserstein_proxy import WassersteinProxy
@@ -452,6 +453,34 @@ class Repl:
             except Exception:
                 pass
 
+    def _compute_bias_tensor(self) -> tuple[float, float]:
+        """V6.3: Fission relax_bias into two orthogonal control signals.
+
+        Reads meta_adapt snapshot once (P11: execution-time state freeze).
+        Uses previous round's raw_drift to classify failure mode:
+          - Drift > 0.5 → Intent Contradiction: explore hard, keep Critic strict
+          - Drift ≤ 0.5 → Capability Exhaustion: stay focused, relax Critic slightly
+          - Drift = None → Minimax: worst-case = intent contradiction
+
+        Returns (explore_bias, compromise_bias). Both zero when not relaxed.
+        Pure function: no side effects, no cross-round accumulation.
+        """
+        snapshot = self.c.meta_adapt.snapshot()
+        if not snapshot.get("relaxed", False):
+            return 0.0, 0.0
+
+        last_drift = self._prev_raw_drift
+        # Minimax Fallback (Patch 3): no history → worst-case = maximum entropy
+        if last_drift is None:
+            last_drift = 1.0  # [0, 2] endpoint = assume chaos, not calm
+
+        if last_drift > 0.5:
+            # Cause B: Intent Contradiction — goal is malformed, explore widely
+            return 0.20, 0.00
+        else:
+            # Cause A: Capability Exhaustion — goal is clear, system can't deliver
+            return 0.00, 0.05
+
     def _start_wasserstein_calibration(self, embed_model) -> None:
         """V6.2: Async background WassersteinProxy calibration.
 
@@ -486,13 +515,16 @@ class Repl:
                      trust: float = 0.5, e_t: float = 0.5,
                      raw_drift: float = 0.0,
                      clarity: float = 0.5,
-                     session_gain: float = 1.0):
-        """Track C: full engine pipeline. V6.2: returns (response, output_capacity_mult)."""
+                     session_gain: float = 1.0,
+                     explore_bias: float = 0.0,
+                     compromise_bias: float = 0.0):
+        """Track C: full engine pipeline. V6.3: returns (response, output_capacity_mult)."""
         from core.track_c import TrackCEngine
         engine = self._get_track_c_engine()
         return engine.run(user, system, self.round_count,
                           trust=trust, e_t=e_t, raw_drift=raw_drift,
-                          clarity=clarity, session_gain=session_gain)
+                          clarity=clarity, session_gain=session_gain,
+                          explore_bias=explore_bias, compromise_bias=compromise_bias)
 
     def _get_track_c_engine(self):
         """Lazy-init Track C engine with real CloudLLM backend."""
@@ -812,6 +844,14 @@ class Repl:
             self.c.bus.emit("观测器", f"w-gain={session_gain:.2f}")
             self._update_live(xray, live)
 
+            # ── V6.3: Bias tensor fission (Path 1 → Planning/Critic) ──
+            explore_bias, compromise_bias = self._compute_bias_tensor()
+            if explore_bias > 0 or compromise_bias > 0:
+                self.c.bus.emit("Path 1→C",
+                    f"explore={explore_bias:.2f} compromise={compromise_bias:.2f}")
+                self._update_live(xray, live)
+            self._prev_raw_drift = raw_drift  # Save for next round's bias tensor
+
             # ── Phase 9: pending consent proposals ──
             if self.pending_consent:
                 consent = self._detect_user_consent(user)
@@ -913,7 +953,8 @@ class Repl:
             if route == "C":
                 full_response, cog_mult = self._run_track_c(user, system, xray, live,
                     trust=trust, e_t=e_t, raw_drift=raw_drift,
-                    clarity=clarity, session_gain=session_gain)
+                    clarity=clarity, session_gain=session_gain,
+                    explore_bias=explore_bias, compromise_bias=compromise_bias)
                 # V6: Cognitive depth → dynamic output capacity
                 if cog_mult > 1.0:
                     pl = self.c.output_pipeline

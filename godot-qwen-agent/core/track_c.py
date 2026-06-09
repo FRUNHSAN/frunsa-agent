@@ -350,7 +350,9 @@ class TrackCEngine:
             trust: float = 0.5, e_t: float = 0.5,
             raw_drift: float = 0.0,
             clarity: float = 0.5,
-            session_gain: float = 1.0):
+            session_gain: float = 1.0,
+            explore_bias: float = 0.0,
+            compromise_bias: float = 0.0):
         """Execute Track C pipeline. Returns (response_text, output_capacity_mult).
 
         V5.3: Dual-sensor fusion — raw semantic drift (cross-round) + LLM clarity
@@ -362,6 +364,12 @@ class TrackCEngine:
         sensitivity — wide domain (gain>1) slightly relaxes, narrow (gain<1)
         slightly tightens. Max effect ±0.05 on θ.
 
+        V6.3: explore_bias/compromise_bias from Path 1 meta_adapt state fission.
+        explore_bias → Planning (wider search when intent is contradictory).
+        compromise_bias → Critic (lower bar when capability is exhausted).
+        P11: all signals are primitive snapshots locked at t₀. No mid-execution
+        re-read of external state machines.
+
         Flow: Planning → {DIRECT: Synthesis} | {FULL_DAG: Orch → Critic → (retry?) → Synthesize}
         """
         t0 = time.time()
@@ -369,18 +377,26 @@ class TrackCEngine:
 
         # ── V5.3 Path 2: Dual-sensor fusion (drift ⊕ clarity) ──
         f_fused = compute_dual_sensor_f(raw_drift, clarity)
-        branch_count = _path2_branch_count(f_fused)
+        # V6.3: explore_bias → Planning only (widen search for intent contradiction)
+        f_planning = min(1.0, f_fused + explore_bias)
+        branch_count = _path2_branch_count(f_planning)
         # Critic: drift-only (not fused) — keeps sensitivity to semantic space instability
         f_drift, g = _critic_factors(raw_drift, e_t)
         theta = _critic_threshold(f_drift, g, session_gain)
+        # V6.3: compromise_bias → Critic only (relax standards for capability exhaustion)
+        theta = max(0.50, theta - compromise_bias)
         output_mult = _dynamic_output_mult(branch_count, raw_drift)
         mode = "EXPLORE" if branch_count >= 3 else "BALANCED" if branch_count >= 2 else "EXPLOIT"
         # 🧊 = lucid suppression active: high clarity killed a drift spike
         suppression_mark = " 🧊" if clarity > 0.80 and raw_drift > 0.40 else ""
+        # V6.3 bias marks
+        if explore_bias > 0:
+            suppression_mark += " 🔍"  # exploring: intent contradiction bias
+        if compromise_bias > 0:
+            suppression_mark += " 🤝"  # compromising: capability exhaustion bias
         self._emit("Path 2",
             f"{mode}{suppression_mark} (drift={raw_drift:.3f}, clarity={clarity:.2f}, "
-            f"f={f_fused:.2f}, branches={branch_count}, θ={theta:.2f}, out×{output_mult:.1f})")
-
+            f"f={f_planning:.2f}, branches={branch_count}, θ={theta:.2f}, out×{output_mult:.1f})")
         # ── Phase 1: Planning ──
         self._emit("🔀 Track C Planning", "⏳ 动态规划中...")
         plan_result = safe_async_run(self._do_plan(
