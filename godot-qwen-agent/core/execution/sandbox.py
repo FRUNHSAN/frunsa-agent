@@ -76,24 +76,41 @@ class SandboxExecutor:
         self._max_exec_sec = max_exec_sec
 
     def run(self, code: str, test_cases: list[dict] | None = None,
-            intent_type: str = "EXECUTABLE") -> ExecutionResult:
-        """Execute code through layered physical verification.
+            intent_type: str = "EXECUTABLE",
+            budget=None) -> ExecutionResult:
+        """V7.2: Layered physical verification with weighted budget.
+
+        Layer 1 (AST, cost=0): always runs, catches ~80% syntax errors.
+        Layer 2 (Mypy, cost=0.1): static type check, skipped if budget < 0.1.
+        Layer 3 (Sandbox, cost=1.0): restricted execution with timeout.
+        Fail-Safe: budget < 1.0 → REJECT (never execute without full filter chain).
 
         Args:
             code: Python source code to verify.
             test_cases: Optional list of {input, expected} pairs.
             intent_type: EXECUTABLE, PSEUDOCODE, DEMONSTRATION, DESTRUCTIVE_TEST.
-
-        Returns:
-            ExecutionResult with state and diagnostics.
+            budget: Optional PhysicalBudget for layered accounting.
         """
         t0 = time.perf_counter()
+        tc = test_cases or []
 
         # ── Layer 1: AST syntax check (free, always runs) ──
         ast_result = self._check_ast(code)
         if ast_result.state != PhysicalState.PASS:
             ast_result.elapsed_ms = (time.perf_counter() - t0) * 1000
             return ast_result
+
+        # ── Double-filter test_cases through AST (Patch B) ──
+        for tc_item in tc:
+            tc_code = tc_item.get("input", "")
+            if tc_code and isinstance(tc_code, str) and len(tc_code) > 3:
+                tc_ast = self._check_ast(f"assert {tc_code}")
+                if tc_ast.state != PhysicalState.PASS:
+                    return ExecutionResult(
+                        state=PhysicalState.COMPILE_ERR,
+                        error_message=f"test_case AST failed: {tc_ast.error_message}",
+                        elapsed_ms=(time.perf_counter() - t0) * 1000,
+                    )
 
         # PSEUDOCODE / DEMONSTRATION / DESTRUCTIVE_TEST: stop at AST
         if intent_type != "EXECUTABLE":
@@ -103,10 +120,70 @@ class SandboxExecutor:
                 elapsed_ms=(time.perf_counter() - t0) * 1000,
             )
 
-        # ── Layer 3: Sandbox execution with test cases ──
-        exec_result = self._run_sandbox(code, test_cases or [])
-        exec_result.elapsed_ms = (time.perf_counter() - t0) * 1000
-        return exec_result
+        # ── Layer 2: Mypy type check (cost=0.1) ──
+        if budget is None or budget.spend(0.1):
+            mypy_result = self._check_mypy(code)
+            if mypy_result.state != PhysicalState.PASS:
+                mypy_result.elapsed_ms = (time.perf_counter() - t0) * 1000
+                return mypy_result
+
+        # ── Fail-Safe: ensure budget for at least one sandbox execution (Patch C) ──
+        if budget is not None and budget.remaining < 1.0:
+            return ExecutionResult(
+                state=PhysicalState.TIMEOUT,
+                error_message="PhysicalBudget exhausted before sandbox execution. Safety first — REJECT.",
+                elapsed_ms=(time.perf_counter() - t0) * 1000,
+            )
+
+        # ── Layer 3: Sandbox execution (cost=1.0) ──
+        if budget is None or budget.spend(1.0):
+            exec_result = self._run_restricted(code, tc)
+            exec_result.elapsed_ms = (time.perf_counter() - t0) * 1000
+            return exec_result
+
+        return ExecutionResult(
+            state=PhysicalState.TIMEOUT,
+            error_message="PhysicalBudget exhausted — REJECT.",
+            elapsed_ms=(time.perf_counter() - t0) * 1000,
+        )
+
+    def _run_restricted(self, code: str, test_cases: list[dict]) -> ExecutionResult:
+        """V7.2 Layer 3: multiprocessing.Process with timeout=3s.
+
+        Patch B.1: prevents OOM/DoS from LLM-generated test cases with
+        resource-exhausting expressions (e.g. range(10**8)).
+        Falls back gracefully to in-process execution on platforms where
+        spawn/pickle fails (e.g. some Windows configurations).
+        """
+        import multiprocessing
+
+        parent_conn, child_conn = multiprocessing.Pipe(duplex=False)
+        try:
+            proc = multiprocessing.Process(
+                target=_sandbox_worker_fn,
+                args=(child_conn, code, test_cases),
+            )
+            proc.start()
+            proc.join(timeout=3.0)
+
+            if proc.is_alive():
+                proc.terminate()
+                proc.join(timeout=1.0)
+                return ExecutionResult(
+                    state=PhysicalState.TIMEOUT,
+                    error_message="Sandbox execution exceeded 3s limit.",
+                )
+
+            if parent_conn.poll():
+                return parent_conn.recv()
+        except Exception:
+            # Fallback: in-process execution on pickle/spawn failure
+            return self._run_sandbox(code, test_cases)
+
+        return ExecutionResult(
+            state=PhysicalState.RUNTIME_ERR,
+            error_message="Sandbox process exited without result.",
+        )
 
     # ── Layer 1: AST ────────────────────────────────────────────────
 
@@ -120,6 +197,39 @@ class SandboxExecutor:
                 state=PhysicalState.COMPILE_ERR,
                 error_message=f"SyntaxError at line {e.lineno}: {e.msg}",
                 error_line=e.lineno,
+            )
+        return ExecutionResult(state=PhysicalState.PASS)
+
+    # ── Layer 2: Mypy ────────────────────────────────────────────────
+
+    @staticmethod
+    def _check_mypy(code: str) -> ExecutionResult:
+        """V7.2 Layer 2: mypy.api.run() in-process type check.
+
+        Uses mypy's internal API to avoid subprocess fork + typeshed reload.
+        First call ~300ms (typeshed load), subsequent ~50ms (cached).
+        Graceful degradation: returns PASS if mypy not installed.
+        """
+        try:
+            from mypy import api as mypy_api
+        except ImportError:
+            return ExecutionResult(state=PhysicalState.PASS)  # Skip — mypy unavailable
+
+        try:
+            stdout, stderr, exit_code = mypy_api.run([
+                '--ignore-missing-imports',
+                '--no-error-summary',
+                '-c', code,
+            ])
+            if exit_code != 0:
+                return ExecutionResult(
+                    state=PhysicalState.TYPE_MISMATCH,
+                    error_message=stdout[:500] or stderr[:500] or f"mypy exit code {exit_code}",
+                )
+        except Exception as e:
+            return ExecutionResult(
+                state=PhysicalState.TYPE_MISMATCH,
+                error_message=f"mypy error: {e}",
             )
         return ExecutionResult(state=PhysicalState.PASS)
 
@@ -250,6 +360,25 @@ def _assert_equal(got: Any, expected: Any) -> bool:
     if isinstance(got, (int, float)) and isinstance(expected, (int, float)):
         return abs(got - expected) < 1e-9
     return False
+
+
+def _sandbox_worker_fn(conn, code_str: str, tc_list: list) -> None:
+    """Module-level worker for multiprocessing.Process (Patch B.1).
+
+    Must be at module level because Windows spawn requires picklable targets.
+    Creates a fresh SandboxExecutor in the child process.
+    """
+    try:
+        executor = SandboxExecutor()
+        result = executor._run_sandbox(code_str, tc_list)
+        conn.send(result)
+    except Exception as e:
+        conn.send(ExecutionResult(
+            state=PhysicalState.RUNTIME_ERR,
+            error_message=f"Sandbox worker crashed: {e}",
+        ))
+    finally:
+        conn.close()
 
 
 def _extract_lineno_from_tb(tb) -> int | None:

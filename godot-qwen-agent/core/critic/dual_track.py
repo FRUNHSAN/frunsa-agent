@@ -150,28 +150,29 @@ class DualTrackCritic:
 
 
 class PhysicalBudget:
-    """Global budget counter for physical executions per Track C cycle.
+    """V7.2: Weighted budget tracker for physical executions per Track C cycle.
 
-    Defensive Axiom D: max 5 physical executions. Layer 1 (AST) is free.
-    Layers 2 (Mypy) and 3 (Sandbox) each cost 1 unit.
-    Budget exhausted → return partial results + [WARN].
+    Costs weighted by compute time (Patch C):
+      AST (Layer 1):      0.0  free, always runs
+      Mypy (Layer 2):     0.1  micro-cost, skipped if budget tight
+      Sandbox (Layer 3):  1.0  full cost, Fail-Safe guarantees at least 1.0 reserve
     """
 
-    def __init__(self, max_budget: int = 5):
-        self._max = max_budget
-        self._spent = 0
+    def __init__(self, max_budget: float = 5.0):
+        self._max = float(max_budget)
+        self._spent: float = 0.0
 
     @property
-    def remaining(self) -> int:
-        return max(0, self._max - self._spent)
+    def remaining(self) -> float:
+        return max(0.0, self._max - self._spent)
 
     @property
     def is_exhausted(self) -> bool:
         return self._spent >= self._max
 
-    def spend(self, amount: int = 1) -> bool:
+    def spend(self, amount: float = 1.0) -> bool:
         """Spend budget units. Returns True if budget was available."""
-        if self._spent + amount > self._max:
+        if self._spent + amount > self._max + 1e-9:
             return False
         self._spent += amount
         return True

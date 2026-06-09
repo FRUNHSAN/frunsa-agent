@@ -35,6 +35,21 @@ class ErrorMapper:
             # Inject mapping.fix_hint into Planning prompt
     """
 
+    # ── V7.2: ⊢ delimited assertion extraction (Patch D) ─────────────
+
+    @staticmethod
+    def _extract_from_assertion(error_message: str) -> tuple[str, str] | None:
+        """Extract (expected, actual) from ⊢-delimited assertion error.
+
+        f-string format: f\"⊢EXPECTED⊢{expected}⊢ACTUAL⊢{actual}\"
+        Returns None if the message doesn't match the format.
+        """
+        import re
+        match = re.search(r"⊢EXPECTED⊢(.*)⊢ACTUAL⊢(.*)", error_message)
+        if match:
+            return match.group(1).strip(), match.group(2).strip()
+        return None
+
     # ── Public API ──────────────────────────────────────────────────
 
     def map(self, result: ExecutionResult, original_code: str = "",
@@ -52,7 +67,20 @@ class ErrorMapper:
                 fix_hint="",
             )
 
-        # Preferred path: assertion diff (Defensive Axiom A)
+        # V7.2 Preferred path: ⊢ delimiters regex extraction (Patch D, zero LLM)
+        if result.error_message:
+            extracted = self._extract_from_assertion(result.error_message)
+            if extracted:
+                expected, actual = extracted
+                return ErrorMapping(
+                    error_type="AssertionDiff",
+                    location="assertion",
+                    constraint_violated=f"expected={expected}, got={actual}",
+                    fix_hint=self._generate_fix_hint(expected, actual),
+                    raw_context=f"Expected: {expected}\nGot: {actual}",
+                )
+
+        # Preferred path: assertion diff from test_cases (Defensive Axiom A)
         if result.test_results:
             mapping = self._from_assertion_diff(result)
             if mapping:

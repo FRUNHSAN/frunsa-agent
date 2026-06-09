@@ -157,7 +157,8 @@ def _extract_step_fields(text: str, step: dict) -> None:
         match = _re.search(r'\{[^{}]*\}', text.replace('\n', ' '))
         if match:
             data = _json.loads(match.group())
-            for key in ("produces", "needs", "depends_on"):
+            for key in ("produces", "needs", "depends_on",
+                         "test_cases", "intent_type"):
                 if key in data:
                     step[key] = data[key]
     except (_json.JSONDecodeError, KeyError, ValueError):
@@ -506,10 +507,18 @@ class TrackCEngine:
                 f'  {{"type": "DIRECT", "action": "直接基于上下文生成回复"}}\n\n'
                 f"如果用户意图需要新增知识、多步推理或工具调用，输出 FULL_DAG：\n"
                 f'  {{"type": "FULL_DAG", "steps": [{{"prompt": "...", "tool": "", '
-                f'"produces": "标签(可选)", "needs": "标签(可选)"}}, ...]}}\n'
+                f'"produces": "标签(可选)", "needs": "标签(可选)", '
+                f'"intent_type": "EXECUTABLE|PSEUDOCODE|DEMONSTRATION", '
+                f'"test_cases": [{{"input": "...", "expected": ...}}]}}, ...]}}\n'
                 f"  （拆解为 {min_steps}-5 步，每步包含 prompt 和 tool 字段。\n"
                 f"  可选字段 produces: 本步骤产出的数据标签（如 'paper_list', 'code_v1'）。\n"
                 f"  可选字段 needs: 本步骤需要的前序数据标签。标签命名必须一致。\n"
+                f"  V7.2 Test-First 契约: 如果步骤涉及代码生成(tool=sandbox_python)，\n"
+                f"  必须先声明 test_cases。每个 test case 包含 input(输入参数) 和\n"
+                f"  expected(期望输出)。断言格式必须严格使用特殊定界符:\n"
+                f'  assert func(input) == expected, f"⊢EXPECTED⊢{{expected}}⊢ACTUAL⊢{{actual}}"\n'
+                f"  test_cases 只能包含 assert 语句。禁止 import/class/for/while/I/O。\n"
+                f"  可选字段 intent_type: EXECUTABLE(需物理验证)|PSEUDOCODE(仅语法)|DEMONSTRATION(纯展示)。\n"
                 f"在 JSON 之前用 <!-- reasoning --> 注释简要说明选择理由。）"
                 f"{' ' + branch_hint if branch_hint else ''}"
                 f"{state_hint}"
@@ -580,8 +589,16 @@ class TrackCEngine:
     async def _orchestrate_one(
         self, step: dict, user: str, system: str, prev_context: str,
         parallel_depth: int = 1,
+        budget_slice: int = 1,            # V8 groundwork: per-Loop budget
+        retry_policy=None,                # V8 groundwork: formal Loop injection point
     ) -> str:
-        """Execute a single orchestration branch. V6.1: DAG-aware concurrency."""
+        """Execute a single orchestration branch. V6.1: DAG-aware concurrency.
+
+        V8 groundwork:
+          budget_slice: per-Loop budget units for multi-Agent budget boundaries.
+          retry_policy: optional callable(step, attempt_count) → bool.
+            None = default retry behavior. V8 replaces with formal Loop 2-morphism.
+        """
         from engines.orchestration.interface import OrchestrationContext, BranchSpec
         from engines.orchestration.identity import OrchestratorIdentity
         from core.contracts.streaming_protocol import PaceConfig
