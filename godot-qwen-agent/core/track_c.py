@@ -23,6 +23,41 @@ from core.trace_node import TraceStatus, TraceNode
 MIN_PLAN_STEPS = 3  # Minimum plan steps before retry (configurable via env)
 
 
+# ── V7.2 Phase 1: Code extraction ────────────────────────────────────
+
+def _extract_code(text: str) -> str:
+    """π: S → C — extract Python code block from Orch synthesis output.
+
+    Tries ```python fence first, then def/class detection as fallback.
+    Returns empty string if no code block found (→ FORMAT_ERROR, no budget).
+    """
+    import re
+    # Try fenced code block
+    m = re.search(r'```(?:python|py)?\s*\n(.*?)```', text, re.DOTALL)
+    if m:
+        return m.group(1).strip()
+    # Fallback: find def or class followed by indented lines
+    m = re.search(r'((?:def|class)\s+\w+[^\n]*\n(?:\s+[^\n]+\n?)+)', text)
+    if m:
+        return m.group(1).strip()
+    return ""
+
+
+def _format_retry_hint(hint: str) -> str:
+    """Wrap ErrorMapper fix_hint as a Planning constraint."""
+    if not hint:
+        return ""
+    return f"\n[PHYSICAL CONSTRAINT] Previous code failed. Fix: {hint}"
+
+
+def _signature_lock_hint() -> str:
+    """Step 4.5: Prompt-level interface isomorphism constraint."""
+    return (
+        "\n[PHYSICAL CONSTRAINT] Retry rule: fix ONLY the internal logic. "
+        "Keep function name, parameter list, and return type EXACTLY the same."
+    )
+
+
 # ── V5.1: Lambda Gain Scheduling ───────────────────────────────────
 
 def _lambda_hint(trust: float, e_t: float) -> str:
@@ -433,6 +468,10 @@ class TrackCEngine:
         self._emit("🔀 Track C Planning",
             f"FULL_DAG: {len(plan_result)} 步, DAG depth={parallel_depth} ({time.time()-t0:.1f}s)")
 
+        # ── V7.2 Phase 1: PhysicalBudget (DAG上的联络) ──
+        from core.critic.dual_track import PhysicalBudget as _PhysicalBudget
+        phys_budget = _PhysicalBudget(max_budget=5.0)
+
         # ── Phase 2: Orchestration → Critic (retry loop) ──
         pad = Scratchpad(max_retries=2)
         pad.plan = plan_with_deps
@@ -442,7 +481,8 @@ class TrackCEngine:
             self._emit("🔀 Track C Orch", f"⏳ 执行 {len(pad.plan)} 步 (depth={parallel_depth})...")
             pad.step_results = safe_async_run(
                 self._do_orchestrate(pad.plan, user, system, pad.truncated_for_critic(),
-                                     parallel_depth=parallel_depth)
+                                     parallel_depth=parallel_depth,
+                                     phys_budget=phys_budget)
             )
             orch_elapsed = time.time() - t_orch
             self._emit("🔀 Track C Orch", f"完成 {len(pad.step_results)} 步 ({orch_elapsed:.1f}s)")
@@ -572,15 +612,16 @@ class TrackCEngine:
     async def _do_orchestrate(
         self, plan: list[dict], user: str, system: str, prev_context: str,
         parallel_depth: int = 1,
+        phys_budget=None,  # V7.2: PhysicalBudget联络
     ) -> list[str]:
         """Execute plan steps via OrchestrationEngine — V6.1 DAG-aware concurrency.
 
-        parallel_depth from DAG topology: 1=sequential, 2+=Semaphore-limited parallel.
-        Steps with unresolved dependencies are serialized by the Orch engine.
+        V7.2: phys_budget passed to each step for physical verification accounting.
         """
         import asyncio as _asyncio
         tasks = [self._orchestrate_one(step, user, system, prev_context,
-                                       parallel_depth=parallel_depth)
+                                       parallel_depth=parallel_depth,
+                                       phys_budget=phys_budget)
                  for step in plan]
         raw = await _asyncio.gather(*tasks, return_exceptions=True)
         # Safety clamp: explicit error marking for downstream Critic/Synth
@@ -591,13 +632,13 @@ class TrackCEngine:
         parallel_depth: int = 1,
         budget_slice: int = 1,            # V8 groundwork: per-Loop budget
         retry_policy=None,                # V8 groundwork: formal Loop injection point
+        phys_budget=None,                 # V7.2: PhysicalBudget联络
     ) -> str:
-        """Execute a single orchestration branch. V6.1: DAG-aware concurrency.
+        """Execute a single orchestration branch. V7.2: physical verification.
 
-        V8 groundwork:
-          budget_slice: per-Loop budget units for multi-Agent budget boundaries.
-          retry_policy: optional callable(step, attempt_count) → bool.
-            None = default retry behavior. V8 replaces with formal Loop 2-morphism.
+        V6.1: DAG-aware concurrency.
+        V7.2: If step uses sandbox_python tool, runs SandboxExecutor on result.
+        V8 groundwork: budget_slice + retry_policy injection points.
         """
         from engines.orchestration.interface import OrchestrationContext, BranchSpec
         from engines.orchestration.identity import OrchestratorIdentity
@@ -618,7 +659,59 @@ class TrackCEngine:
         items = await _collect(self._orch.orchestrate(
             ctx, deadline=60.0, pace_config=PaceConfig(),
         ))
-        return "".join(item.delta for item in items)
+        result_text = "".join(item.delta for item in items)
+
+        # ── V7.2 Phase 1: Physical verification ──
+        tool = step.get("tool", "")
+        if tool == "sandbox_python" and phys_budget is not None:
+            # Step 1: π — extract code from Orch result
+            code = _extract_code(result_text)
+
+            # Step 1.5: Fail-Fast — don't waste budget on non-code
+            if not code or len(code) < 10:
+                self._emit("🔧 物理验证", "FORMAT_ERROR: code < 10 chars, semantic retry")
+                return result_text + "\n[FORMAT_ERROR: 必须使用 ```python 包裹代码]"
+
+            # Determine degraded mode (Step 4: entropy penalty)
+            test_cases = step.get("test_cases", [])
+            degraded = not test_cases
+            budget_cost = 2.0 if degraded else 1.0
+
+            if phys_budget.remaining < budget_cost:
+                self._emit("🔧 物理验证",
+                    f"BUDGET_EXHAUSTED: {phys_budget.remaining:.1f} < {budget_cost}")
+                return result_text + "\n[BUDGET_EXHAUSTED]"
+
+            # Step 2: Run sandbox
+            from core.execution.sandbox import SandboxExecutor
+            from core.execution.error_mapper import ErrorMapper
+
+            intent = step.get("intent_type", "EXECUTABLE")
+            executor = SandboxExecutor()
+            phys_result = executor.run(code, test_cases, intent, phys_budget)
+
+            if phys_result.state.name == "PASS":
+                phys_budget.spend(budget_cost)
+                self._emit("🔧 物理验证", f"PASS (budget={phys_budget.remaining:.1f})")
+                return result_text
+
+            # Physical failure
+            phys_budget.spend(budget_cost)
+            mapper = ErrorMapper()
+            mapping = mapper.map(phys_result, code, test_cases)
+            fix_hint = mapping.fix_hint
+
+            mode_tag = " [DEGRADED]" if degraded else ""
+            self._emit("🔧 物理验证",
+                f"FAIL{mode_tag}: {phys_result.state.value} → retry "
+                f"(budget={phys_budget.remaining:.1f}, hint={fix_hint[:50]})")
+
+            # Step 4.5: Prompt-level interface lock
+            sig_lock = _signature_lock_hint()
+            hint = _format_retry_hint(fix_hint)
+            return result_text + f"\n[PHYSICAL_FAIL] {hint}{sig_lock}"
+
+        return result_text
 
     async def _do_critique(self, user: str, result_text: str,
                            theta: float = 0.75) -> tuple[float, str]:
