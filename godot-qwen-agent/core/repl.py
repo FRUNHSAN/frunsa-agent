@@ -954,11 +954,12 @@ class Repl:
                 f"Track {route} ({reason}) "
                 f"[V5: e(t)={e_t:.2f} sigma2={trust_var:.3f} trust={trust:.2f}]")
             if route == "C":
-                # V7 Phase 1: Streaming synthesis — stop live display, stream tokens
+                # V7 Phase 1: Streaming synthesis — stop live, stream tokens
                 if live:
+                    xray.render_live(live)  # Final X-Ray snapshot before streaming
                     live.stop()
                 import sys as _sys
-                _sys.stdout.write('\n')
+                _sys.stdout.write('\n[agent] ')
                 _sys.stdout.flush()
                 full_response, cog_mult = self._run_track_c(
                     user, system, xray, live,
@@ -1078,7 +1079,9 @@ class Repl:
                 full_response = f"{full_response} {exec_gap_mark}"
                 self.c.bus.emit("认知标记", f"exec_constraint: trunc={truncation_ratio:.0%}")
 
-            print(f"\n[agent] {full_response}")
+            # V7 Phase 1: skip print if already streamed (route C)
+            if route != "C":
+                print(f"\n[agent] {full_response}")
             session_log.append(f"User: {user}\nAgent: {full_response}\n")
 
             # ── Feedback ──
