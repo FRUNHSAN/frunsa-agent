@@ -218,66 +218,62 @@ def augment_test_cases(error_type: str, failed_test: dict | None = None
     # ── IndexError: boundary of the index set ──
     if "indexerror" in et or "index" in et:
         aug = [
-            {"input": "empty_sequence, k=0",
+            {"input": "([], 0)",
              "expected": "IndexError or None"},
-            {"input": "single_element, k=1",
+            {"input": "([1], 1)",
              "expected": "IndexError or None"},
-            {"input": "sequence, k=-1",
-             "expected": "last element or error"},
+            {"input": "([1,2,3], -1)",
+             "expected": "3"},
         ]
-        # If we know what was being indexed, add variable-specific tests
         if failed_test:
             inp = str(failed_test.get("input", ""))
-            if inp:
+            if inp and len(inp) < 80:
                 aug.append({
-                    "input": f"{inp} (boundary: first and last index)",
-                    "expected": "verify bounds for all indices",
+                    "input": f"([{inp}], 999)",
+                    "expected": "IndexError or None",
                 })
         return aug
 
     # ── KeyError: complement of the key set ──
     if "keyerror" in et or "key" in et:
         return [
-            {"input": "empty_dict, key='x'",
+            {"input": "({}, 'x')",
              "expected": "KeyError or None"},
-            {"input": "dict_without_key, key='missing'",
+            {"input": "({'a': 1}, 'missing')",
              "expected": "KeyError or None"},
-            {"input": "dict, key=None",
-             "expected": "TypeError or KeyError or None"},
         ]
 
     # ── TypeError: type lattice boundary ──
     if "typeerror" in et or "type" in et:
         return [
-            {"input": "wrong_type_arg (e.g. str for int parameter)",
+            {"input": "('hello', 1)",
              "expected": "TypeError or explicit cast"},
-            {"input": "None_arg where value expected",
+            {"input": "(None,)",
              "expected": "TypeError or None guard"},
         ]
 
     # ── AttributeError: method/attribute existence ──
     if "attributeerror" in et or "attribute" in et:
         return [
-            {"input": "object_without_expected_method",
+            {"input": "(42,)",
              "expected": "AttributeError or hasattr guard"},
-            {"input": "None_object.method_call()",
-             "expected": "AttributeError or None check"},
         ]
 
     # ── ZeroDivisionError / ValueError / generic ──
     if "zerodivision" in et or "division" in et:
         return [
-            {"input": "divisor=0", "expected": "ZeroDivisionError or guard clause"},
+            {"input": "(10, 0)",
+             "expected": "ZeroDivisionError or None"},
         ]
 
     if "valueerror" in et or "value" in et:
         return [
-            {"input": "invalid_value (out of domain)",
-             "expected": "ValueError or validation"},
+            {"input": "(-1,)",
+             "expected": "ValueError or None"},
         ]
 
     # ── Generic: check edge conditions ──
     return [
-        {"input": "empty_input", "expected": "handle gracefully"},
-        {"input": "max_size_input", "expected": "handle or bound"},
+        {"input": "()",
+         "expected": "handle gracefully or error"},
     ]
