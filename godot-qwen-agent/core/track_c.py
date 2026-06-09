@@ -514,32 +514,24 @@ class TrackCEngine:
         final = ""
 
         while phys_retries <= max_phys_retries:
-            # Synthesis
             if phys_retries == 0:
                 self._emit("🔀 Track C 合成", "⏳ 合成最终回复...")
             else:
                 self._emit("🔀 Track C 合成",
                     f"⏳ 物理 Retry ({phys_retries}/{max_phys_retries})...")
 
-            # Patch 3: prompt-level annealing
-            if phys_retries == 1 and accumulated_hints:
-                pad.plan.append({
-                    "prompt": "\n".join(accumulated_hints),
-                    "tool": "_physical_fix",
-                })
-            if phys_retries == 2:
-                # Critical: final attempt, tighten
-                annealing = (
-                    "[CRITICAL] 最后一次修正机会。"
-                    "严格按以下 fix_hints 修改代码，不要引入任何其他变更。\n"
-                    + "\n".join(accumulated_hints)
-                )
-                pad.plan.append({"prompt": annealing, "tool": "_physical_fix"})
+            # Patch 3: annealing — final attempt gets explicit critical tag
+            constraints = (
+                accumulated_hints +
+                ["[CRITICAL] 最后一次修正。严格按以上约束修改，不要引入任何其他变更。"]
+                if phys_retries >= max_phys_retries and accumulated_hints
+                else accumulated_hints
+            ) if accumulated_hints else None
 
             if stream_callback:
-                final = self._stream_and_collect(user, system, pad, stream_callback)
+                final = self._stream_and_collect(user, system, pad, stream_callback, constraints)
             else:
-                final = self._synthesize(user, system, pad)
+                final = self._synthesize(user, system, pad, constraints)
 
             # Physical gate
             code = _extract_code(final)
@@ -550,14 +542,13 @@ class TrackCEngine:
             from core.execution.sandbox import SandboxExecutor, PhysicalState
             from core.execution.error_mapper import ErrorMapper
 
-            # Run sandbox — AST only for speed in retry loop
             executor = SandboxExecutor()
             phys_result = executor.run(code, None, "EXECUTABLE", phys_budget)
 
             if phys_result.state == PhysicalState.PASS:
                 self._emit("🔧 物理验证",
                     f"PASS (retries={phys_retries}, budget={phys_budget.remaining:.1f})")
-                break  # Gate open
+                break
 
             # Patch 2: TIMEOUT → semantic escape
             if phys_result.state == PhysicalState.TIMEOUT:
@@ -565,12 +556,15 @@ class TrackCEngine:
                 final += "\n\n[⚠ PHYSICAL TIMEOUT: 代码可能存在死循环或复杂度过高]"
                 break
 
-            # Physical FAIL — accumulate constraint (Patch 1)
+            # Physical FAIL — accumulate constraint (Patch 1: integral term)
             phys_retries += 1
             mapper = ErrorMapper()
             mapping = mapper.map(phys_result, code)
             hint = mapping.fix_hint
-            accumulated_hints.append(f"[PHYSICAL CONSTRAINT #{phys_retries}] {hint}")
+            accumulated_hints.append(
+                f"PHYSICAL FAIL {phys_result.state.value}: {hint}"
+                f" — 修复时必须保持函数名、参数、返回类型完全不变，只改内部逻辑。"
+            )
             self._emit("🔧 物理验证",
                 f"FAIL ({phys_retries}/{max_phys_retries}): {phys_result.state.value} — {hint[:60]}")
 
@@ -757,8 +751,9 @@ class TrackCEngine:
 
     # ── Synthesis ───────────────────────────────────────────────────
 
-    def _build_synthesis_prompt(self, user: str, system: str, pad: Scratchpad) -> str:
-        """Build the synthesis prompt. Shared by _synthesize and _synthesize_stream."""
+    def _build_synthesis_prompt(self, user: str, system: str, pad: Scratchpad,
+                                 constraints: list[str] | None = None) -> str:
+        """Build the synthesis prompt. V7.2: supports physical constraints injection."""
         parts = [
             f"用户问题: {user}",
             f"分析结果: {pad.truncated_for_critic()}",
@@ -766,50 +761,54 @@ class TrackCEngine:
         ]
         if pad.retry_count > 0:
             parts.append(f"(经过 {pad.retry_count} 次重试后通过)")
+
+        # V7.2: Physical constraints as structured block — visually distinct
+        if constraints:
+            constraint_block = "\n".join(
+                f"  [{i+1}] {c}" for i, c in enumerate(constraints)
+            )
+            parts.insert(1,
+                f"\n{'='*40}\n"
+                f"[PHYSICAL CONSTRAINTS — 以下修改是强制性的]\n"
+                f"{constraint_block}\n"
+                f"{'='*40}\n"
+            )
+
         return f"{system}\n\n" + "\n".join(parts) + "\n请基于以上内容生成最终回复。"
 
-    def _synthesize(self, user: str, system: str, pad: Scratchpad) -> str:
-        """Build final response from all step results + critique.
-
-        Uses the injected GenerationAdapter for LLM synthesis.
-        """
-        prompt = self._build_synthesis_prompt(user, system, pad)
-
+    def _synthesize(self, user: str, system: str, pad: Scratchpad,
+                    constraints: list[str] | None = None) -> str:
+        """Build final response from all step results + critique."""
+        prompt = self._build_synthesis_prompt(user, system, pad, constraints)
         if self._adapter:
             from core.contracts import GenerationResult
             result = safe_async_run(self._adapter.generate(prompt, [], {}))
             if isinstance(result, GenerationResult):
                 return result.text
             return str(result)
-        # Last resort: return concatenated results
         return "\n\n".join(pad.step_results[-3:])
 
     def _stream_and_collect(self, user: str, system: str, pad: Scratchpad,
-                            callback) -> str:
+                            callback, constraints: list[str] | None = None) -> str:
         """Stream synthesis tokens through callback, return full text."""
         parts: list[str] = []
-        for chunk in self._synthesize_stream(user, system, pad):
+        for chunk in self._synthesize_stream(user, system, pad, constraints):
             parts.append(chunk)
             try:
                 callback(chunk)
             except Exception:
-                pass  # Display failure must not crash synthesis
+                pass
         return "".join(parts)
 
-    def _synthesize_stream(self, user: str, system: str, pad: Scratchpad):
-        """V7 Phase 1: Stream synthesis tokens via raw LLM client.
-
-        Yields str chunks. Falls back to non-streaming _synthesize if
-        no stream_llm is available.
-        """
+    def _synthesize_stream(self, user: str, system: str, pad: Scratchpad,
+                           constraints: list[str] | None = None):
+        """V7 Phase 1: Stream synthesis tokens via raw LLM client."""
         if self._stream_llm is None:
-            yield self._synthesize(user, system, pad)
+            yield self._synthesize(user, system, pad, constraints)
             return
-
-        prompt = self._build_synthesis_prompt(user, system, pad)
+        prompt = self._build_synthesis_prompt(user, system, pad, constraints)
         try:
             for chunk in self._stream_llm.generate_stream(prompt):
                 yield chunk
         except Exception:
-            # Fallback: generate synchronously
-            yield self._synthesize(user, system, pad)
+            yield self._synthesize(user, system, pad, constraints)
