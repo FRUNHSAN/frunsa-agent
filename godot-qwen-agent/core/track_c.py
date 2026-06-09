@@ -485,8 +485,7 @@ class TrackCEngine:
             self._emit("🔀 Track C Orch", f"⏳ 执行 {len(pad.plan)} 步 (depth={parallel_depth})...")
             pad.step_results = safe_async_run(
                 self._do_orchestrate(pad.plan, user, system, pad.truncated_for_critic(),
-                                     parallel_depth=parallel_depth,
-                                     phys_budget=phys_budget)
+                                     parallel_depth=parallel_depth)
             )
             orch_elapsed = time.time() - t_orch
             self._emit("🔀 Track C Orch", f"完成 {len(pad.step_results)} 步 ({orch_elapsed:.1f}s)")
@@ -508,35 +507,74 @@ class TrackCEngine:
             pad.retry_count += 1
             self._emit("🔀 Track C 评分", f"{score:.2f} ❌ 重试 ({pad.retry_count}/{pad.max_retries})")
 
-        # ── Phase 4: Synthesize final response ──
-        self._emit("🔀 Track C 合成", "⏳ 合成最终回复...")
-        if stream_callback:
-            final = self._stream_and_collect(user, system, pad, stream_callback)
-        else:
-            final = self._synthesize(user, system, pad)
-        self._emit("🔀 Track C 合成", f"完成 ({time.time()-t0:.1f}s)")
+        # ── V7.2 Phase 2: Hard physical retry loop around Synthesis ──
+        phys_retries = 0
+        max_phys_retries = 2
+        accumulated_hints: list[str] = []  # Patch 1: integral term
+        final = ""
 
-        # ── V7.2 Phase 1: Post-synthesis physical verification ──
-        # Code is generated during Synthesis, not during Orch steps.
-        # Soft verify: extract code blocks → sandbox → warn if broken.
-        if phys_budget.remaining >= 1.0:
+        while phys_retries <= max_phys_retries:
+            # Synthesis
+            if phys_retries == 0:
+                self._emit("🔀 Track C 合成", "⏳ 合成最终回复...")
+            else:
+                self._emit("🔀 Track C 合成",
+                    f"⏳ 物理 Retry ({phys_retries}/{max_phys_retries})...")
+
+            # Patch 3: prompt-level annealing
+            if phys_retries == 1 and accumulated_hints:
+                pad.plan.append({
+                    "prompt": "\n".join(accumulated_hints),
+                    "tool": "_physical_fix",
+                })
+            if phys_retries == 2:
+                # Critical: final attempt, tighten
+                annealing = (
+                    "[CRITICAL] 最后一次修正机会。"
+                    "严格按以下 fix_hints 修改代码，不要引入任何其他变更。\n"
+                    + "\n".join(accumulated_hints)
+                )
+                pad.plan.append({"prompt": annealing, "tool": "_physical_fix"})
+
+            if stream_callback:
+                final = self._stream_and_collect(user, system, pad, stream_callback)
+            else:
+                final = self._synthesize(user, system, pad)
+
+            # Physical gate
             code = _extract_code(final)
-            if code and len(code) >= 10:
-                from core.execution.sandbox import SandboxExecutor
-                from core.execution.error_mapper import ErrorMapper
-                executor = SandboxExecutor()
-                test_cases = []  # Planning test_cases not available at synthesis level
-                phys_result = executor.run(code, test_cases, "EXECUTABLE", phys_budget)
-                if phys_result.state.name == "PASS":
-                    self._emit("🔧 物理验证",
-                        f"PASS (budget={phys_budget.remaining:.1f})")
-                else:
-                    mapper = ErrorMapper()
-                    mapping = mapper.map(phys_result, code)
-                    self._emit("🔧 物理验证",
-                        f"WARN: {phys_result.state.value} — {mapping.fix_hint[:60]}")
-                    final = final + f"\n\n[⚠ PHYSICAL FAIL: {phys_result.state.value}. {mapping.fix_hint}]"
+            if not code or len(code) < 10:
+                self._emit("🔧 物理验证", "no code in Synthesis — skipping")
+                break
 
+            from core.execution.sandbox import SandboxExecutor, PhysicalState
+            from core.execution.error_mapper import ErrorMapper
+
+            # Run sandbox — AST only for speed in retry loop
+            executor = SandboxExecutor()
+            phys_result = executor.run(code, None, "EXECUTABLE", phys_budget)
+
+            if phys_result.state == PhysicalState.PASS:
+                self._emit("🔧 物理验证",
+                    f"PASS (retries={phys_retries}, budget={phys_budget.remaining:.1f})")
+                break  # Gate open
+
+            # Patch 2: TIMEOUT → semantic escape
+            if phys_result.state == PhysicalState.TIMEOUT:
+                self._emit("🔧 物理验证", "TIMEOUT → semantic escape")
+                final += "\n\n[⚠ PHYSICAL TIMEOUT: 代码可能存在死循环或复杂度过高]"
+                break
+
+            # Physical FAIL — accumulate constraint (Patch 1)
+            phys_retries += 1
+            mapper = ErrorMapper()
+            mapping = mapper.map(phys_result, code)
+            hint = mapping.fix_hint
+            accumulated_hints.append(f"[PHYSICAL CONSTRAINT #{phys_retries}] {hint}")
+            self._emit("🔧 物理验证",
+                f"FAIL ({phys_retries}/{max_phys_retries}): {phys_result.state.value} — {hint[:60]}")
+
+        self._emit("🔀 Track C 合成", f"完成 ({time.time()-t0:.1f}s)")
         return final, output_mult
 
     # ── Async engine wrappers ───────────────────────────────────────
@@ -639,16 +677,11 @@ class TrackCEngine:
     async def _do_orchestrate(
         self, plan: list[dict], user: str, system: str, prev_context: str,
         parallel_depth: int = 1,
-        phys_budget=None,  # V7.2: PhysicalBudget联络
     ) -> list[str]:
-        """Execute plan steps via OrchestrationEngine — V6.1 DAG-aware concurrency.
-
-        V7.2: phys_budget passed to each step for physical verification accounting.
-        """
+        """Execute plan steps via OrchestrationEngine — V6.1 DAG-aware concurrency."""
         import asyncio as _asyncio
         tasks = [self._orchestrate_one(step, user, system, prev_context,
-                                       parallel_depth=parallel_depth,
-                                       phys_budget=phys_budget)
+                                       parallel_depth=parallel_depth)
                  for step in plan]
         raw = await _asyncio.gather(*tasks, return_exceptions=True)
         # Safety clamp: explicit error marking for downstream Critic/Synth
@@ -659,7 +692,6 @@ class TrackCEngine:
         parallel_depth: int = 1,
         budget_slice: int = 1,            # V8 groundwork: per-Loop budget
         retry_policy=None,                # V8 groundwork: formal Loop injection point
-        phys_budget=None,                 # V7.2: PhysicalBudget联络
     ) -> str:
         """Execute a single orchestration branch. V7.2: physical verification.
 
