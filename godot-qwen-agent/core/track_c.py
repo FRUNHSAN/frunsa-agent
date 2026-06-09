@@ -662,8 +662,10 @@ class TrackCEngine:
         result_text = "".join(item.delta for item in items)
 
         # ── V7.2 Phase 1: Physical verification ──
-        tool = step.get("tool", "")
-        if tool == "sandbox_python" and phys_budget is not None:
+        # Trigger: intent_type is EXECUTABLE or absent (default = EXECUTABLE).
+        # Only PSEUDOCODE/DEMONSTRATION/DESTRUCTIVE_TEST skip physical check.
+        intent = step.get("intent_type", "") or "EXECUTABLE"
+        if intent == "EXECUTABLE" and phys_budget is not None:
             # Step 1: π — extract code from Orch result
             code = _extract_code(result_text)
 
@@ -686,7 +688,6 @@ class TrackCEngine:
             from core.execution.sandbox import SandboxExecutor
             from core.execution.error_mapper import ErrorMapper
 
-            intent = step.get("intent_type", "EXECUTABLE")
             executor = SandboxExecutor()
             phys_result = executor.run(code, test_cases, intent, phys_budget)
 
