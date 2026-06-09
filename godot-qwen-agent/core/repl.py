@@ -977,14 +977,24 @@ class Repl:
                     pl.char_limit_multiplier = max(pl.char_limit_multiplier, cog_mult)
                     pl.sentence_limit_multiplier = max(pl.sentence_limit_multiplier, cog_mult)
             else:
+                # V7 Track A: FIR kernel — forget stale topics
+                # Free dynamics with exponential decay: old context should NOT
+                # cause the LLM to re-engage topics that the user has moved on from.
+                decay_directive = (
+                    "\n\n[SYSTEM] 前序对话仅供理解当前轮次的指代关系。"
+                    "不要主动补充、重新解释或继续展开已结束的历史话题。"
+                    "只回应当前轮次用户的直接请求。"
+                )
                 self.c.bus.emit_pending("内容生成", "⏳ 生成中...")
                 self._update_live(xray, live)
                 backend = route_decide(bp.snapshot, user, trust)
                 if backend == "local":
-                    full_response = self.c.local_llm.generate(full_prompt, grammar=build_gbnf(bp.snapshot))
+                    full_response = self.c.local_llm.generate(
+                        full_prompt + decay_directive,
+                        grammar=build_gbnf(bp.snapshot))
                     self.c.bus.emit("路由决策", "本地 + GBNF 物理约束")
                 else:
-                    full_response = self.c.cloud_llm.generate(full_prompt)
+                    full_response = self.c.cloud_llm.generate(full_prompt + decay_directive)
                 self.c.bus.emit("内容生成", f"生成 {len(full_response)} 字符")
                 self._update_live(xray, live)
 
