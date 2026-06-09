@@ -584,6 +584,7 @@ class TrackCEngine:
         phys_retries = 0
         max_phys_retries = 2
         accumulated_hints: list[str] = []  # Patch 1: integral term
+        augmented_tc: list[dict] = []       # V7.3: sigma-monotone test cases
         final = ""
 
         while phys_retries <= max_phys_retries:
@@ -601,6 +602,21 @@ class TrackCEngine:
                 else accumulated_hints
             ) if accumulated_hints else None
 
+            # V7.3: if we have augmented test_cases, inject them as constraints
+            if augmented_tc:
+                tc_summary = "; ".join(
+                    f"test[{i}]: {t.get('input','?')} -> {t.get('expected','?')}"
+                    for i, t in enumerate(augmented_tc[:3])
+                )
+                tc_hint = (
+                    f"[PHYSICAL CONSTRAINT] Retry must pass these additional "
+                    f"boundary tests: {tc_summary}"
+                )
+                if constraints:
+                    constraints.append(tc_hint)
+                else:
+                    constraints = [tc_hint]
+
             if stream_callback:
                 final = self._stream_and_collect(user, system, pad, stream_callback, constraints)
             else:
@@ -616,11 +632,14 @@ class TrackCEngine:
             from core.execution.error_mapper import ErrorMapper
 
             executor = SandboxExecutor()
-            phys_result = executor.run(code, None, "EXECUTABLE", phys_budget)
+            phys_result = executor.run(
+                code, augmented_tc if augmented_tc else None,
+                "EXECUTABLE", phys_budget)
 
             if phys_result.state == PhysicalState.PASS:
                 self._emit("🔧 物理验证",
-                    f"PASS (retries={phys_retries}, budget={phys_budget.remaining:.1f})")
+                    f"PASS (retries={phys_retries}, budget={phys_budget.remaining:.1f})"
+                    + (f", aug_tc={len(augmented_tc)}" if augmented_tc else ""))
                 break
 
             # Patch 2: TIMEOUT → semantic escape
@@ -633,6 +652,19 @@ class TrackCEngine:
             phys_retries += 1
             mapper = ErrorMapper()
             mapping = mapper.map(phys_result, code)
+
+            # ── V7.3: sigma-monotone test case augmentation ──
+            # T_{n+1} = T_n + sigma(error_type) -> acceptance region shrinks
+            from core.execution.error_mapper import augment_test_cases
+            new_tc = augment_test_cases(
+                mapping.error_type,
+                failed_test=phys_result.test_results[0] if phys_result.test_results else None,
+            )
+            if new_tc:
+                augmented_tc.extend(new_tc)
+                self._emit("🔧 物理验证",
+                    f"augmented {len(new_tc)} boundary tests (total={len(augmented_tc)})")
+
             hint = mapping.fix_hint
             accumulated_hints.append(
                 f"PHYSICAL FAIL {phys_result.state.value}: {hint}"

@@ -186,3 +186,98 @@ class ErrorMapper:
         if state == PhysicalState.SANDBOX_VIOLATION:
             return "Code attempted restricted operation. Rewrite using only safe builtins."
         return f"Fix physical error: {detail[:150]}"
+
+
+# ── V7.3: Test case auto-augmentation — canonical section sigma: E -> T ──
+
+def augment_test_cases(error_type: str, failed_test: dict | None = None
+                       ) -> list[dict]:
+    """sigma: E -> T — canonical section of the test-case fiber bundle.
+
+    For each error type e in E, selects boundary test cases from fiber T_e.
+    Deterministic — the fiber structure is algebraic, not probabilistic.
+    Zero LLM. Executes in ~microseconds.
+
+    Mathematical:
+      E = error type space (discrete)
+      T_e = fiber over e = {test cases that specifically test for error type e}
+      sigma(e) = canonical representative boundary tests
+
+    Args:
+        error_type: e.g. "IndexError", "KeyError", "TypeError", or state name.
+        failed_test: optional dict with input/expected from the failing test.
+
+    Returns:
+        List of {input, expected} dicts to add to test_cases.
+    """
+    if not error_type:
+        return []
+
+    et = error_type.lower()
+
+    # ── IndexError: boundary of the index set ──
+    if "indexerror" in et or "index" in et:
+        aug = [
+            {"input": "empty_sequence, k=0",
+             "expected": "IndexError or None"},
+            {"input": "single_element, k=1",
+             "expected": "IndexError or None"},
+            {"input": "sequence, k=-1",
+             "expected": "last element or error"},
+        ]
+        # If we know what was being indexed, add variable-specific tests
+        if failed_test:
+            inp = str(failed_test.get("input", ""))
+            if inp:
+                aug.append({
+                    "input": f"{inp} (boundary: first and last index)",
+                    "expected": "verify bounds for all indices",
+                })
+        return aug
+
+    # ── KeyError: complement of the key set ──
+    if "keyerror" in et or "key" in et:
+        return [
+            {"input": "empty_dict, key='x'",
+             "expected": "KeyError or None"},
+            {"input": "dict_without_key, key='missing'",
+             "expected": "KeyError or None"},
+            {"input": "dict, key=None",
+             "expected": "TypeError or KeyError or None"},
+        ]
+
+    # ── TypeError: type lattice boundary ──
+    if "typeerror" in et or "type" in et:
+        return [
+            {"input": "wrong_type_arg (e.g. str for int parameter)",
+             "expected": "TypeError or explicit cast"},
+            {"input": "None_arg where value expected",
+             "expected": "TypeError or None guard"},
+        ]
+
+    # ── AttributeError: method/attribute existence ──
+    if "attributeerror" in et or "attribute" in et:
+        return [
+            {"input": "object_without_expected_method",
+             "expected": "AttributeError or hasattr guard"},
+            {"input": "None_object.method_call()",
+             "expected": "AttributeError or None check"},
+        ]
+
+    # ── ZeroDivisionError / ValueError / generic ──
+    if "zerodivision" in et or "division" in et:
+        return [
+            {"input": "divisor=0", "expected": "ZeroDivisionError or guard clause"},
+        ]
+
+    if "valueerror" in et or "value" in et:
+        return [
+            {"input": "invalid_value (out of domain)",
+             "expected": "ValueError or validation"},
+        ]
+
+    # ── Generic: check edge conditions ──
+    return [
+        {"input": "empty_input", "expected": "handle gracefully"},
+        {"input": "max_size_input", "expected": "handle or bound"},
+    ]
