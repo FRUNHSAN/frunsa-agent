@@ -954,7 +954,9 @@ class Repl:
                 f"Track {route} ({reason}) "
                 f"[V5: e(t)={e_t:.2f} sigma2={trust_var:.3f} trust={trust:.2f}]")
             if route == "C":
-                # V7 Phase 1: Streaming synthesis — stream tokens in real-time
+                # V7 Phase 1: Streaming synthesis — stop live display, stream tokens
+                if live:
+                    live.stop()
                 import sys as _sys
                 _sys.stdout.write('\n')
                 _sys.stdout.flush()
@@ -967,6 +969,8 @@ class Repl:
                 )
                 _sys.stdout.write('\n')
                 _sys.stdout.flush()
+                if live:
+                    live.start()
                 # V6: Cognitive depth → dynamic output capacity
                 if cog_mult > 1.0:
                     pl = self.c.output_pipeline
