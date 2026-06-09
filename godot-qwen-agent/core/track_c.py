@@ -687,10 +687,11 @@ class TrackCEngine:
         budget_slice: int = 1,            # V8 groundwork: per-Loop budget
         retry_policy=None,                # V8 groundwork: formal Loop injection point
     ) -> str:
-        """Execute a single orchestration branch. V7.2: physical verification.
+        """Execute a single orchestration branch.
 
         V6.1: DAG-aware concurrency.
-        V7.2: If step uses sandbox_python tool, runs SandboxExecutor on result.
+        V7.2: SandboxExecutor verification in Synthesis hard retry loop.
+        V7.3: Phi functor — post-hoc physical verification for ALL physical tools.
         V8 groundwork: budget_slice + retry_policy injection points.
         """
         from engines.orchestration.interface import OrchestrationContext, BranchSpec
@@ -712,7 +713,67 @@ class TrackCEngine:
         items = await _collect(self._orch.orchestrate(
             ctx, deadline=60.0, pace_config=PaceConfig(),
         ))
-        return "".join(item.delta for item in items)
+        result = "".join(item.delta for item in items)
+
+        # ── V7.3: Phi functor — physical verification for side-effect tools ──
+        tool_name = step.get("tool", "")
+        if tool_name:
+            result = self._verify_physical_tool(tool_name, result)
+
+        return result
+
+    def _verify_physical_tool(self, tool_name: str, result: str) -> str:
+        """V7.3: Post-hoc physical verification via Phi: Tool -> Phys.
+
+        Scans orchestrator result for tool failure indicators when the step
+        uses a physical (side-effect-producing) tool. On failure, injects
+        [PHYSICAL FAIL] annotation for downstream Critic/Synthesis consumption.
+
+        Deeper integration (direct ToolResult access) deferred to V8 when
+        the orchestrator exposes per-tool execution results.
+        """
+        from core.execution.tool_verifier import (
+            ToolPhysicalVerifier, is_physical_tool,
+        )
+        from core.execution.sandbox import PhysicalState
+
+        if not is_physical_tool(tool_name):
+            return result
+
+        # Post-hoc: scan result for error indicators
+        verifier = ToolPhysicalVerifier()
+        phys_state = verifier.verify_text(tool_name, result)
+
+        if phys_state is None:
+            return result  # No error detected in text
+
+        if phys_state == PhysicalState.FATAL_EXTERNAL:
+            self._emit("🔧 物理验证",
+                f"FATAL_EXTERNAL: {tool_name} — external rejection, circuit breaker tripped")
+            return (
+                f"{result}\n\n"
+                f"[PHYSICAL FATAL: {tool_name} received external rejection "
+                f"(rate-limit/auth/quota). Circuit breaker tripped. "
+                f"No retry — escalate to user.]"
+            )
+
+        if phys_state == PhysicalState.SANDBOX_VIOLATION:
+            self._emit("🔧 物理验证",
+                f"SANDBOX_VIOLATION: {tool_name} — Rigid Contract #5")
+            return (
+                f"{result}\n\n"
+                f"[PHYSICAL FATAL: {tool_name} permission denied. "
+                f"Rigid Contract #5 — unconditional abort.]"
+            )
+
+        # RUNTIME_ERR / TIMEOUT — retryable
+        self._emit("🔧 物理验证",
+            f"FAIL: {tool_name} — {phys_state.value}")
+        return (
+            f"{result}\n\n"
+            f"[PHYSICAL FAIL: {tool_name} returned {phys_state.value}. "
+            f"Retry with corrected parameters.]"
+        )
 
     async def _do_critique(self, user: str, result_text: str,
                            theta: float = 0.75) -> tuple[float, str]:

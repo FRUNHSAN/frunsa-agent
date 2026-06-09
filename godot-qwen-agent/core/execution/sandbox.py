@@ -26,20 +26,32 @@ from typing import Any
 
 
 class PhysicalState(enum.Enum):
-    """Discrete physical state q ∈ Q."""
+    """Discrete physical state q in Q.
+
+    V7.3: Q decomposes into connected components:
+      C_internal = {PASS, COMPILE_ERR, TYPE_MISMATCH, RUNTIME_ERR, TIMEOUT}
+        Retry can walk within this component.
+      C_external = {FATAL_EXTERNAL, SANDBOX_VIOLATION}
+        No path from C_internal — retry forbidden, circuit breaker trips.
+      DOCKER_UNAVAILABLE is isolated — triggers S3 fallback, not retry.
+    """
     PASS = "PASS"
     COMPILE_ERR = "COMPILE_ERR"
     TYPE_MISMATCH = "TYPE_MISMATCH"
     RUNTIME_ERR = "RUNTIME_ERR"
     TIMEOUT = "TIMEOUT"
     SANDBOX_VIOLATION = "SANDBOX_VIOLATION"
+    DOCKER_UNAVAILABLE = "DOCKER_UNAVAILABLE"  # V7.3 Layer 4 fallback
+    FATAL_EXTERNAL = "FATAL_EXTERNAL"          # V7.3 external circuit breaker
 
     def is_fatal(self) -> bool:
-        """FAIL_FATAL states trigger Rigid Contract #5."""
-        return self in (PhysicalState.SANDBOX_VIOLATION,)
+        """FAIL_FATAL states trigger Rigid Contract #5.
+        V7.3: FATAL_EXTERNAL is also fatal — no retry across connected components."""
+        return self in (PhysicalState.SANDBOX_VIOLATION, PhysicalState.FATAL_EXTERNAL)
 
     def is_retryable(self) -> bool:
-        """FAIL_RETRYABLE states allow ErrorMapper + retry."""
+        """FAIL_RETRYABLE states allow ErrorMapper + retry.
+        V7.3: FATAL_EXTERNAL is NOT retryable — external rejection must be escalated."""
         return self in (
             PhysicalState.COMPILE_ERR,
             PhysicalState.TYPE_MISMATCH,
