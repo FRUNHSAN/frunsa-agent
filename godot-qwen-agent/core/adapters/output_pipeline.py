@@ -108,14 +108,25 @@ class OutputPipeline:
     def _truncate_sentences(text: str, max_sentences: int) -> str:
         """Cut text after N sentence-ending punctuations.
 
+        Code-block-aware: lines inside ```...``` fences are NOT counted as
+        sentences. Code comments, docstrings, and method chains ending with '.'
+        followed by newline are structural, not semantic sentence boundaries.
+
         Smart boundary: '.' only counts as sentence end when followed by
         space+capital or end-of-string — avoids splitting on 'e.g.', '3.14', etc.
         """
         count = 0
         result: list[str] = []
         chars = list(text)
+        in_code_block = False
         for i, ch in enumerate(chars):
             result.append(ch)
+            # Track code block boundaries
+            if ch == "`" and i + 2 < len(chars):
+                if chars[i + 1] == "`" and chars[i + 2] == "`":
+                    in_code_block = not in_code_block
+            if in_code_block:
+                continue  # Code lines are not sentences
             if ch in "。！？!?":
                 count += 1
             elif ch == ".":
