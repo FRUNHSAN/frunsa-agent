@@ -933,6 +933,14 @@ class Repl:
                     f"e(t)={e_t:.2f} [{sig_type}] interval={interval:.0f}s",
                 )
 
+            # ── V7.2: Pseudo mode — all steps as PSEUDOCODE, skip physical verification ──
+            if self.c.cfg.pseudo:
+                user = (
+                    f"[PSEUDOCODE MODE] 以下请求只需要伪代码/架构展示，不需要可执行代码。"
+                    f"所有步骤的 intent_type 必须是 PSEUDOCODE。"
+                    f"不要写 test_cases。不要用 tool=sandbox_python。\n\n{user}"
+                )
+
             # ── Auto-RAG: inject knowledge context when mode is on ──
             rag_context = ""
             if rag_mode and not cmd.startswith("/"):
