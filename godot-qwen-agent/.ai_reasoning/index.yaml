@@ -371,6 +371,13 @@ chains:
     tags: [v6, engine_landing, dag_topology, kahn_algorithm, semaphore, wasserstein_calibration, bayesian_smoothing, bias_tensor, path1_interlock, code_block_aware]
     status: active
 
+  - chain_id: v7_physical_critic_streaming
+    file: chains/v7_physical_critic_streaming.yaml
+    title: "V7 物理 Critic + 流式 Synthesis + Track A FIR 核 — 混合自动机 + 自由动力学修正"
+    layer: plan
+    tags: [v7, physical_critic, sandbox_executor, dual_track_critic, error_mapper, physical_budget, streaming_synthesis, track_a_fir, hybrid_automaton, loop_topology]
+    status: active
+
   # ── Real LLM Orchestration + Critic Engines ──
   - chain_id: phase_18_real_orch_critic
     file: chains/phase_18_real_orch_critic.yaml
@@ -593,3 +600,13 @@ tag_index:
   bias_tensor: [v6_engine_landing]
   path1_interlock: [v6_engine_landing]
   code_block_aware: [v6_engine_landing]
+  v7: [v7_physical_critic_streaming]
+  physical_critic: [v7_physical_critic_streaming]
+  sandbox_executor: [v7_physical_critic_streaming]
+  dual_track_critic: [v7_physical_critic_streaming]
+  error_mapper: [v7_physical_critic_streaming]
+  physical_budget: [v7_physical_critic_streaming]
+  streaming_synthesis: [v7_physical_critic_streaming]
+  track_a_fir: [v7_physical_critic_streaming]
+  hybrid_automaton: [v7_physical_critic_streaming]
+  loop_topology: [v7_physical_critic_streaming]

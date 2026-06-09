@@ -1,0 +1,95 @@
+chain_id: v7_physical_critic_streaming
+title: "V7 物理 Critic + 流式 Synthesis + Track A FIR 核 — 混合自动机落地 + 自由动力学修正"
+created_at: "2026-06-09"
+status: active
+context: |
+  V6 完成了 V5 控制面在引擎层的落地。三个引擎各有独立的充分统计量。
+  但系统存在三个结构残余：
+
+  残余 1 (循环隐式化): retry 逻辑嵌在 Track C 的 while 循环里，不是形式化的拓扑结构。
+  残余 2 (语义-物理分离): DAG 只处理语义步骤依赖，物理操作和语义操作在拓扑上没有差异。
+  残余 3 (Agent↔Environment 自适应缺失): 物理反馈没有被建模为"关系"——它是单次事件记录，不是累积契约。
+
+  同时，三个工程问题推动了对流式输出和 Track A 上下文管理的需求：
+  - Synthesis 占 Track C 总延迟的 ~60% (25s/40s)，用户感知延迟过高
+  - Track A 将全部历史塞进 prompt (IIR) 导致已结束话题跨轮次持续传播
+  - rich.live 终端管理与流式 stdout 写入冲突
+
+decision: |
+  V7.1 MVP (代码级物理 Critic):
+    1. SandboxExecutor: 分层物理执行 (AST 免费 + 沙箱计费)
+    2. ErrorMapper: 断言式验证取代 traceback 帧快照
+    3. DualTrackCritic: 乘法门控 (θ AND q)，绝不物理替代语义
+    4. PhysicalBudget: max 5/cycle，Layer 1 免费，Layers 2-3 计费
+
+  防御性工程设计四原则:
+    A. 断言式验证取代帧快照 (Planning 生成 test_cases)
+    B. 沙箱天然无状态 (每次 run() 独立进程/内存空间)
+    C. 基于意图的契约豁免 (intent_type → 跳过物理检查)
+    D. 物理预算与分层执行 (AST 永远免费，Mypy/沙箱计费)
+
+  V7 Phase 1 (流式 Synthesis):
+    1. DeepSeekClient.generate_stream 已就绪
+    2. TrackCEngine._synthesize_stream + _stream_and_collect
+    3. rich.live.stop() 释放终端 → 流式 → live.start() 恢复
+    4. 流式模式跳过句子截断，只做 markdown 清洗
+
+  V7 Track A FIR 核:
+    Track A 是零控制自由动力学 dx/dt = f(x, 0)。
+    实现违背数学定义: 全部历史塞进 prompt (IIR — 无限脉冲响应)。
+    修复: 注入遗忘指令，等价于 FIR 核 (K=3, γ=0.6) — 旧话题信息指数衰减。
+
+rationale: |
+  ### 物理 Critic 的数学基础
+
+  系统从连续最优控制 (S ⊂ R^384) 扩展到混合自动机 (S × Q):
+    ψ: (generated_text, sandbox_state) → q ∈ Q    (物理映射，确定性)
+    Guard: q ∈ FAIL_STATES → retry/fatal             (离散守卫条件)
+    Reset: error_mapper(q) → constraint_embedding    (重置映射，回到语义空间)
+
+  乘法门控 (不是物理否决):
+    Final_Pass = (θ_semantic > threshold) AND (q_physical != FAIL_FATAL)
+    物理安全红线是刚性契约 #5 — FAIL_FATAL 无视 trust_ema 直接熔断
+
+  ### 循环拓扑化
+
+  Loop 作为 1-态射，重试作为 2-态射:
+    串行: Loop_A ∘ Loop_B
+    并行: Loop_A ∥ (B₁ ∥ B₂)
+    反馈: μ(Loop_A ∘ Loop_B)
+  单 Agent 的 2-范畴横向合成 = 推测并行 (不是 Multi-Agent)
+
+  ### Track A 的 Pontryagin 路由
+
+  choose A when cost(K) > |err_A| - |err_C|
+  社交信号 |err_A|≈0 → 控制纯浪费 → 选 A 是数学最优
+
+evidence:
+  - core/execution/sandbox.py: SandboxExecutor + PhysicalState (24 tests)
+  - core/execution/error_mapper.py: ErrorMapper assertion diff + traceback fallback
+  - core/critic/dual_track.py: DualTrackCritic + PhysicalBudget (14 integration tests)
+  - core/track_c.py: _synthesize_stream + _stream_and_collect
+  - core/repl.py: streaming callback + live.stop/start + Track A decay directive
+  - tests/unit/test_v7_1_physical_critic.py: 24 tests
+  - tests/integration/test_v7_1_sandbox_integration.py: 14 tests
+  - Session 78-80: streaming works, X-Ray deduplicated, Track A FIR kernel
+
+alternatives:
+  - "物理 Critic 一票否决语义 Critic" — 被否决 (违背自适应契约身份，生硬层级关系)
+  - "Traceback 帧快照还原犯罪现场" — 被否决 (第三方库和表达式求值是黑盒)
+  - "Track A 保持全量历史" — 被否决 (IIR 导致社交信号触发长篇技术回复)
+  - "流式前渲染 X-Ray 快照" — 被否决 (导致 X-Ray 碎片化和重复渲染)
+
+anti_patterns:
+  - "物理替代语义 (physical veto)" — 乘法门控才是正确的融合方式
+  - "帧快照充分还原变量" — f_locals 在深层调用中不可靠
+  - "Track A 上下文无衰减" — IIR 核让已结束话题跨轮次传播
+  - "流式模式下仍做句子截断" — LLM 自调节长度，Python 端不应切
+
+future_guidance: |
+  V7.2+ 方向:
+    1. Mypy 静态类型检查 (Layer 2)
+    2. RestrictedPython 安全沙箱 (Layer 3)
+    3. 代码块挂起 + 物理验证标注 (Phase 2 流式增强)
+    4. StatefulSandbox (snapshot/rollback for stateful tasks)
+    5. Multi-Agent: 2-范畴之间的函子 (Agent 间 Loop 拓扑通信)
