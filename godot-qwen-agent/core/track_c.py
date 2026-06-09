@@ -515,6 +515,28 @@ class TrackCEngine:
         else:
             final = self._synthesize(user, system, pad)
         self._emit("🔀 Track C 合成", f"完成 ({time.time()-t0:.1f}s)")
+
+        # ── V7.2 Phase 1: Post-synthesis physical verification ──
+        # Code is generated during Synthesis, not during Orch steps.
+        # Soft verify: extract code blocks → sandbox → warn if broken.
+        if phys_budget.remaining >= 1.0:
+            code = _extract_code(final)
+            if code and len(code) >= 10:
+                from core.execution.sandbox import SandboxExecutor
+                from core.execution.error_mapper import ErrorMapper
+                executor = SandboxExecutor()
+                test_cases = []  # Planning test_cases not available at synthesis level
+                phys_result = executor.run(code, test_cases, "EXECUTABLE", phys_budget)
+                if phys_result.state.name == "PASS":
+                    self._emit("🔧 物理验证",
+                        f"PASS (budget={phys_budget.remaining:.1f})")
+                else:
+                    mapper = ErrorMapper()
+                    mapping = mapper.map(phys_result, code)
+                    self._emit("🔧 物理验证",
+                        f"WARN: {phys_result.state.value} — {mapping.fix_hint[:60]}")
+                    final = final + f"\n\n[⚠ PHYSICAL FAIL: {phys_result.state.value}. {mapping.fix_hint}]"
+
         return final, output_mult
 
     # ── Async engine wrappers ───────────────────────────────────────
@@ -664,63 +686,7 @@ class TrackCEngine:
         items = await _collect(self._orch.orchestrate(
             ctx, deadline=60.0, pace_config=PaceConfig(),
         ))
-        result_text = "".join(item.delta for item in items)
-
-        # ── V7.2 Phase 1: Physical verification ──
-        # Trigger: intent_type is EXECUTABLE or absent (default = EXECUTABLE).
-        # Only PSEUDOCODE/DEMONSTRATION/DESTRUCTIVE_TEST skip physical check.
-        intent = step.get("intent_type", "") or "EXECUTABLE"
-        if intent == "EXECUTABLE" and phys_budget is not None:
-            # Step 1: π — extract code from Orch result
-            code = _extract_code(result_text)
-
-            # Step 1.5: Fail-Fast — don't waste budget on non-code
-            if not code or len(code) < 10:
-                # Emit what we got for debugging
-                preview = result_text[:200].replace('\n', ' ')
-                self._emit("🔧 物理验证",
-                    f"FORMAT_ERROR: code={len(code)}chars, result_preview={preview}")
-                return result_text + "\n[FORMAT_ERROR: 必须使用 ```python 包裹代码]"
-
-            # Determine degraded mode (Step 4: entropy penalty)
-            test_cases = step.get("test_cases", [])
-            degraded = not test_cases
-            budget_cost = 2.0 if degraded else 1.0
-
-            if phys_budget.remaining < budget_cost:
-                self._emit("🔧 物理验证",
-                    f"BUDGET_EXHAUSTED: {phys_budget.remaining:.1f} < {budget_cost}")
-                return result_text + "\n[BUDGET_EXHAUSTED]"
-
-            # Step 2: Run sandbox
-            from core.execution.sandbox import SandboxExecutor
-            from core.execution.error_mapper import ErrorMapper
-
-            executor = SandboxExecutor()
-            phys_result = executor.run(code, test_cases, intent, phys_budget)
-
-            if phys_result.state.name == "PASS":
-                phys_budget.spend(budget_cost)
-                self._emit("🔧 物理验证", f"PASS (budget={phys_budget.remaining:.1f})")
-                return result_text
-
-            # Physical failure
-            phys_budget.spend(budget_cost)
-            mapper = ErrorMapper()
-            mapping = mapper.map(phys_result, code, test_cases)
-            fix_hint = mapping.fix_hint
-
-            mode_tag = " [DEGRADED]" if degraded else ""
-            self._emit("🔧 物理验证",
-                f"FAIL{mode_tag}: {phys_result.state.value} → retry "
-                f"(budget={phys_budget.remaining:.1f}, hint={fix_hint[:50]})")
-
-            # Step 4.5: Prompt-level interface lock
-            sig_lock = _signature_lock_hint()
-            hint = _format_retry_hint(fix_hint)
-            return result_text + f"\n[PHYSICAL_FAIL] {hint}{sig_lock}"
-
-        return result_text
+        return "".join(item.delta for item in items)
 
     async def _do_critique(self, user: str, result_text: str,
                            theta: float = 0.75) -> tuple[float, str]:
