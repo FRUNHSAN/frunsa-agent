@@ -87,8 +87,8 @@ Max retries per item: {max_retries}
 
 Return a JSON object with:
 - "branches": array of objects, each with "name" (string), "pool" (string), "items" (integer)
-- "parallel_depth": integer (concurrent execution depth, 1 = sequential, 2+ = parallel)
 
+Note: concurrency depth is determined by the DAG topology, not by this decision.
 Respond with ONLY the JSON object, no other text."""
 
 MERGE_PROMPT = """\
@@ -121,8 +121,7 @@ Respond with ONLY the JSON object, no other text."""
 # Default mock responses per the plan
 DEFAULT_ROUTE_RESPONSE = (
     '{"branches": [{"name": "fast_path", "pool": "cpu", "items": 3}, '
-    '{"name": "full_rerank", "pool": "gpu", "items": 2}], '
-    '"parallel_depth": 1}'
+    '{"name": "full_rerank", "pool": "gpu", "items": 2}]}'
 )
 
 DEFAULT_MERGE_RESPONSE = '{"strategy": "sequential"}'
@@ -328,7 +327,7 @@ class LLMOrchestrationEngine:
             return
 
         branches = route_data.get("branches", [])
-        parallel_depth = route_data.get("parallel_depth", 1)
+        parallel_depth = context.parallel_depth  # V6.1: DAG-computed, not LLM
 
         # ── Step 2: asyncio.gather() parallel dispatch ─────────
         resource_pools = context.resource_pools or {}
@@ -398,8 +397,16 @@ class LLMOrchestrationEngine:
                 f"{time.perf_counter() - start:.3f}s > {deadline:.3f}s"
             )
 
+        # V6.1: DAG-aware concurrency — Semaphore limits parallel depth.
+        # Per-call Semaphore: created here, destroyed after gather → no cross-session blocking.
+        _semaphore = asyncio.Semaphore(context.parallel_depth)
+
+        async def _run_branch_gated(branch_spec: dict):
+            async with _semaphore:
+                return await _run_branch(branch_spec)
+
         branch_tasks = [
-            _run_branch(b) for b in branches
+            _run_branch_gated(b) for b in branches
         ] if branches else []
         branch_results = await asyncio.gather(*branch_tasks)
 

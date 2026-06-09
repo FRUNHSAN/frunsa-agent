@@ -59,6 +59,7 @@ class OrchestrationContext:
     agent_identity: OrchestratorIdentity
     merge_strategy: str = "sequential"
     max_retries: int = 3
+    parallel_depth: int = 1  # V6.1: max concurrent branches (1=serial)
     resource_pools: Mapping[str, str] | None = None
     metadata: Mapping[str, Any] = field(
         default_factory=lambda: MappingProxyType({})

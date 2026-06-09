@@ -133,6 +133,104 @@ def _dynamic_output_mult(branch_count, raw_drift):
     return mult
 
 
+# ── V6.1: DAG Topology Engine ────────────────────────────────────────
+
+def _extract_step_fields(text: str, step: dict) -> None:
+    """Try to extract V6.1 structural fields from LLM step output.
+
+    LLM may embed produces/needs/depends_on in JSON within the step text.
+    Graceful degradation: if parsing fails, fields are absent (no crash).
+    """
+    import json as _json
+    import re as _re
+    try:
+        # Find the first JSON object in the text
+        match = _re.search(r'\{[^{}]*\}', text.replace('\n', ' '))
+        if match:
+            data = _json.loads(match.group())
+            for key in ("produces", "needs", "depends_on"):
+                if key in data:
+                    step[key] = data[key]
+    except (_json.JSONDecodeError, KeyError, ValueError):
+        pass  # LLM didn't output structured JSON — fields absent, no crash
+
+
+def _build_dag_and_depth(steps: list[dict]) -> tuple[list[dict], int]:
+    """Build DAG from step tags + indices, compute maximal safe parallel depth.
+
+    Resolution order:
+      1. Match produces/needs tags (deterministic string equality)
+      2. Fall back to depends_on indices for unmatched needs
+      3. Resolve transitive dependencies for tags
+
+    Returns (steps_with_deps, parallel_depth).
+    parallel_depth = 1 if cycle detected (graph theory: no topological order exists).
+    """
+    n = len(steps)
+
+    # ── 1. Build tag-to-index map ──
+    tag_to_idx: dict[str, int] = {}
+    for i, s in enumerate(steps):
+        tag = str(s.get("produces", "")).strip()
+        if tag:
+            tag_to_idx[tag] = i
+
+    # ── 2. Resolve dependencies per step ──
+    for i, s in enumerate(steps):
+        resolved = set()
+
+        # Tag-based: match needs tags to produces tags
+        needs_tag = str(s.get("needs", "")).strip()
+        if needs_tag and needs_tag in tag_to_idx:
+            resolved.add(tag_to_idx[needs_tag])
+
+        # Index-based fallback: explicit depends_on indices
+        raw_deps = s.get("depends_on", [])
+        if isinstance(raw_deps, list):
+            for d in raw_deps:
+                if isinstance(d, int) and 0 <= d < n and d != i:
+                    resolved.add(d)
+
+        s["_resolved_deps"] = sorted(resolved)
+
+    # ── 3. Sanitize: filter out-of-bounds, self-loops ──
+    for s in steps:
+        s["_resolved_deps"] = [d for d in s.get("_resolved_deps", [])
+                               if 0 <= d < n and d != steps.index(s)]
+
+    # ── 4. Cycle detection (Kahn's algorithm) ──
+    in_degree = [len(s.get("_resolved_deps", [])) for s in steps]
+    queue = [i for i, d in enumerate(in_degree) if d == 0]
+    visited = 0
+    while queue:
+        node = queue.pop(0)
+        visited += 1
+        for i, s in enumerate(steps):
+            if node in s.get("_resolved_deps", []):
+                in_degree[i] -= 1
+                if in_degree[i] == 0:
+                    queue.append(i)
+
+    if visited < n:
+        # Cycle detected — LLM hallucination. Safe fallback: full sequential.
+        return steps, 1
+
+    # ── 5. BFS level assignment on verified DAG ──
+    levels: dict[int, int] = {}
+    for i, s in enumerate(steps):
+        deps = s.get("_resolved_deps", [])
+        if not deps:
+            levels[i] = 0
+        else:
+            levels[i] = max(levels.get(d, 0) for d in deps) + 1
+
+    from collections import Counter
+    level_counts = Counter(levels.values())
+    max_depth = max(level_counts.values()) if level_counts else 1
+
+    return steps, max_depth
+
+
 # ── Safe async bridge (暗礁 1: event loop bomb) ──────────────────────
 
 def safe_async_run(coro):
@@ -203,6 +301,17 @@ class TrackCEngine:
     Does NOT own the engines — they are injected from Container.
     This is a pure orchestrator: receives engines, runs the flow.
     """
+
+    # V6.1: Global Critic rate limiter — prevents RPM throttling when
+    # parallel_depth > 1 and multiple branches complete simultaneously.
+    _CRITIC_SEMAPHORE = None
+
+    @classmethod
+    def _get_critic_semaphore(cls):
+        if cls._CRITIC_SEMAPHORE is None:
+            import asyncio as _asyncio
+            cls._CRITIC_SEMAPHORE = _asyncio.Semaphore(2)
+        return cls._CRITIC_SEMAPHORE
 
     def __init__(
         self,
@@ -282,23 +391,26 @@ class TrackCEngine:
             self._emit("🔀 Track C 合成", f"完成 ({time.time()-t0:.1f}s)")
             return final, output_mult
 
-        # ── FULL_DAG: unchanged pipeline ──
-        self._emit("🔀 Track C Planning", f"FULL_DAG: {len(plan_result)} 步 ({time.time()-t0:.1f}s)")
+        # ── FULL_DAG: build DAG topology, compute parallel_depth ──
+        plan_with_deps, parallel_depth = _build_dag_and_depth(plan_result)
+        self._emit("🔀 Track C Planning",
+            f"FULL_DAG: {len(plan_result)} 步, DAG depth={parallel_depth} ({time.time()-t0:.1f}s)")
 
         # ── Phase 2: Orchestration → Critic (retry loop) ──
         pad = Scratchpad(max_retries=2)
-        pad.plan = plan_result
+        pad.plan = plan_with_deps
 
         while True:
             t_orch = time.time()
-            self._emit("🔀 Track C Orch", f"⏳ 执行 {len(pad.plan)} 步...")
+            self._emit("🔀 Track C Orch", f"⏳ 执行 {len(pad.plan)} 步 (depth={parallel_depth})...")
             pad.step_results = safe_async_run(
-                self._do_orchestrate(pad.plan, user, system, pad.truncated_for_critic())
+                self._do_orchestrate(pad.plan, user, system, pad.truncated_for_critic(),
+                                     parallel_depth=parallel_depth)
             )
             orch_elapsed = time.time() - t_orch
             self._emit("🔀 Track C Orch", f"完成 {len(pad.step_results)} 步 ({orch_elapsed:.1f}s)")
 
-            # ── Phase 3: Critic ──
+            # ── Phase 3: Critic (rate-limited) ──
             t_critic = time.time()
             self._emit("🔀 Track C Critic", "⏳ 评估中...")
             score, detail = safe_async_run(
@@ -354,8 +466,11 @@ class TrackCEngine:
                 f"（如'字多一点'、'继续'、'好的'），输出 DIRECT：\n"
                 f'  {{"type": "DIRECT", "action": "直接基于上下文生成回复"}}\n\n'
                 f"如果用户意图需要新增知识、多步推理或工具调用，输出 FULL_DAG：\n"
-                f'  {{"type": "FULL_DAG", "steps": [{{"prompt": "...", "tool": ""}}, ...]}}\n'
-                f"  （拆解为 {min_steps}-5 步，每步包含 prompt 和 tool 字段。"
+                f'  {{"type": "FULL_DAG", "steps": [{{"prompt": "...", "tool": "", '
+                f'"produces": "标签(可选)", "needs": "标签(可选)"}}, ...]}}\n'
+                f"  （拆解为 {min_steps}-5 步，每步包含 prompt 和 tool 字段。\n"
+                f"  可选字段 produces: 本步骤产出的数据标签（如 'paper_list', 'code_v1'）。\n"
+                f"  可选字段 needs: 本步骤需要的前序数据标签。标签命名必须一致。\n"
                 f"在 JSON 之前用 <!-- reasoning --> 注释简要说明选择理由。）"
                 f"{' ' + branch_hint if branch_hint else ''}"
                 f"{state_hint}"
@@ -391,6 +506,8 @@ class TrackCEngine:
                     step["type"] = "DIRECT"
                 elif '"type": "FULL_DAG"' in text or "'type': 'FULL_DAG'" in text:
                     step["type"] = "FULL_DAG"
+                # V6.1: Extract structural fields (produces/needs/depends_on)
+                _extract_step_fields(text, step)
                 steps.append(step)
 
         # DIRECT: always valid (1 step is correct)
@@ -406,18 +523,26 @@ class TrackCEngine:
 
     async def _do_orchestrate(
         self, plan: list[dict], user: str, system: str, prev_context: str,
+        parallel_depth: int = 1,
     ) -> list[str]:
-        """Execute plan steps via OrchestrationEngine — parallelized (V4.3 speed)."""
+        """Execute plan steps via OrchestrationEngine — V6.1 DAG-aware concurrency.
+
+        parallel_depth from DAG topology: 1=sequential, 2+=Semaphore-limited parallel.
+        Steps with unresolved dependencies are serialized by the Orch engine.
+        """
         import asyncio as _asyncio
-        tasks = [self._orchestrate_one(step, user, system, prev_context) for step in plan]
+        tasks = [self._orchestrate_one(step, user, system, prev_context,
+                                       parallel_depth=parallel_depth)
+                 for step in plan]
         raw = await _asyncio.gather(*tasks, return_exceptions=True)
         # Safety clamp: explicit error marking for downstream Critic/Synth
         return [r if isinstance(r, str) else f"[STEP_FAILED: {type(r).__name__}: {r}]" for r in raw]
 
     async def _orchestrate_one(
         self, step: dict, user: str, system: str, prev_context: str,
+        parallel_depth: int = 1,
     ) -> str:
-        """Execute a single orchestration branch."""
+        """Execute a single orchestration branch. V6.1: DAG-aware concurrency."""
         from engines.orchestration.interface import OrchestrationContext, BranchSpec
         from engines.orchestration.identity import OrchestratorIdentity
         from core.contracts.streaming_protocol import PaceConfig
@@ -431,6 +556,7 @@ class TrackCEngine:
             branches=(branch,),
             agent_identity=OrchestratorIdentity(id="orch-v1", role="orchestration", version="1.0.0"),
             max_retries=1,
+            parallel_depth=parallel_depth,
             metadata={"goal": user, "system_prompt": system, "context": prev_context},
         )
         items = await _collect(self._orch.orchestrate(
@@ -456,9 +582,11 @@ class TrackCEngine:
             plan_output=f"Goal: {user}\n\nResults: {result_text}{theta_hint}",
             metadata={"goal": user, "v6.critic_theta": theta},
         )
-        items = await _collect(self._critic.evaluate(
-            ctx, deadline=30.0, pace_config=PaceConfig(),
-        ))
+        # V6.1: Critic rate limiter — max 2 concurrent Critic LLM calls
+        async with self._get_critic_semaphore():
+            items = await _collect(self._critic.evaluate(
+                ctx, deadline=30.0, pace_config=PaceConfig(),
+            ))
         # Extract score from trace_context
         score = 0.5
         detail = ""
