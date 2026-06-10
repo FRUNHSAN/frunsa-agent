@@ -84,7 +84,7 @@ class TestReplPrompt:
     def test_build_prompt_reflects_verbose_change(self, repl):
         repl.c.bp.apply_proposal("response_verbose_level", "MINIMAL")
         prompt = repl._build_prompt("test_user")
-        assert "一句话" in prompt
+        assert "极简" in prompt  # V7.8: continuum format, was "一句话"
 
     def test_build_prompt_includes_anti_sycophancy(self, repl):
         prompt = repl._build_prompt("test_user")

@@ -107,6 +107,7 @@ class Repl:
         self._sensor_cooldown: dict[str, int] = {}
         self._restore_streaks()
         self._sem = None  # V7.7: unified semantic observer (set in run())
+        self._clarification_needed = False  # V7.8: ⊥ → clarification meta-action
         # Embedding model loads lazily on first _route_task() or _classify_command() call
 
     # ── V5 Status dashboard ──
@@ -177,16 +178,47 @@ class Repl:
             tone = bp_fields.get("tone_style", "WARM")
             anchoring = bp_fields.get("contextual_anchoring", "HIGH")
             parts = ["[CURRENT MODE]"]
-            v_map = {"HIGH": "详细解释, 600-800 字, 多用列表",
-                     "MEDIUM": "均衡, 300-400 字",
-                     "LOW": "简洁, 100-150 字, 单段落",
-                     "MINIMAL": "一句话, 不超过 50 字"}
-            parts.append(f"输出规范: {v_map.get(v, v)}")
+
+            # ── V7.8: Continuum interpolation replacing hardcoded v_map ──
+            # Each level maps to (min_words, max_words, template).
+            # The template uses {words} for the interpolated word count.
+            VERBOSE_CONTINUUM = {
+                "HIGH":    (600, 800, "详细解释, {words} 字, 多用列表, 可分段"),
+                "MEDIUM":  (300, 400, "均衡解释, {words} 字, 适度分段"),
+                "LOW":     (100, 150, "简洁回复, {words} 字, 单段落"),
+                "MINIMAL": (20,  50,  "极简回复, 不超过 {words} 字"),
+            }
+            prev_v = getattr(self, '_prev_verbose_level', None)
+            if prev_v and prev_v != v and prev_v in VERBOSE_CONTINUUM and v in VERBOSE_CONTINUUM:
+                # Transition: use midpoint word count for smooth handoff
+                prev_max = VERBOSE_CONTINUUM[prev_v][1]
+                curr_min = VERBOSE_CONTINUUM[v][0]
+                mid_words = int((prev_max + curr_min) / 2)
+                parts.append(f"输出规范: {VERBOSE_CONTINUUM[v][2].format(words=mid_words)} （过渡期）")
+            else:
+                r = VERBOSE_CONTINUUM.get(v, (300, 400, "均衡, {words} 字"))
+                parts.append(f"输出规范: {r[2].format(words=r[1])}")
+            self._prev_verbose_level = v
+
+            # ── V7.8: Tone continuum ──
+            TONE_CONTINUUM = {
+                "ENTHUSIASTIC": "热情洋溢，适度使用感叹号和表情符号",
+                "WARM":         "温和共情，语气友善自然",
+                "CALM":         "克制冷静，最小化情感表达",
+                "PRAGMATIC":    "务实直白，不加修饰语和填充词",
+            }
+            prev_tone = getattr(self, '_prev_tone_style', None)
+            if prev_tone and prev_tone != tone:
+                # Transition: blend descriptions
+                parts.append(f"语气: {TONE_CONTINUUM.get(tone, tone)} （从{TONE_CONTINUUM.get(prev_tone, prev_tone)}过渡中）")
+            else:
+                parts.append(f"语气: {TONE_CONTINUUM.get(tone, tone)}")
+            self._prev_tone_style = tone
+            # ── End V7.8 ──
+
             init_map = {"PROACTIVE": "主动引导对话", "BALANCED": "自然有来有回",
                         "RESPONSIVE_ONLY": "绝对不反问"}
             parts.append(f"主动性: {init_map.get(initiative, initiative)}")
-            tone_map = {"ENTHUSIASTIC": "热情", "WARM": "温和", "CALM": "克制", "PRAGMATIC": "务实直白"}
-            parts.append(f"语气: {tone_map.get(tone, tone)}")
             if anchoring == "LOW":
                 parts.append("禁止: 晨光/阳光/月光/夜色/微风等时间天气隐喻。直接说事。")
             # Self-evolving values: render custom instruction from Blueprint
@@ -211,6 +243,12 @@ class Repl:
         context = _build_context(self.history, self.contract_events)
         now = datetime.now().strftime("%H:%M")
         system = f"{contract}\n当前时间: {now}\n{context}".strip()
+        # ── V7.8: ⊥ clarification injection ──
+        if getattr(self, '_clarification_needed', False):
+            system += (
+                "\n[语义状态] 上一轮用户输入处于语义模糊区域。"
+                "如果你不确定用户意图，请礼貌地请用户澄清，不要猜测。"
+            )
         return system
 
     def _detect_explicit_command(self, text: str) -> tuple[str, str] | None:
@@ -228,8 +266,18 @@ class Repl:
         except Exception:
             return self._keyword_fallback(text)
         # Gate: null region, gap region, or low confidence → no command
-        if obs.null_region or obs.gap_region:
+        # ── V7.8: ⊥ → clarification meta-action ──
+        if obs.null_region:
+            self._clarification_needed = True
+            self.c.bus.emit("语义真空", f"⊥ region, confidence={obs.confidence:.2f}")
             return None
+        if obs.gap_region:
+            self._clarification_needed = True
+            self.c.bus.emit("语义歧义", f"gap region, {len(obs.command_candidates)} candidates")
+            return None
+        # ── End V7.8 ──
+
+        self._clarification_needed = False
         if obs.confidence < 0.55:
             return None
         if obs.command is None:
@@ -937,14 +985,39 @@ class Repl:
                 })
             self._frustration_high = 0
 
-        # ── Apply proposals through cooldown gate ──
+        # ── Apply proposals through cooldown + Lipschitz gates ──
         for prop in proposals:
             key = prop["target_blueprint_key"]
             last = self._sensor_cooldown.get(key, -999)
             if self.round_count - last < self.MIN_SENSOR_COOLDOWN:
                 continue  # Cooldown — skip
+            # ── V7.8: Lipschitz enforcement ──
+            if not self._check_lipschitz(key, prop["new_value"]):
+                continue  # Step too large — reject
             if self._apply_proposal(prop, label="∇V"):
                 self._sensor_cooldown[key] = self.round_count
+
+    def _check_lipschitz(self, key: str, new_value: str) -> bool:
+        """Enforce ||c' - c|| ≤ MAX_GRADIENT_NORM (Banach contraction).
+
+        For enum fields: step = |new_ordinal - current_ordinal| / max_ordinal.
+        For non-enum fields: always accept (no ordinal scale to measure).
+        """
+        current = self.c.bp.enforce(key)
+        if current is None:
+            return True  # Unknown field — let schema validation handle it
+        from core.contracts.blueprint_schema import BLUEPRINT_SCHEMA
+        schema = BLUEPRINT_SCHEMA.get(key)
+        if not schema or schema.get("type") != "enum":
+            return True
+        values = schema.get("values", [])
+        if current not in values or new_value not in values:
+            return True  # Novel value — schema validation handles it
+        step_size = abs(values.index(new_value) - values.index(current)) / max(len(values) - 1, 1)
+        if step_size > self.MAX_GRADIENT_NORM:
+            self.c.bus.emit("Lipschitz", f"{key}: |{current}→{new_value}| = {step_size:.2f} > {self.MAX_GRADIENT_NORM}")
+            return False
+        return True
 
     # ── Main loop ──
 
