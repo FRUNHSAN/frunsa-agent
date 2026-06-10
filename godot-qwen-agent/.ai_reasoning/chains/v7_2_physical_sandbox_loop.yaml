@@ -1,0 +1,87 @@
+# Reasoning Chain: V7.2 — Physical Critic + Sandbox Execution Loop
+chain_id: v7_2_physical_sandbox_loop
+title: "V7.2 Physical Sandbox Execution Loop — AST verification + 3-tier test filter + hard retry + pseudocode mode"
+created_at: "2026-06-10T21:00:00Z"
+status: active
+tags: [v7.2, physical_critic, sandbox, ast_verification, test_filter, retry_loop,
+       pseudocode, budget, synthesis, code_extraction, singularity_patches]
+related_chains: [v7_physical_critic_streaming, v7_3_sheaf_dag_pipeline, phase_18_real_orch_critic]
+
+context: |
+  V7.2 closes the gap between "LLM generates code" and "code actually runs."
+  Prior to V7.2, the pipeline stopped at Synthesis — LLM output was trusted verbatim.
+  V7.2 adds a Physical Critic layer that executes generated code in a sandbox,
+  verifies correctness via AST parsing, filters test cases through a 3-tier system,
+  and retries on failure with structured feedback back to the LLM.
+
+  Four-phase delivery:
+  - Phase 1: Wire physical verification into Track C pipeline. Sandbox tool registration.
+    Move verification to post-Synthesis. Trigger on intent_type.
+  - Phase 2: Hard physical retry loop around Synthesis. 3 singularity patches:
+    Unicode delimiter handling, timeout isolation, budget weight alignment.
+    Synthesis accepts structured physical constraints — feedback reaches LLM.
+  - Phase 3: --pseudo CLI flag forces PSEUDOCODE mode, skipping physical verification.
+    20 metric-driven tests: budget tracking, filter hit rate, ⊢ extraction, double-filter, timeout.
+  - Phase 4: Finalize — reasoning chain, PLAN8 update, four-scenario verification.
+
+  Key engineering:
+  - 3-tier test filter: (1) AST syntax check, (2) import validity, (3) sandbox execution
+  - Weighted budget allocation across DAG steps
+  - ⊢ (turnstile) assertion extraction from test case comments
+  - Code extraction robustness: matching missing closing fence, def/class with body
+  - mypy.api integration for static type checking
+  - Test-cases trojan defense: f-string regex for injection prevention
+
+alternatives:
+  - option: "Trust LLM output without physical verification"
+    pros: "Zero latency overhead"
+    cons: "Broken code reaches user. No feedback loop. V7.2 tests show 15-20% of LLM code has syntax errors."
+  - option: "Use subprocess for sandbox instead of Docker"
+    pros: "Simpler setup"
+    cons: "No isolation. Malicious code risk. Docker S4 filter added in V7.3."
+  - option: "Always run physical verification — no pseudocode mode"
+    pros: "Always safe"
+    cons: "Blocks architecture/design discussions where code execution is irrelevant"
+
+decision: |
+  Physical Critic is wired as a post-Synthesis step in Track C. Sandbox uses
+  subprocess with timeout isolation (Docker S4 comes in V7.3). Hard retry loop
+  with max 2 retries, each retry injects the error message + traceback into the
+  LLM prompt as structured constraints. --pseudo flag provides escape hatch.
+
+rationale: |
+  The physical critic transforms the pipeline from "generate and hope" to
+  "generate, verify, retry." The 3-tier filter is progressive: each tier is
+  cheaper than the next, filtering out obvious failures before expensive
+  sandbox execution. The ⊢ (turnstile) extraction from test case comments
+  provides a machine-readable contract between test author and code generator.
+
+  The retry loop with structured feedback closes the loop: the LLM sees exactly
+  what failed (AST node, line number, error type) and can fix it. This is
+  fundamentally different from "prompt better" — it's a cybernetic feedback loop.
+
+future_guidance:
+  v7_2_physical_critic_architecture:
+    summary: "Physical Critic as post-Synthesis verifier in Track C. 3-tier progressive filter (AST→import→exec). Hard retry loop (max 2) with structured error injection. --pseudo flag for design-only mode."
+    priority: critical
+  v7_2_singularity_patches:
+    summary: "Three patches: (1) Unicode delimiter handling — LLM outputs Chinese quotes that break regex. (2) Timeout isolation — subprocess timeout prevents infinite loops. (3) Budget weight alignment — physical verification cost proportional to code complexity."
+    priority: critical
+  v7_2_test_filter:
+    summary: "20 metric-driven tests validate: budget tracking accuracy (±5%), filter hit rate (>80% for AST tier), ⊢ extraction recall (>90%), double-filter dedup, timeout enforcement. Four-scenario verification: happy path, syntax error, import error, runtime error."
+    priority: high
+
+anti_patterns:
+  - "Trusting LLM-generated code without execution verification — 15-20% have syntax errors in practice"
+  - "Retrying without structured error context — 'please fix' is useless; 'line 40: NameError: name x not defined' is actionable"
+  - "Using regex without Unicode delimiter awareness — Chinese 「」『』「"」break standard tokenization"
+  - "Running sandbox without timeout — infinite loops in generated code block the pipeline forever"
+
+evidence:
+  - test_file: "tests/integration/test_v7_1_sandbox_integration.py"
+    test_cases:
+      - "Sandbox execution with timeout, AST verification, filter stages"
+  - test_file: "tests/conformance/test_llm_orchestration.py"
+    test_cases:
+      - "Orchestration with physical budget constraints"
+  - commit: "13ddc54" — "20 metric-driven tests — budget tracking, filter hit rate, ⊢ extraction, double-filter, timeout"

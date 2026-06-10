@@ -406,6 +406,20 @@ chains:
     tags: [v7, physical_critic, sandbox_executor, dual_track_critic, error_mapper, physical_budget, streaming_synthesis, track_a_fir, hybrid_automaton, loop_topology]
     status: active
 
+  - chain_id: v7_2_physical_sandbox_loop
+    file: chains/v7_2_physical_sandbox_loop.yaml
+    title: "V7.2 物理沙箱执行循环 — AST验证+3层测试过滤+硬重试+伪代码模式"
+    layer: plan
+    tags: [v7.2, physical_critic, sandbox, ast_verification, test_filter, retry_loop, pseudocode, budget, synthesis, code_extraction]
+    status: active
+
+  - chain_id: v7_3_sheaf_dag_pipeline
+    file: chains/v7_3_sheaf_dag_pipeline.yaml
+    title: "V7.3 层论DAG管道 — Φ函子+阻力层R+sigma增广+Docker S4"
+    layer: plan
+    tags: [v7.3, phi_functor, resistance_dag, sheaf, causality, sigma_augmentation, docker_s4, sandbox, dmypy]
+    status: active
+
   - chain_id: v7_4_identity_manifold
     file: chains/v7_4_identity_manifold.yaml
     title: "V7.4 身份流形 — 跨会话身份连续性 via M_id ⊂ ℝ¹² (OU过程+Betti检测+自标定百分位)"
@@ -418,6 +432,13 @@ chains:
     title: "V7.5 熵监控器 — 主动牵挂 via 子水平集滤子 (信息论+控制论+自然变换)"
     layer: plan
     tags: [v7.5, entropy, watcher, active, concern, tension, sublevel_set, filtration, information_theory, control_theory, natural_transformation, sigmoid, normalization, red_team, compatibility, rag, mcp]
+    status: active
+
+  - chain_id: v7_6_adaptive_contract_closed_loop
+    file: chains/v7_6_adaptive_contract_closed_loop.yaml
+    title: "V7.6 自适应契约闭环 — σ选择压力+T路径积分+∇V梯度下降 (达尔文三元组)"
+    layer: plan
+    tags: [v7.6, adaptive_contract, selection_pressure, trust_breathing, contract_gradient, darwinian_triad, lipschitz, hysteresis, cooldown, banach_fixed_point, sarcasm_weighting, streak_persistence]
     status: active
 
   - chain_id: v7_7_sheaf_semantic_translator

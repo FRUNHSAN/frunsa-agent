@@ -1,0 +1,121 @@
+# Reasoning Chain: V7.6 — Adaptive Contract Closed Loop (Darwinian Triad)
+chain_id: v7_6_adaptive_contract_closed_loop
+title: "V7.6 Adaptive Contract Closed Loop — σ selection pressure + trust path integral + contract gradient descent"
+created_at: "2026-06-10T21:00:00Z"
+status: active
+tags: [v7.6, adaptive_contract, selection_pressure, trust_breathing, contract_gradient,
+       darwinian_triad, lipschitz, hysteresis, cooldown, banach_fixed_point,
+       sarcasm_weighting, streak_persistence, force_reset, nominal_actual_sync]
+related_chains: [v5_math_adaptive_contract, v5.2_observer_downgrade, v5_3_dual_sensor_fusion,
+                  v7_3_sheaf_dag_pipeline, v7_7_sheaf_semantic_translator]
+
+context: |
+  V7.6 closes the Darwinian triad at the heart of the Agent: Variation (LLM
+  generation) → Selection (user behavior as environmental pressure) → Retention
+  (contract state update). The closed loop operates on three control surfaces:
+
+  1. Selection Pressure σ: A scalar field on the interaction manifold. Four
+     orthogonal components — σ_clarity (user understanding), σ_emotion (user
+     emotional state), σ_competence (system physical success), σ_explicit
+     (user positive engagement). Asymmetric bounds: penalty [-0.05] > reward [0.03].
+
+  2. Trust Breathing T(t) = T(0) + ∫σ dτ: Trust is NOT a state variable.
+     It is the path integral of selection pressure over interaction time.
+     T ∈ [0, 1] with hard clamping. OU mean reversion is a future feature.
+
+  3. Contract Gradient Descent c_{t+1} = c_t - η·∇V(c_t; s): The contract
+     evolves along the negative gradient of a potential function V that encodes
+     user satisfaction. η = f(T): frozen at T<0.10, half-speed at T<0.30,
+     full-speed otherwise. Lipschitz constraint ||Δc|| ≤ 0.3 (Banach contraction).
+
+  Three red-team cracks were discovered and patched:
+  - Crack 1 (Phase Lag): Streak counters were ephemeral → persisted to profile
+  - Crack 2 (Limit Cycle): THEORETICAL↔WARM oscillation → hysteresis comparator
+    (enter≠exit thresholds) + cooldown (≥5 rounds between same-key sensor adapts)
+  - Crack 3 (Bypass Paths): /new could be rejected by trust gate; kernel repairs
+    diverged nominal from actual → force_reset_proposal + _sync_contract_state
+
+  V7.6's place in the architecture: it is the SELECTION + RETENTION half of
+  the Darwinian triad. V7.7 (sheaf observer) provides the VARIATION input
+  quality. Together they close the full adaptive loop.
+
+alternatives:
+  - option: "Use RL-based policy gradient for contract updates"
+    pros: "Can learn complex nonlinear policies"
+    cons: "Requires reward signal definition. Sample inefficient. Black-box — no Lipschitz guarantee."
+  - option: "Hardcoded rules for contract changes (if frustration → WARM)"
+    pros: "Trivial implementation"
+    cons: "No gradient, no trust gating, no hysteresis. Oscillates on boundary conditions."
+  - option: "Always apply contract changes — skip trust gate"
+    pros: "Simpler — one less parameter"
+    cons: "Trust<0.10 means the system has fundamentally lost the user. Contract changes at that point are noise."
+
+decision: |
+  σ is computed per-round from four orthogonal sensors (clarity, frustration,
+  dimension/score, physical_pass). HardTanh clamping with asymmetric bounds.
+  T = T + σ (path integral). c' = c - η·∇V with η = f(T) and Lipschitz.
+  Hysteresis + cooldown prevent limit cycles. Streaks persisted for cross-session.
+  Force reset for /new bypasses trust gate but preserves audit.
+
+rationale: |
+  The Darwinian triad (Variation→Selection→Retention) is the foundational
+  metaphor. σ is the selection pressure — the environment (user) selecting
+  for or against the agent's behavior. T is accumulated trust — not a snapshot,
+  but the history of all selection events. ∇V is the contract's response to
+  sustained selection pressure in a particular direction.
+
+  The asymmetric EMA (negativity bias) in σ reflects human psychology: trust
+  erodes faster than it builds. The Lipschitz constraint on ∇V is a Banach
+  fixed-point guarantee — the contract converges to a stable point in finite
+  steps, cannot oscillate.
+
+  Hysteresis (enter≠exit thresholds) is the same pattern as V5's Schmitt
+  trigger for binary routing — it's the universal solution to chattering at
+  decision boundaries. Cooldown (≥5 rounds) prevents sensor noise from
+  driving high-frequency contract switching.
+
+  Sarcasm weighting for σ_explicit (confidence = 1 - sarcasm) closes a
+  vulnerability where "Thanks a lot..." with sarcasm=0.9 would otherwise
+  give a false positive +0.02 selection boost.
+
+future_guidance:
+  v7_6_selection_pressure:
+    summary: "σ = σ_clarity + σ_emotion + σ_competence + σ_explicit. Orthogonal decomposition on interaction manifold. Each component measures a distinct selection signal. Asymmetric bounds: reward≤0.03, penalty≥-0.05 (negativity bias). Sarcasm confidence weighting for σ_explicit."
+    priority: critical
+  v7_6_trust_path_integral:
+    summary: "T(t) = T(0) + ∫σ dτ. Trust is accumulated history, not snapshot. T∈[0,1] with hard clamp. T<0.10 → contract frozen. T<0.30 → half-speed gradient. T≥0.30 → full-speed. OU mean reversion reserved for V8."
+    priority: critical
+  v7_6_contract_gradient:
+    summary: "c' = c - η·∇V. η = f(T). Lipschitz ||Δc|| ≤ 0.3 (Banach contraction → fixed-point convergence). Hysteresis: enter THEORETICAL at clarity>0.7×3, exit at frustration>0.5×3. Cooldown: ≥5 rounds between same-key sensor_adapt."
+    priority: critical
+  v7_6_red_team_cracks:
+    summary: "Crack 1 (phase lag): streaks persisted to profile (_v76_clarity_streak, _v76_frustration_streak). Crack 2 (limit cycle): hysteresis + cooldown + compile-time assertion cooldown≥max(streaks). Crack 3 (bypass): _force_reset_proposal for /new; _sync_contract_state after kernel repairs."
+    priority: critical
+  v7_6_closed_loop_verification:
+    summary: "Gradient boundedness: |Δc|≤0.3. Cooldown-hysteresis compatibility: compile-time assertion. Sarcasm robustness: gratitude=0.8+sarcasm=0.9→σ≤0.002. Integral convergence: fixed σ=0.01→T converges to OU mean±0.05. Cross-session streak survival: 2r clarity>0.7→restart→_clarity_high=2."
+    priority: high
+
+anti_patterns:
+  - "Computing trust as a snapshot (EMA of recent scores) — trust must be ∫σ dτ, the accumulated history"
+  - "Symmetric σ bounds — human psychology has negativity bias. Penalty must be larger than reward."
+  - "Same threshold for entering and exiting a contract state — causes chattering. Use hysteresis."
+  - "Applying sensor-driven contract changes every round — use cooldown ≥5 rounds per key"
+  - "Rejecting /new via trust gate — user reset intent must bypass all gates (audit trail preserved)"
+  - "Using heuristics (time-of-day, round count) for contract decisions — P4: Signal over Schedule"
+
+evidence:
+  - file: "core/repl.py"
+    symbols:
+      - "_compute_selection_pressure: σ(r) = Σσᵢ with 4 orthogonal components"
+      - "_trust_breathe: T = ∫σ dτ, path integral with hard clamp"
+      - "_contract_adapt: c' = c - η·∇V with hysteresis + cooldown + Lipschitz"
+      - "_persist_streaks / _restore_streaks: cross-session streak survival"
+      - "_force_reset_proposal: bypass trust gate for user resets"
+      - "ENTER_STREAK_CLARITY=3, EXIT_STREAK_FRUSTRATION=3, MIN_SENSOR_COOLDOWN=5, MAX_GRADIENT_NORM=0.3"
+      - "Compile-time assertion: cooldown >= max(streaks)"
+  - file: "core/container.py"
+    symbols:
+      - "_sync_contract_state: nominal ← actual after kernel repairs"
+  - file: "core/track_c.py"
+    symbols:
+      - "_physical_pass_count: replaces boolean flag for multi-DAG counting"

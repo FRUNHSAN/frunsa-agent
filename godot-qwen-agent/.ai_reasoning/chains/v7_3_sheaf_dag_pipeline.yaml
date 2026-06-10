@@ -1,0 +1,102 @@
+# Reasoning Chain: V7.3 — Sheaf-Theoretic DAG Pipeline + Phi Functor
+chain_id: v7_3_sheaf_dag_pipeline
+title: "V7.3 Sheaf-Theoretic DAG Pipeline — Φ functor + resistance sheaf R + sigma augmentation + Docker S4"
+created_at: "2026-06-10T21:00:00Z"
+status: active
+tags: [v7.3, phi_functor, resistance_dag, sheaf, causality, sigma_augmentation,
+       docker_s4, sandbox, test_case_canonical, dmypy, physical_feedback]
+related_chains: [v7_2_physical_sandbox_loop, v7_physical_critic_streaming, v5_math_adaptive_contract]
+
+context: |
+  V7.3 extends the physical verification pipeline from V7.2 with four mathematical
+  structures that transform it from "a pipeline that runs code" to "a sheaf-theoretic
+  DAG with universal physical feedback."
+
+  Four-phase delivery:
+  - Phase 1 (Φ functor): Universal physical feedback for all side-effect tools.
+    Every tool with side effects (sandbox, file I/O, network) gets a canonical
+    physical feedback channel through the Φ natural transformation.
+  - Phase 2 (Resistance sheaf R): A sheaf R on the DAG with causality preservation.
+    Each DAG node carries a resistance value encoding physical constraints
+    (timeout likelihood, memory pressure, I/O cost). The sheaf structure ensures
+    that collapsing a sub-DAG preserves total resistance — causality is maintained.
+  - Phase 3 (σ canonical section): Test case canonical section σ: E → T.
+    Maps from execution space E to test space T via a sigma functor that
+    augments test cases with structured physical metadata.
+  - Phase 4 (Docker S4 filter): Layer 4 OS sandbox — Docker S4 filter + dmypy daemon.
+    Adds container-level isolation (S4 = S₁⊃S₂⊃S₃⊃S₄ filtration tower)
+    and mypy daemon for fast incremental type checking.
+
+  The resistance sheaf R is the key mathematical innovation: it assigns to each
+  open set of the DAG (a sub-DAG) a resistance value, with restriction maps that
+  preserve the filtration structure. This means you can reason about "how hard
+  is this sub-pipeline to execute physically" without running it.
+
+alternatives:
+  - option: "Flat physical verification without DAG structure"
+    pros: "Simpler implementation"
+    cons: "No causality preservation. Can't reason about sub-pipelines. Resistance is global, not local."
+  - option: "Use a simple dict for resistance instead of sheaf"
+    pros: "Less abstraction"
+    cons: "Loses restriction maps and gluing axioms. No formal guarantee that sub-DAG collapse preserves resistance."
+  - option: "Skip Docker S4 and stay with subprocess isolation"
+    pros: "No Docker dependency"
+    cons: "No filesystem isolation. Malicious code can escape. dmypy daemon can't run."
+
+decision: |
+  Φ functor is a thin wrapper around all side-effect tool calls — it's the
+  universal property that guarantees physical feedback for ANY tool, present
+  or future. Resistance sheaf R is computed at DAG construction time from
+  node metadata (estimated timeout, memory, I/O). σ canonical section maps
+  execution traces to structured test cases for regression. Docker S4 adds
+  container-level isolation as the 4th layer in the filtration tower.
+
+rationale: |
+  The progression from V7.2→V7.3 mirrors the progression from "engineering
+  patch" to "mathematical structure." V7.2 got physical verification working.
+  V7.3 makes it principled.
+
+  Φ functor: without it, every new tool needs explicit physical feedback wiring.
+  With Φ, physical feedback is a natural transformation — automatic, universal.
+
+  Resistance sheaf R: the DAG is not just a composition graph — it's a topological
+  space with a sheaf of resistance values. Gluing axioms guarantee that merging
+  two sub-DAGs preserves their combined resistance. This is essential for V7.6's
+  contract gradient, which needs to know the physical cost of each path.
+
+  Docker S4 completes the filtration tower: S₁ (regex) ⊃ S₂ (AST) ⊃ S₃ (subprocess)
+  ⊃ S₄ (container). Each layer catches what the layer above can't.
+
+future_guidance:
+  v7_3_phi_functor:
+    summary: "Φ: Tool → PhysicalFeedback is a natural transformation. Every side-effect tool gets automatic physical feedback channel. Universal property — new tools inherit Φ without code changes."
+    priority: critical
+  v7_3_resistance_sheaf:
+    summary: "R(U) = resistance value for open sub-DAG U. Restriction maps res_U,V: R(U)→R(V) for V⊂U. Gluing: R(U∪V) = R(U) + R(V) - R(U∩V). Causality preserved under DAG collapse."
+    priority: critical
+  v7_3_sigma_section:
+    summary: "σ: E→T maps execution traces to structured test cases. Augments test cases with physical metadata (execution time, memory peak, exit code). Canonical in the sense that σ∘π = id_T where π is test projection."
+    priority: high
+  v7_3_docker_s4:
+    summary: "Docker S4 is layer 4 in the S₁⊃S₂⊃S₃⊃S₄ filtration tower. Container-level isolation with dmypy daemon for fast incremental type checking. Complements V7.2's subprocess S3."
+    priority: high
+
+anti_patterns:
+  - "Adding physical feedback to each tool individually — use Φ functor for universal coverage"
+  - "Using flat dict for DAG resistance — loses restriction maps and gluing axioms"
+  - "Skipping the filtration tower — each layer catches failures the upper layer can't"
+
+evidence:
+  - test_file: "tests/unit/test_v7_3_resistance_dag.py"
+    test_cases:
+      - "Resistance sheaf gluing axioms, DAG collapse preservation, causality"
+  - test_file: "tests/integration/test_v7_3_full_pipeline.py"
+    test_cases:
+      - "Full pipeline with Φ functor + resistance DAG + σ augmentation + Docker S4"
+  - test_file: "tests/integration/test_v7_1_sandbox_integration.py"
+    test_cases:
+      - "Sandbox integration with S4 layer"
+  - commit: "c47556d" — "Phi functor — universal physical feedback for all side-effect tools"
+  - commit: "206549c" — "resistance-field DAG — sheaf R on DAG with causality preservation"
+  - commit: "19a3052" — "test case canonical section sigma: E -> T"
+  - commit: "61de373" — "Docker S4 filter + dmypy daemon"
