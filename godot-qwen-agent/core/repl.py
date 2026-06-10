@@ -56,62 +56,10 @@ def _get_registered_tools() -> list[dict]:
             pass
     return result
 
-# ── Semantic command classifier (embedding-based, no hardcoded keywords) ──
-_EMBED_MODEL: object | None = None
-
-
-def _get_command_model():
-    global _EMBED_MODEL
-    if _EMBED_MODEL is None:
-        import os
-        os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
-        import numpy as np
-        from sentence_transformers import SentenceTransformer, util as st_util
-        m = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
-        anchors = {
-            "response_verbose_level:MINIMAL": ["字少点", "别啰嗦", "简单点说", "话少点", "精简", "简洁", "短一点"],
-            "response_verbose_level:HIGH": ["详细点", "展开讲讲", "多说点", "再讲讲", "展开来说"],
-            "response_verbose_level:MEDIUM": ["字多点", "多一点", "多一点点", "多讲几句"],
-            "conversational_initiative:PROACTIVE": ["你问", "问问题", "反问", "问我", "你问我", "问我几个", "你倒是问", "继续问", "多问点"],
-            "conversational_initiative:RESPONSIVE_ONLY": ["别问了", "不要问", "别反问", "别老问我"],
-            "tone_style:WARM": ["带点感情", "自然点", "像朋友", "来点人味"],
-        }
-        centers = {}
-        for label, sentences in anchors.items():
-            centers[label] = np.mean(m.encode(sentences), axis=0)
-        _EMBED_MODEL = (m, st_util, centers)
-    return _EMBED_MODEL
-
-
-def _classify_command(text: str) -> tuple[str, str] | None:
-    # Short greetings/closers + very short text should never trigger commands
-    t = text.strip()
-    if len(t) < 3 or t in ("拜拜", "再见", "bye", "晚安", "谢谢", "好的", "你好", "可以", "嗯", "哦"):
-        return None
-    if t.startswith("好的"):
-        return None
-    m, st_util, centers = _get_command_model()
-    # Guard: garbled/surrogate text → skip classification
-    if not text or any(0xD800 <= ord(c) <= 0xDFFF for c in text):
-        return None
-    try:
-        emb = m.encode([text])[0]
-    except Exception:
-        # Older sentence-transformers accept bare string; fallback gracefully
-        try:
-            emb = m.encode(text)
-        except Exception:
-            return None
-    best_label, best_score = None, 0.0
-    for label, center in centers.items():
-        s = float(st_util.cos_sim(emb, center))
-        if s > best_score:
-            best_label, best_score = label, s
-    if best_label and best_score > 0.70:
-        key, val = best_label.split(":", 1)
-        return (key, val)
-    # Embedding didn't match → fall through to keyword fallback
-    raise ValueError(f"no embedding match (best={best_score:.3f})")
+# ── V7.7: Semantic command classifier moved to SemanticTrustEngine.observe() ──
+# The old _get_command_model(), _classify_command(), __null__ Voronoi cell
+# have been replaced by sheaf-theoretic local sections with ⊥ = E \\ ∪ U_i.
+# See core/adapters/semantic_trust.py for the unified observer.
 
 
 class Repl:
@@ -119,7 +67,12 @@ class Repl:
 
     def __init__(self, ctr: Container) -> None:
         self.c = ctr
-        self.trust = 0.30
+        # ── V7.4: Restore identity prior for trust (cross-session continuity) ──
+        self._identity_prior = self._restore_identity_prior()
+        self.trust = self._identity_prior.get("trust_initial", 0.30)
+        # ── V7.5: Active concern at session start ──
+        self._kernel_snapshot = None  # Updated after each Track C run
+        self._session_start_time = time.time()  # For session duration tracking
         self.round_count = 0
         self.healthy_rounds = 0  # Phase 8: consecutive healthy rounds counter
         self.pending: list[dict] = []
@@ -148,6 +101,12 @@ class Repl:
         from core.adapters.wasserstein_proxy import WassersteinProxy
         self._wasserstein = WassersteinProxy.uncalibrated()
         self._w_calibration_started: bool = False
+        # ── V7.6: Adaptive contract feedback loop ──
+        self._clarity_high: int = 0
+        self._frustration_high: int = 0
+        self._sensor_cooldown: dict[str, int] = {}
+        self._restore_streaks()
+        self._sem = None  # V7.7: unified semantic observer (set in run())
         # Embedding model loads lazily on first _route_task() or _classify_command() call
 
     # ── V5 Status dashboard ──
@@ -255,14 +214,31 @@ class Repl:
         return system
 
     def _detect_explicit_command(self, text: str) -> tuple[str, str] | None:
-        """Semantic command detection via embedding — no hardcoded keywords."""
+        """V7.7: Semantic command detection via unified sheaf-theoretic observer.
+
+        Uses self._sem.observe() — which jointly models emotion × command
+        on the product fiber with ⊥ region rejection and cross-coefficient
+        reweighting. Falls back to keyword matching only when the semantic
+        engine is unavailable.
+        """
+        if self._sem is None:
+            return self._keyword_fallback(text)
         try:
-            return _classify_command(text)
+            obs = self._sem.observe(text)
         except Exception:
             return self._keyword_fallback(text)
+        # Gate: null region, gap region, or low confidence → no command
+        if obs.null_region or obs.gap_region:
+            return None
+        if obs.confidence < 0.55:
+            return None
+        if obs.command is None:
+            return None
+        return (obs.command["key"], obs.command["value"])
 
     @staticmethod
     def _keyword_fallback(text: str) -> tuple[str, str] | None:
+        """Last-resort command detection when embedding model is unavailable."""
         t = text.strip()
         if any(w in t for w in ("字少点", "别啰嗦", "简洁", "简单点说", "短一点")):
             return ("response_verbose_level", "MINIMAL")
@@ -421,6 +397,184 @@ class Repl:
             return "拒绝"
         return None
 
+    # ═══════════════════════════════════════════════════════════════════
+    # V7.4: Identity manifold integration
+    # ═══════════════════════════════════════════════════════════════════
+
+    def _restore_identity_prior(self) -> dict:
+        """Restore cross-session identity prior at session start.
+
+        Called once per REPL instantiation. Injects semantic + physical
+        priors from the identity manifold into the current session's
+        initial conditions.
+        """
+        try:
+            uid = self.c.cfg.user_id
+            return self.c.identity_store.restore_prior(uid)
+        except Exception:
+            return {"trust_initial": 0.30, "physical_caution": 1.0}
+
+    def _evolve_identity(self) -> None:
+        """Capture session sufficient statistic and evolve identity point.
+
+        Called at session end (/quit or /new boundary).
+        Feeds compressed statistics into the identity manifold's OU + push
+        pipeline. Graceful degradation — identity errors never crash the REPL.
+        """
+        if self.round_count < 1:
+            return  # No interaction — nothing to evolve
+        try:
+            uid = self.c.cfg.user_id
+            stats = self._build_session_statistic()
+            self.c.identity_store.evolve(uid, stats)
+        except Exception:
+            pass  # Identity is best-effort
+
+    def _build_session_statistic(self) -> "SessionSufficientStatistic":
+        """Build compressed sufficient statistic from current session.
+
+        Aggregates all the live signals (trust, drift, clarity, e(t),
+        physical events) into a frozen statistic. Never includes raw text.
+        """
+        from core.memory.identity_manifold import SessionSufficientStatistic
+
+        # Compute physical-3 scores from this session
+        # tool_risk_score: mean RESISTANCE_WEIGHT of tools actually used
+        tool_risk_score = 0.5  # Default neutral
+        budget_exhausted = 0.0
+        retry_success = 0.5
+
+        # If Track C engine has physical stats available
+        if hasattr(self, '_track_c_engine'):
+            eng = self._track_c_engine
+            phys = getattr(eng, '_physical_stats', None)
+            if phys and isinstance(phys, dict):
+                tool_scores = phys.get("tool_risk_scores", [])
+                if tool_scores:
+                    import statistics
+                    tool_risk_score = statistics.mean(tool_scores)
+                phys_attempts = phys.get("physical_attempts", 0)
+                phys_failures = phys.get("physical_failures", 0)
+                if phys_attempts > 0:
+                    budget_exhausted = phys.get("budget_exhaustions", 0) / phys_attempts
+                    retries = phys.get("retries", 0)
+                    retry_passes = phys.get("retry_passes", 0)
+                    if retries > 0:
+                        retry_success = retry_passes / retries
+
+        return SessionSufficientStatistic(
+            trust_final=self.trust,
+            drift_values=tuple(self._drift_history[-20:]),
+            clarity_values=(),   # Clarity history not tracked per-round currently
+            e_t_values=(),       # e(t) history accessible via tracking_error
+            selection_pressure_triggers=self.c.meta_adapt.trigger_count,
+            physical_failures=getattr(
+                getattr(self, '_track_c_engine', None), '_physical_failures', 0
+            ),
+            physical_attempts=getattr(
+                getattr(self, '_track_c_engine', None), '_physical_attempts', 0
+            ),
+            tool_risk_score=tool_risk_score,
+            budget_exhausted_ratio=budget_exhausted,
+            retry_success_ratio=retry_success,
+            session_duration_sec=time.time() - (self._session_start_time or time.time()),
+            round_count=self.round_count,
+        )
+
+    # ── V7.5: Active concern ─────────────────────────────────────────
+
+    def _check_active_interrupt(self) -> None:
+        """Check internal tension at session start and emit soft interrupt.
+
+        Loads the previous session's kernel snapshot, samples tension,
+        and prints a natural-language interrupt if warranted.
+        Graceful degradation — errors never crash the REPL.
+
+        V7.5-visibility: always prints a one-line status so the user
+        knows the entropy monitor ran, even when nothing is amiss.
+        """
+        try:
+            uid = self.c.cfg.user_id
+            from core.watcher.entropy_monitor import load_snapshot
+            identity = self.c.identity_store.load(uid)
+            snapshot = load_snapshot(".identity", uid, identity.session_count)
+            if snapshot is None:
+                print(f"  [守望者] 无残留牵挂 — 干净启动")
+                return
+
+            # Sample tension
+            reading = self.c.entropy_monitor.sample(snapshot, identity)
+            msg = self.c.entropy_monitor.format_interrupt(
+                reading, identity, snapshot)
+            if msg:
+                print(f"\n{msg}")
+            else:
+                d = snapshot.dangling_dag_count
+                pf = snapshot.physical_failures
+                parts = []
+                if d:
+                    parts.append(f"dangling={d}")
+                if pf:
+                    parts.append(f"phys_fails={pf}")
+                status = ", ".join(parts) if parts else "clean"
+                print(f"  [守望者] 上次残留: {status} (S_int={reading.S_int:.2f} < θ) — 无需干预")
+        except Exception:
+            pass  # Active concern is best-effort
+
+    def _update_snapshot_after_track(self, track_snapshot: dict | None) -> None:
+        """C2: Accumulate snapshot across multiple Track C runs in session.
+
+        Uses max(dangling) and sum(failures) to preserve worst-case state.
+        Track A calls this with empty dict to clear DAG/physical fields.
+        """
+        if track_snapshot is None:
+            track_snapshot = {}
+        from core.watcher.entropy_monitor import KernelStateSnapshot
+
+        prev = self._kernel_snapshot
+        new_dangling = track_snapshot.get("dangling_dag_count", 0)
+        new_e_t = track_snapshot.get("accumulated_e_t", 0.0)
+        new_budget = track_snapshot.get("budget_remaining_ratio", 1.0)
+        new_phys_f = track_snapshot.get("physical_failures", 0)
+        new_phys_a = track_snapshot.get("physical_attempts", 0)
+        new_mcp_f = track_snapshot.get("mcp_failures", 0)
+        new_mcp_a = track_snapshot.get("mcp_attempts", 0)
+
+        if prev is None:
+            self._kernel_snapshot = KernelStateSnapshot(
+                dangling_dag_count=new_dangling,
+                accumulated_e_t=new_e_t,
+                budget_remaining_ratio=new_budget,
+                physical_failures=new_phys_f,
+                physical_attempts=new_phys_a,
+                mcp_failures=new_mcp_f,
+                mcp_attempts=new_mcp_a,
+            )
+        else:
+            # C2: accumulate — max dangling, sum failures
+            self._kernel_snapshot = KernelStateSnapshot(
+                dangling_dag_count=max(prev.dangling_dag_count, new_dangling),
+                accumulated_e_t=new_e_t,  # latest e_t
+                budget_remaining_ratio=new_budget,  # latest budget
+                physical_failures=prev.physical_failures + new_phys_f,
+                physical_attempts=prev.physical_attempts + new_phys_a,
+                mcp_failures=prev.mcp_failures + new_mcp_f,
+                mcp_attempts=prev.mcp_attempts + new_mcp_a,
+            )
+
+    def _persist_snapshot(self) -> None:
+        """Persist kernel snapshot at session end."""
+        if self._kernel_snapshot is None:
+            return
+        try:
+            uid = self.c.cfg.user_id
+            identity = self.c.identity_store.load(uid)
+            from core.watcher.entropy_monitor import persist_snapshot
+            persist_snapshot(".identity", uid, self._kernel_snapshot,
+                           identity.session_count)
+        except Exception:
+            pass
+
     def _restore_contract_state(self) -> None:
         """Phase 8b: restore contract state from previous session on startup."""
         snapshot = self.c.profile.load_blueprint_snapshot()
@@ -519,14 +673,26 @@ class Repl:
                      explore_bias: float = 0.0,
                      compromise_bias: float = 0.0,
                      stream_callback=None):
-        """Track C: full engine pipeline. V7 Phase 1: streaming synthesis."""
+        """Track C: full engine pipeline. V7 Phase 1: streaming synthesis.
+        Returns (response, output_mult, snapshot_dict)."""
         from core.track_c import TrackCEngine
         engine = self._get_track_c_engine()
-        return engine.run(user, system, self.round_count,
+        response, cog_mult = engine.run(user, system, self.round_count,
                           trust=trust, e_t=e_t, raw_drift=raw_drift,
                           clarity=clarity, session_gain=session_gain,
                           explore_bias=explore_bias, compromise_bias=compromise_bias,
                           stream_callback=stream_callback)
+        # V7.5: build snapshot from engine state after execution
+        snap = {
+            "dangling_dag_count": getattr(engine, '_last_dangling_count', 0),
+            "accumulated_e_t": e_t,
+            "budget_remaining_ratio": getattr(engine, '_last_budget_ratio', 1.0),
+            "physical_failures": getattr(engine, '_physical_failures', 0),
+            "physical_attempts": getattr(engine, '_physical_attempts', 0),
+            "mcp_failures": getattr(engine, '_mcp_failures', 0),
+            "mcp_attempts": getattr(engine, '_mcp_attempts', 0),
+        }
+        return response, cog_mult, snap
 
     def _get_track_c_engine(self):
         """Lazy-init Track C engine with real CloudLLM backend."""
@@ -636,6 +802,150 @@ class Repl:
                 return True
         return False
 
+    # ── V7.6: Adaptive contract feedback loop ──────────────────────────
+
+    # Parameter constants (configurable)
+    ENTER_STREAK_CLARITY: int = 3      # Rounds of clarity > 0.7 to trigger ∇V
+    EXIT_STREAK_FRUSTRATION: int = 3   # Rounds of frustration > 0.5 to exit (hysteresis)
+    MIN_SENSOR_COOLDOWN: int = 5       # Min rounds between sensor_adapt on same key
+    MAX_GRADIENT_NORM: float = 0.3     # Lipschitz constraint on ∇V (Banach contraction)
+
+    # Compile-time assertion: cooldown >= max hysteresis to prevent dead zones
+    assert MIN_SENSOR_COOLDOWN >= max(ENTER_STREAK_CLARITY, EXIT_STREAK_FRUSTRATION), (
+        f"V7.6 invariant: cooldown ({MIN_SENSOR_COOLDOWN}) must >= "
+        f"max(enter={ENTER_STREAK_CLARITY}, exit={EXIT_STREAK_FRUSTRATION})"
+    )
+
+    def _restore_streaks(self) -> None:
+        """Restore streak counters from previous session."""
+        self._clarity_high = getattr(self.c.profile, '_v76_clarity_streak', 0) or 0
+        self._frustration_high = getattr(self.c.profile, '_v76_frustration_streak', 0) or 0
+
+    def _persist_streaks(self) -> None:
+        """Save streak counters for cross-session survival (裂缝 1)."""
+        try:
+            self.c.profile._v76_clarity_streak = self._clarity_high
+            self.c.profile._v76_frustration_streak = self._frustration_high
+        except Exception:
+            pass
+
+    def _force_reset_proposal(self, target_key: str, new_value: str,
+                              reason: str = "") -> bool:
+        """Apply a contract change bypassing trust gate (裂缝 3).
+
+        For /new and other user-initiated resets. Skips trust gate and
+        cooldown, but preserves audit trail.
+        """
+        ok, msg = self.c.bp.apply_proposal(target_key, new_value,
+                                            ignore_cooldown=True)
+        if ok:
+            self.c.profile.record_modification(target_key, new_value)
+            self.c.engine.record_evolution(self.trust)
+            self.c.bus.emit("契约重置",
+                f"{target_key} → {new_value} ({reason})")
+        return ok
+
+    def _compute_selection_pressure(self, clarity: float, frustration: float,
+                                    dim, dim_score: float, phys_pass: bool) -> float:
+        """σ(r) = σ_clarity + σ_emotion + σ_competence + σ_explicit.
+
+        Selection pressure on the interaction manifold. Orthogonal decomposition
+        into four components, each measuring a different selection signal.
+        """
+        sigma = 0.0
+
+        # σ_clarity: user understands the response (+α₁ when clear and calm)
+        if clarity > 0.7 and frustration < 0.1:
+            sigma += 0.01
+
+        # σ_emotion: user emotional state (-α₂ when severely frustrated)
+        if frustration > 0.7:
+            sigma -= 0.02
+
+        # σ_competence: system proved itself (+α₃ on physical PASS)
+        if phys_pass:
+            sigma += 0.01
+
+        # σ_explicit: user positive feedback from ANY positive emotion dimension.
+        # The observer might return "curiosity", "gratitude", etc — all
+        # indicate engagement. Use the dimension's own score directly,
+        # with sarcasm confidence weighting to filter ironic positives.
+        _POSITIVE_DIMS = {"gratitude", "curiosity"}
+        if dim in _POSITIVE_DIMS:
+            pos_score = dim_score
+            sarcasm = getattr(self, '_prev_sarcasm', 0.0)
+            confidence = max(0.0, 1.0 - sarcasm)
+            if pos_score > 0.6:
+                sigma += 0.02 * confidence
+
+        # Hard clamp: asymmetric bounds (penalty can be slightly larger)
+        return max(-0.05, min(0.03, sigma))
+
+    def _trust_breathe(self, sigma: float) -> float:
+        """T(t) = T(0) + ∫σ dτ — trust as path integral of selection pressure."""
+        T_new = self.trust + sigma
+        return max(0.0, min(1.0, T_new))
+
+    def _contract_adapt(self, clarity: float, frustration: float) -> None:
+        """c_{t+1} = c_t - η·∇V(c_t; s) — contract gradient descent.
+
+        η = f(T): frozen when trust < 0.10, slow when < 0.30, full otherwise.
+        Lipschitz constraint ||c' - c|| ≤ MAX_GRADIENT_NORM (裂缝 2.1).
+        Hysteresis: enter THEORETICAL at clarity>0.7×3, exit at frustration>0.5×3.
+        """
+        # ── η: learning rate gated by trust ──
+        if self.trust < 0.10:
+            return  # Frozen — trust too low
+        eta = 0.5 if self.trust < 0.30 else 1.0
+
+        # ── Streak tracking (hysteresis) ──
+        if clarity > 0.7:
+            self._clarity_high += 1
+        else:
+            self._clarity_high = 0
+
+        if frustration > 0.5:
+            self._frustration_high += 1
+        else:
+            self._frustration_high = 0
+
+        proposals: list[dict] = []
+
+        # ── ∇_{explanation} V: clarity streak → deeper explanations ──
+        if self._clarity_high >= self.ENTER_STREAK_CLARITY:
+            current = self.c.bp.enforce("explanation_style")
+            if current != "THEORETICAL":
+                proposals.append({
+                    "target_blueprint_key": "explanation_style",
+                    "new_value": "THEORETICAL",
+                    "source": "sensor_gradient",
+                    "trigger_condition": (
+                        f"clarity={clarity:.2f}×{self._clarity_high}r"),
+                })
+            self._clarity_high = 0
+
+        # ── ∇_{tone} V: frustration streak → warmer tone ──
+        if self._frustration_high >= self.EXIT_STREAK_FRUSTRATION:
+            current = self.c.bp.enforce("tone_style")
+            if current != "WARM":
+                proposals.append({
+                    "target_blueprint_key": "tone_style",
+                    "new_value": "WARM",
+                    "source": "sensor_gradient",
+                    "trigger_condition": (
+                        f"frustration={frustration:.2f}×{self._frustration_high}r"),
+                })
+            self._frustration_high = 0
+
+        # ── Apply proposals through cooldown gate ──
+        for prop in proposals:
+            key = prop["target_blueprint_key"]
+            last = self._sensor_cooldown.get(key, -999)
+            if self.round_count - last < self.MIN_SENSOR_COOLDOWN:
+                continue  # Cooldown — skip
+            if self._apply_proposal(prop, label="∇V"):
+                self._sensor_cooldown[key] = self.round_count
+
     # ── Main loop ──
 
     def run(self) -> None:
@@ -644,10 +954,21 @@ class Repl:
         session_log: list[str] = []
         rag_mode = False  # Toggle: /rag on | /rag off
 
+        # ── V7.5: Active concern check at session start ──
+        self._check_active_interrupt()
+
+        # ── V7.4: Identity manifold status ──
+        id_prior = getattr(self, '_identity_prior', {})
+        id_caution = id_prior.get("physical_caution", 1.0)
+        id_trust_src = "identity" if id_prior else "default"
+        id_sessions = self.c.identity_store.load(uid).session_count if self.c.identity_store else 0
+
         print(f"\n{'='*50}")
         print(f"PLAN5 Live — {uid}")
         print(f"  blueprint: {bp.snapshot}")
-        print(f"  trust: {trust:.2f} | sessions: {self.c.profile.session_count}")
+        print(f"  trust: {trust:.2f} (from {id_trust_src}) | sessions: {id_sessions}")
+        if id_caution != 1.0:
+            print(f"  physical_caution: {id_caution:.2f}")
         print(f"  /quit 退出 | /new 新对话")
         print(f"{'='*50}")
 
@@ -658,7 +979,9 @@ class Repl:
             from core.adapters.semantic_trust import SemanticTrustEngine
             sem = SemanticTrustEngine(llm_client=self.c.cloud_llm)
             USE_SEMANTIC = True
+            self._sem = sem  # V7.7: store for _detect_explicit_command + drift
         except (ImportError, OSError):
+            self._sem = None
             pass
 
         while True:
@@ -669,14 +992,21 @@ class Repl:
                 break
             cmd = user.strip().lower()
             if cmd in ("/quit", "/exit"):
+                self._persist_snapshot()  # V7.5: save snapshot before quit
                 break
             if cmd == "/new":
+                self._persist_snapshot()  # V7.5: save snapshot before reset
+                self._evolve_identity()  # V7.4: persist current session before reset
+                # V7.5 UX: reset snapshot for fresh session
+                self._kernel_snapshot = None
                 self.round_count = 0
                 self.history.clear()
                 self.contract_events.clear()
-                self.c.bp.apply_proposal("tone_style", "WARM", ignore_cooldown=True)
-                self.c.bp.apply_proposal("conversational_initiative", "BALANCED", ignore_cooldown=True)
-                self.trust = 0.30  # 热数据重置
+                self._force_reset_proposal("tone_style", "WARM", reason="user_reset")
+                self._force_reset_proposal("conversational_initiative", "BALANCED", reason="user_reset")
+                # V7.4: Restore trust from identity prior (not hardcoded 0.30)
+                prior = self._restore_identity_prior()
+                self.trust = prior.get("trust_initial", 0.30)
                 self.c.profile.start_session()
                 # ── V5: reset controller + spinal state ──
                 self._route_track = "A"
@@ -706,6 +1036,13 @@ class Repl:
             if cmd == "/rag off":
                 rag_mode = False
                 print(f"  [RAG] 本地知识库模式已关闭。")
+                continue
+            if cmd == "/ignore":
+                # V7.5 UX: permanent dismiss of active concern
+                from core.watcher.entropy_monitor import delete_snapshot
+                delete_snapshot(".identity", uid)
+                self._kernel_snapshot = None
+                print("  [牵挂] 已关闭。不会再主动提醒。")
                 continue
             if cmd == "/mcp" or cmd.startswith("/mcp "):
                 # /mcp <tool_name> <json_params>
@@ -761,6 +1098,22 @@ class Repl:
             if not user.strip():
                 continue
 
+            # ── V7.5: Content-free fast path ──
+            # Inputs with no meaningful content (pure punctuation, random
+            # keystrokes, single CJK particles without semantic payload)
+            # skip the full engine pipeline. This prevents 30-second
+            # EXPLORE+FULL_DAG for "nnnn" type inputs.
+            stripped = user.strip()
+            _has_cjk = any('一' <= c <= '鿿' for c in stripped)
+            _has_alpha = any(c.isalpha() for c in stripped)
+            _wordish = len(stripped) >= 3 and (_has_cjk or _has_alpha)
+            if not _wordish and len(stripped) <= 6:
+                # Content-free — echo back quickly, skip all engines
+                print(f"\n[agent] 👋")
+                self.history.append(f"User: {user}")
+                self.history.append("Agent: [content-free skip]")
+                continue
+
             xray = XRay()
             self.c.bus.subscribe(xray)  # X-Ray = observer on the bus
             self.round_count += 1
@@ -778,6 +1131,7 @@ class Repl:
             # 1a. Fast Path: embedding-based emotional/state signals (~30ms)
             dim, score = None, 0.0
             clarity = 0.5  # default neutral (no LLM available)
+            sig = {"dimension": None, "score": 0.0, "all_scores": {}}
             if USE_SEMANTIC and sem:
                 try:
                     sig = sem.detect(user)
@@ -799,8 +1153,7 @@ class Repl:
                     # ── Drift computation runs WHILE clarity LLM is in flight ──
                     if len(user.strip()) > 3:
                         try:
-                            m, _, _ = _get_command_model()
-                            cur_emb = m.encode([user])[0]
+                            cur_emb = self._sem.model.encode([user])[0]
                             _cur_emb = cur_emb  # V6.2: save for window
                             if self._prev_user_emb is not None:
                                 cos_sim = float(_np.dot(cur_emb, self._prev_user_emb)
@@ -810,15 +1163,39 @@ class Repl:
                         except Exception:
                             pass  # Embedding model unavailable → raw_drift stays 0
                     # Barrier: collect clarity (with guarantees cleanup)
-                    clarity = _future.result(timeout=5.0)
+                    try:
+                        clarity = _future.result(timeout=5.0)
+                    except Exception:
+                        clarity = 0.5  # LLM hung — neutral fallback
+
+                # ── Clarity sanity gate ──
+                # If the LLM returns 0.0 for everything (including "你好呀"),
+                # Clarity sanity gate: if the LLM returns ≤0.35 for short
+                # clear inputs ("你好呀","对对对","再讲多点"), the sensor is
+                # de facto blind. Use input structure as fallback.
+                # DeepSeek routinely returns 0.0-0.20 for perfectly clear
+                # Chinese inputs — the fallback is essential.
+                if clarity <= 0.35:
+                    stripped = user.strip()
+                    cjk_count = sum(1 for c in stripped if '一' <= c <= '鿿')
+                    alpha_count = sum(1 for c in stripped if c.isalpha())
+                    wordish = cjk_count + alpha_count
+                    if wordish <= 3:
+                        clarity = 0.65  # Very short CJK — almost certainly clear
+                    elif wordish <= 8:
+                        clarity = 0.55  # Short — likely clear
+                    elif len(stripped) <= 30:
+                        clarity = 0.45
+                    else:
+                        clarity = 0.35  # Long input — ambiguous, keep low
+
                 self.c.bus.emit("观测器", f"clarity={clarity:.2f}")
                 self._update_live(xray, live)
             else:
                 # No semantic engine — just compute drift
                 if len(user.strip()) > 3:
                     try:
-                        m, _, _ = _get_command_model()
-                        cur_emb = m.encode([user])[0]
+                        cur_emb = self._sem.model.encode([user])[0]
                         _cur_emb = cur_emb  # V6.2: save for window
                         if self._prev_user_emb is not None:
                             cos_sim = float(_np.dot(cur_emb, self._prev_user_emb)
@@ -836,7 +1213,7 @@ class Repl:
                 # Async background calibration (first-round trigger)
                 if not self._w_calibration_started:
                     self._w_calibration_started = True
-                    self._start_wasserstein_calibration(m)
+                    self._start_wasserstein_calibration(self._sem.model)
 
             session_gain = 1.0
             if len(self._embedding_window) >= 2:
@@ -968,13 +1345,17 @@ class Repl:
                 import sys as _sys
                 _sys.stdout.write('\n[agent] ')
                 _sys.stdout.flush()
-                full_response, cog_mult = self._run_track_c(
+                full_response, cog_mult, track_snap = self._run_track_c(
                     user, system, xray, live,
                     trust=trust, e_t=e_t, raw_drift=raw_drift,
                     clarity=clarity, session_gain=session_gain,
                     explore_bias=explore_bias, compromise_bias=compromise_bias,
                     stream_callback=lambda t: (_sys.stdout.write(t), _sys.stdout.flush()),
                 )
+                self._update_snapshot_after_track(track_snap)
+                # V7.6: capture phys stats for selection pressure σ_competence
+                self._last_phys_attempts = track_snap.get("physical_attempts", 0)
+                self._last_phys_failures = track_snap.get("physical_failures", 0)
                 _sys.stdout.write('\n')
                 _sys.stdout.flush()
                 if live:
@@ -986,6 +1367,12 @@ class Repl:
                     pl.sentence_limit_multiplier = max(pl.sentence_limit_multiplier, cog_mult)
             else:
                 # V7 Track A: FIR kernel — forget stale topics
+                # V7.5 C1: clear DAG/physical from snapshot (Track A has none)
+                self._update_snapshot_after_track({
+                    "dangling_dag_count": 0,
+                    "accumulated_e_t": e_t,
+                    "budget_remaining_ratio": 1.0,
+                })
                 # Free dynamics with exponential decay: old context should NOT
                 # cause the LLM to re-engage topics that the user has moved on from.
                 decay_directive = (
@@ -1134,12 +1521,40 @@ class Repl:
             if len(self.history) > 40:
                 self.history = self.history[-40:]
 
-            # Track trust delta across rounds
+            # ── V7.6: Selection pressure → trust breathing → contract gradient ──
+            # Extract emotion signals from semantic observer
+            _all_scores = sig.get("all_scores", {}) if sig else {}
+            frustration_v = _all_scores.get("frustration", 0.0)
+            gratitude_v = _all_scores.get("gratitude", 0.0)
+            sarcasm_v = _all_scores.get("sarcasm", 0.0)
+            self._prev_gratitude = gratitude_v
+            self._prev_sarcasm = sarcasm_v
+
+            # σ_competence: all physical ops passed this round
+            _phys_a = getattr(self, '_last_phys_attempts', 0)
+            _phys_f = getattr(self, '_last_phys_failures', 0)
+            phys_pass = (_phys_a > 0 and _phys_f == 0)
+
+            # ── Capture per-round trust penalties (sycophancy, etc.) ──
             old_trust = self.trust
-            self.trust = trust
-            delta = trust - old_trust
+            self.trust = trust  # trust-local may have been penalized this round
+
+            # ── σ: selection pressure scalar field ──
+            sigma = self._compute_selection_pressure(
+                clarity, frustration_v, dim, score, phys_pass)
+
+            # T(t) = T(t-1) + Δt_penalty + σ(r_t) — additive on penalized base
+            self.trust = self._trust_breathe(sigma)
+            trust = self.trust  # Sync local variable for next round's X-Ray display
+            delta = self.trust - old_trust
             if abs(delta) > 0.001:
                 self.c.profile.record_trust_delta(delta, self.c.profile.session_count)
+
+            # c' = c - η·∇V — contract gradient descent (sensors → contract)
+            self._contract_adapt(clarity, frustration_v)
+
+            # Persist streak counters for cross-session survival
+            self._persist_streaks()
 
             # Phase 7-8: self-repair + recovery — health check every 5 rounds or acute crisis
             failures_this_round = sum(self.c.action_pipeline._failure_counts.values())
@@ -1211,6 +1626,11 @@ class Repl:
                 cleaned = "\n".join(session_log).encode("utf-8", errors="surrogateescape").decode("utf-8", errors="replace")
                 f.write(cleaned)
             print(f"日志已保存: {log_file}")
+
+        # V7.4: Evolve identity at session end (before blueprint snapshot)
+        self._evolve_identity()
+        # V7.5: Persist kernel snapshot for next session's entropy check
+        self._persist_snapshot()
 
         # Phase 7-8b: save full contract state for cross-session persistence
         try:

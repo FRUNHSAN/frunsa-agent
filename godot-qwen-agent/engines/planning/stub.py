@@ -168,12 +168,29 @@ class StubPlanningEngine:
             metadata={"source": "planning_stub"},
         )
         orch_items: list[StreamItem] = []
-        async for orch_item in self._orch.orchestrate(
-            context=orch_context,
-            deadline=deadline,
-            pace_config=pace_config,
-        ):
-            orch_items.append(orch_item)
+        if self._orch is None:
+            # Plan-Only mode: generate synthetic orchestration items
+            for pool_name, count in [("cpu", 3), ("gpu", 2)]:
+                for i in range(count):
+                    orch_items.append(StreamItem(
+                        delta=f"[orch] {pool_name} branch item {i+1}.\n",
+                        index=len(orch_items),
+                        model="orchestration/stub",
+                        is_terminal=(pool_name == "gpu" and i == count - 1),
+                        finish_reason="stop" if (pool_name == "gpu" and i == count - 1) else None,
+                        trace_context={
+                            "orch.branch": pool_name,
+                            "orch.item_index": i,
+                            "orch.source": "planning_stub",
+                        },
+                    ))
+        else:
+            async for orch_item in self._orch.orchestrate(
+                context=orch_context,
+                deadline=deadline,
+                pace_config=pace_config,
+            ):
+                orch_items.append(orch_item)
 
         if time.perf_counter() - start > deadline:
             raise asyncio.TimeoutError(

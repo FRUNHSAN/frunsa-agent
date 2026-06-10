@@ -1,0 +1,132 @@
+# Reasoning Chain: V7.7 — Sheaf-Theoretic Semantic Translator
+chain_id: v7_7_sheaf_semantic_translator
+title: "V7.7 Sheaf-Theoretic Semantic Translator — ⊥ open set + product fiber joint distribution on S³⁸³"
+created_at: "2026-06-10T20:00:00Z"
+status: active
+tags: [v7.7, semantic_translator, sheaf_theory, fiber_bundle, local_section, null_region,
+       product_fiber, joint_distribution, radon_nikodym, angular_distance, geodesic,
+       injectivity_radius, cohomology, adaptive_contract, observe_dont_inject]
+related_chains: [v5.2_observer_downgrade, v5_3_dual_sensor_fusion, v5_math_adaptive_contract,
+                  v7_6_adaptive_contract_closed_loop]
+
+context: |
+  The old _classify_command() performed a 7-cell Voronoi partition on R³⁸⁴: 6 command
+  anchors + 1 __null__ anchor. Voronoi covers the entire space — every embedding e
+  MUST fall into some cell. "你好呀" fell into PROACTIVE not because it was a command,
+  but because Voronoi does not recognize empty sets.
+
+  The old architecture had TWO separate MiniLM instances (~240MB each):
+  - SemanticTrustEngine for emotion detection (fatigue, gratitude, frustration, curiosity)
+  - _get_command_model() for command classification (6 blueprint field targets)
+  These two observers never shared information — emotion and command were computed
+  independently, losing the conditional structure P(c,em|e) ≠ P(c|e)×P(em|e).
+
+  V7.7 replaces the Voronoi partition with a SHEAF of local sections on the embedding
+  manifold E ≅ S³⁸³ (the MiniLM output hypersphere). Each command dimension defines an
+  OPEN SET U_i ⊂ E (a geodesic ball). The ⊥ (null) region is E \ ∪U_i — the complement
+  of all command domains, NOT an 8th Voronoi cell. When e ∈ ⊥, no section is defined
+  and the system legitimately says "I didn't understand."
+
+  V7.7 completes the three-pole autonomic nervous system of the Agent:
+  - Adaptive Loops: execution strategy (state machine + feedback)
+  - Adaptive Contract: interaction style (gradient flow + Lipschitz) [V7.6]
+  - Adaptive Semantic Translation: intent recognition (sheaf sections + product fiber) [V7.7]
+
+alternatives:
+  - option: "Keep the __null__ Voronoi cell + improve anchor quality"
+    pros: "Minimal code change to existing _classify_command()"
+    cons: "Still a Voronoi partition — null is a cell, not an open set. No joint distribution. Two model instances."
+  - option: "Use a separate ML classifier (logistic regression / small NN) on MiniLM embeddings"
+    pros: "Can learn joint P(c,em|e) from labeled data"
+    cons: "Requires labeled training data. New dependency. Training pipeline. Overkill for 6-class problem."
+  - option: "Switch to a larger embedding model (BGE-M3, GTE-Qwen2)"
+    pros: "Directly raises the information ceiling I(L;R³⁸⁴)"
+    cons: "Inference cost ↑, latency ↑. DPI iron law: structure must be optimal first, then raise ceiling."
+
+decision: |
+  Extend SemanticTrustEngine (not a new class) with command detection capabilities.
+  Single MiniLM instance serves both emotion and command classification.
+  Key architectural decisions:
+
+  1. ⊥ = E \ ∪U_i — null region is the topological complement, not a classification label.
+     The __null__ anchor is DELETED. No null center — null is geometric consequence.
+
+  2. Local sections σ_i defined on geodesic balls U_i = {e: angular_similarity(e, center_i) > r_i}.
+     Radii r_i = μ_i - k·σ_i (mean minus k std-dev of anchor embeddings) — injectivity radius estimation.
+
+  3. DYNAMIC_MIN_RADIUS from NOISE_ANCHORS — prevents "curse of dimensionality" where
+     384-dim random vectors have angular similarity baselines up to 0.85, erasing ⊥.
+
+  4. Product fiber F = F_emotion × F_command with joint distribution via cross-coefficients.
+     Coeff(c,em) = P(c|em)/P(c) — Bayesian likelihood ratio, Radon-Nikodym derivative.
+     Dual-channel output: raw_joint_score (threshold gating) + normalized_prob (margin confidence).
+
+  5. ⊥ decomposed into gap-type (boundary — germ extension possible) vs exterior-type
+     (exterior — section completely undefined). Absolute height gate prevents "ambiguity
+     hallucination" on low-similarity inputs.
+
+  6. Angular (geodesic) distance on S³⁸³ replaces cos_sim. arccos gives 33× better
+     float resolution in the [0.99, 1.0] regime where domain boundaries live.
+
+rationale: |
+  The Voronoi→Sheaf transition is not an incremental improvement — it's a category change.
+  Voronoi partitions are a topological error for intent classification because they force
+  every point into exactly one cell. Sheaf theory admits that some regions of embedding
+  space are genuinely undecidable, and that's a feature, not a bug.
+
+  The product fiber structure recovers the conditional dependence that the old dual-track
+  architecture lost. curiosity ⊗ HIGH ≠ frustration ⊗ HIGH — the joint distribution
+  captures this, where independent marginals could not.
+
+  The DYNAMIC_MIN_RADIUS from noise anchors is essential: 384-dimensional hypersphere
+  geometry guarantees that random vectors concentrate near similarity ~0.80-0.85.
+  Without the noise ceiling, ⊥ would vanish numerically even though it exists topologically.
+
+  V7.6's protections (hysteresis, cooldown, Lipschitz) already guard against single-round
+  misclassification. V7.7 adds the topological foundation: contract evolution now only
+  occurs on the domain of definition of local sections. Every σ gradient step, every
+  explicit command application, every contract_adapt trigger — requires a topological license.
+
+future_guidance:
+  v7_7_sheaf_foundation:
+    summary: "⊤ = E\\∪U_i is an open set, not a classification label. U_i are geodesic balls on S³⁸³ with radii r_i = μ_i − k·σ_i (injectivity radius estimation). Gap-type ⊥ is the boundary (H¹ non-trivial region where germ extension may be possible). Exterior-type ⊥ is the exterior (section completely undefined). System refuses contract evolution in cohomology-non-trivial regions."
+    priority: critical
+  v7_7_red_team_patches:
+    summary: "Patch 1: DYNAMIC_MIN_RADIUS from NOISE_ANCHORS prevents ⊥ vanishing in 384-dim (curse of dimensionality). Patch 2: dual-channel joint distribution output (raw_joint_score + normalized_prob) prevents single-candidate normalization deadlock. Patch 3: absolute height gate in _classify_null_region() prevents ambiguity hallucination on low-similarity inputs."
+    priority: critical
+  v7_7_angular_metric:
+    summary: "Angular distance d(e₁,e₂)=arccos(⟨e₁,e₂⟩) is the correct Riemannian metric on the L2-normalized hypersphere S³⁸³. Replaces cos_sim for all domain membership checks and radii computation. 33× better float resolution near cos≈1 where domain boundaries live."
+    priority: critical
+  v7_8_product_fiber_mlp:
+    summary: "Current CROSS_COEFFICIENTS are hand-tuned (7 pairs). V7.8 should learn these from data: either Bayesian update from observation history, or a small MLP head on MiniLM embeddings trained on (text, emotion, accepted_command) triplets. The dual-channel architecture (raw + normalized) already supports learned coefficients with zero interface changes."
+    priority: medium
+  v7_7_cleanup:
+    summary: "Deleted: _EMBED_MODEL global, _get_command_model() (63 lines), _classify_command() + dead code (67 lines), __null__ anchor (27 sentences). Replaced by: SemanticTrustEngine extension (~180 lines). Net: ~15 lines of code removed despite massive functionality increase."
+    priority: medium
+
+anti_patterns:
+  - "Using a single __null__ anchor center as the 7th Voronoi cell — this forces every embedding into SOME cell. The null region must be the topological complement of all domains."
+  - "Using cos_sim for domain boundary decisions — float resolution in [0.99, 1.0] is ~1e-7. Domain boundaries need angular (arccos) distance for stable comparison."
+  - "Hardcoding MIN_RADIUS without noise calibration — in 384-dim space, random text can have angular similarity up to 0.85. Must compute noise ceiling dynamically."
+  - "Normalizing joint scores without preserving raw activation — single-candidate normalization makes normalized≡1.0 always. Dual-channel output (raw + normalized) is mandatory."
+  - "Classifying low-similarity inputs as 'ambiguous' — max_sim < noise_ceiling must force exterior-type ⊥. Ambiguity requires proximity to domain boundaries."
+  - "Loading MiniLM twice — SemanticTrustEngine already holds the model. Command classification reuses it via self._sem.model."
+
+evidence:
+  - test_file: "tests/unit/test_v7_7_sheaf_observer.py"
+    test_cases:
+      - "TestNullRegion: 5 tests — greetings/confirmations/fillers land in ⊥ region"
+      - "TestDomainMembership: 7 tests — clear commands correctly classified"
+      - "TestIntersectionAmbiguity: 2 tests — ambiguous inputs handled gracefully"
+      - "TestJointDistribution: 2 tests — cross-coefficients modulate scores"
+      - "TestGapVsExterior: 2 tests — random/gibberish → exterior, smalltalk → null"
+      - "TestRadiiMonotonicity: 3 tests — radii computed, bounded, noise immune"
+      - "TestBackwardCompatibility: 7 tests — detect()/classify_command()/model unchanged"
+      - "TestCrossCoefficients: 2 tests — coefficient range validation, key pair coverage"
+      - "TestAngularDistance: 4 tests — identical/opposite/orthogonal/near-one stability"
+  - test_file: "tests/unit/test_v3_container_repl.py"
+    test_cases:
+      - "test_explicit_command_*: 6 tests — all pass via keyword fallback (self._sem=None)"
+  - test_file: "tests/unit/test_v4_repl.py"
+    test_cases:
+      - "test_explicit_command_*: 7 tests — all pass via keyword fallback"

@@ -13,7 +13,7 @@
 # Schema: schemas/reasoning_chain.schema.json
 
 library_version: 1
-last_updated: "2026-06-09T20:00:00Z"
+last_updated: "2026-06-10T16:00:00Z"
 
 # ── Chains by architectural layer ────────────────────────────────────
 
@@ -284,6 +284,34 @@ chains:
     tags: [v4, engine_ignition, track_router, planning, orchestration, critic, rag_cache]
     status: active
 
+  - chain_id: v4.1_phase3_track_c
+    file: chains/v4.1_phase3_track_c.yaml
+    title: "V4.1 Phase 3 Track C — 引擎深化：分层并发 + 安全守卫 + 回退保护"
+    layer: plan
+    tags: [v4, track_c, engine_deepening, planning, orchestration, critic, retry]
+    status: active
+
+  - chain_id: v4.1_phase4_polish
+    file: chains/v4.1_phase4_polish.yaml
+    title: "V4.1 Phase 4 打磨 — 规范化 step_index 编号 + 输出字符截断 + 系统提示词约束"
+    layer: plan
+    tags: [v4, phase4, plan_granularity, output_truncation, semantic_char_cap]
+    status: active
+
+  - chain_id: v4.3_decoupling_cleanup
+    file: chains/v4.3_decoupling_cleanup.yaml
+    title: "V4.3 解耦清理 — KernelService Protocol + ToolFormatRegistry"
+    layer: plan
+    tags: [v4, decoupling, kernel_service, tool_format_registry, invariant_fix]
+    status: active
+
+  - chain_id: v4.3_tool_engine
+    file: chains/v4.3_tool_engine.yaml
+    title: "V4.3 ToolEngine — 第四引擎：StreamItem + trace_context + async generator"
+    layer: plan
+    tags: [v4, tool_engine, engine_pattern, stream_item, async_generator]
+    status: active
+
   # ── V4.2 Phase 5-10 Journey ──
   - chain_id: v4.2_journey
     file: chains/v4.2_journey.yaml
@@ -376,6 +404,27 @@ chains:
     title: "V7 物理 Critic + 流式 Synthesis + Track A FIR 核 — 混合自动机 + 自由动力学修正"
     layer: plan
     tags: [v7, physical_critic, sandbox_executor, dual_track_critic, error_mapper, physical_budget, streaming_synthesis, track_a_fir, hybrid_automaton, loop_topology]
+    status: active
+
+  - chain_id: v7_4_identity_manifold
+    file: chains/v7_4_identity_manifold.yaml
+    title: "V7.4 身份流形 — 跨会话身份连续性 via M_id ⊂ ℝ¹² (OU过程+Betti检测+自标定百分位)"
+    layer: plan
+    tags: [v7.4, identity, memory, manifold, ou_process, betti, percentile, sufficient_statistic, fisher_neyman, temporal_fingerprint, cold_start, red_team, self_calibration, dimensional_analysis]
+    status: active
+
+  - chain_id: v7_5_entropy_monitor
+    file: chains/v7_5_entropy_monitor.yaml
+    title: "V7.5 熵监控器 — 主动牵挂 via 子水平集滤子 (信息论+控制论+自然变换)"
+    layer: plan
+    tags: [v7.5, entropy, watcher, active, concern, tension, sublevel_set, filtration, information_theory, control_theory, natural_transformation, sigmoid, normalization, red_team, compatibility, rag, mcp]
+    status: active
+
+  - chain_id: v7_7_sheaf_semantic_translator
+    file: chains/v7_7_sheaf_semantic_translator.yaml
+    title: "V7.7 层论语义翻译器 — ⊥ 开集 + 乘积纤维联合分布 on S³⁸³"
+    layer: plan
+    tags: [v7.7, semantic_translator, sheaf_theory, fiber_bundle, local_section, null_region, product_fiber, joint_distribution, radon_nikodym, angular_distance, geodesic, injectivity_radius, cohomology, adaptive_contract]
     status: active
 
   # ── Real LLM Orchestration + Critic Engines ──
@@ -560,6 +609,19 @@ tag_index:
   orchestration: [v4_phase2_engine_ignition]
   critic: [v4_phase2_engine_ignition]
   rag_cache: [v4_phase2_engine_ignition]
+  track_c: [v4.1_phase3_track_c]
+  engine_deepening: [v4.1_phase3_track_c]
+  retry: [v4.1_phase3_track_c]
+  phase4: [v4.1_phase4_polish]
+  plan_granularity: [v4.1_phase4_polish]
+  output_truncation: [v4.1_phase4_polish]
+  semantic_char_cap: [v4.1_phase4_polish]
+  decoupling: [v4.3_decoupling_cleanup]
+  tool_format_registry: [v4.3_decoupling_cleanup]
+  invariant_fix: [v4.3_decoupling_cleanup]
+  tool_engine: [v4.3_tool_engine]
+  engine_pattern: [v4.3_tool_engine]
+  async_generator: [v4.3_tool_engine]
   v5: [v5_math_adaptive_contract, v5_path3_execution_reflex, v5_binary_bangbang_router, v5.2_observer_downgrade, v5_3_dual_sensor_fusion]
   adaptive_contract: [v5_math_adaptive_contract]
   wasserstein: [v5_math_adaptive_contract]
@@ -610,3 +672,33 @@ tag_index:
   track_a_fir: [v7_physical_critic_streaming]
   hybrid_automaton: [v7_physical_critic_streaming]
   loop_topology: [v7_physical_critic_streaming]
+  v7.4: [v7_4_identity_manifold]
+  identity: [v7_4_identity_manifold]
+  memory: [v7_4_identity_manifold]
+  manifold: [v7_4_identity_manifold]
+  ou_process: [v7_4_identity_manifold]
+  betti: [v7_4_identity_manifold]
+  percentile: [v7_4_identity_manifold]
+  sufficient_statistic: [v7_4_identity_manifold]
+  fisher_neyman: [v7_4_identity_manifold]
+  temporal_fingerprint: [v7_4_identity_manifold]
+  cold_start: [v7_4_identity_manifold]
+  red_team: [v7_4_identity_manifold]
+  self_calibration: [v7_4_identity_manifold, v5_3_dual_sensor_fusion]
+  dimensional_analysis: [v7_4_identity_manifold]
+  v7.5: [v7_5_entropy_monitor]
+  entropy: [v7_5_entropy_monitor]
+  watcher: [v7_5_entropy_monitor]
+  active: [v7_5_entropy_monitor]
+  concern: [v7_5_entropy_monitor]
+  tension: [v7_5_entropy_monitor]
+  sublevel_set: [v7_5_entropy_monitor]
+  filtration: [v7_5_entropy_monitor]
+  information_theory: [v7_5_entropy_monitor]
+  control_theory: [v7_5_entropy_monitor]
+  natural_transformation: [v7_5_entropy_monitor]
+  sigmoid: [v7_5_entropy_monitor]
+  normalization: [v7_5_entropy_monitor]
+  compatibility: [v7_5_entropy_monitor]
+  rag: [v3_self_evolving_rag, v7_5_entropy_monitor]
+  mcp: [v7_5_entropy_monitor]
