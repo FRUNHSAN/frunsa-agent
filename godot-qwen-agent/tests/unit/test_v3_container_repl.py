@@ -67,7 +67,7 @@ class TestRepl:
         cfg = Config.from_args(["test"])
         ctr = Container(cfg)
         repl = Repl(ctr)
-        assert repl.trust == 0.30
+        assert repl.trust == 0.50
         assert repl.round_count == 0
 
     def test_explicit_command_detection(self):

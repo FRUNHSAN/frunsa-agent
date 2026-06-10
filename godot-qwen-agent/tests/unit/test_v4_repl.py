@@ -103,7 +103,7 @@ class TestReplSession:
         assert repl.round_count == 0
 
     def test_trust_starts_at_default(self, repl):
-        assert repl.trust == 0.30
+        assert repl.trust == 0.50
 
     def test_pending_proposals_empty_initially(self, repl):
         assert repl.pending == []
