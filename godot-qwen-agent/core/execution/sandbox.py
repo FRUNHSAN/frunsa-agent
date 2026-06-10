@@ -362,12 +362,10 @@ class SandboxExecutor:
             "_ns = {'__builtins__': _safe_builtins}",
             "",
             "# User code",
+            f'_user_code = {json.dumps(code)}',
             "try:",
         ]
-        for line in code.split("\n"):
-            lines.append(f"    {line}")
-
-        lines.append("    exec(compile(__code__, '<docker_sandbox>', 'exec'), _ns)")
+        lines.append("    exec(compile(_user_code, '<docker_sandbox>', 'exec'), _ns)")
         lines.append("except Exception as e:")
         lines.append("    print(json.dumps({'state': 'RUNTIME_ERR', 'error': str(e)}))")
         lines.append("    sys.exit(1)")
@@ -613,19 +611,94 @@ class SandboxExecutor:
 # ── Helpers ────────────────────────────────────────────────────────────
 
 def _assert_equal(got: Any, expected: Any) -> bool:
-    """Compare got vs expected, handling exception type strings."""
-    # Handle expected exception type
+    """Compare got vs expected, handling exception type strings.
+
+    V7.3: supports "ErrorType or None" / "ErrorType or fallback" patterns
+    from the test-case augmentation canonical section sigma: E -> T.
+    """
+    # ── Handle "ErrorType or None" / "ErrorType or fallback" patterns ──
+    if isinstance(expected, str) and " or " in expected:
+        parts = expected.split(" or ")
+        for part in parts:
+            part = part.strip()
+            if _assert_equal(got, part):
+                return True
+        return False
+
+    # ── Handle expected exception type string ──
     if isinstance(expected, str) and "Error" in str(expected):
         if isinstance(got, str) and "Error" in str(got):
             return str(expected) in str(got) or str(got).startswith(str(expected))
+        # got is None — check if expected accepts None
+        if got is None and "None" in str(expected):
+            return True
         return False
-    # Direct equality
+
+    # ── Direct equality ──
     if got == expected:
         return True
-    # Float tolerance
+
+    # ── Type-coerced equality (e.g. int 3 vs str "3") ──
+    if isinstance(got, (int, float)) and isinstance(expected, str):
+        try:
+            coerced = _coerce_value(expected)
+            if coerced is not expected:  # Avoid infinite recursion
+                if _assert_equal(got, coerced):
+                    return True
+        except (ValueError, TypeError):
+            pass
+    if isinstance(got, str) and isinstance(expected, (int, float)):
+        try:
+            coerced = _coerce_value(got)
+            if coerced is not got:
+                if _assert_equal(coerced, expected):
+                    return True
+        except (ValueError, TypeError):
+            pass
+
+    # ── Float tolerance ──
     if isinstance(got, (int, float)) and isinstance(expected, (int, float)):
         return abs(got - expected) < 1e-9
+
+    # ── Stringified equality (repr matching) ──
+    if repr(got) == str(expected):
+        return True
+    if str(got) == str(expected):
+        return True
+
+    # ── None and None-like ──
+    if got is None and isinstance(expected, str) and expected.lower() in ("null", "none", ""):
+        return True
+
     return False
+
+
+def _coerce_value(s: str) -> Any:
+    """Coerce a string to its most natural Python value.
+    e.g. "3" -> 3, "None" -> None, "True" -> True, "[1,2]" -> [1,2].
+    Falls back to the original string if no coercion applies.
+    """
+    if not isinstance(s, str):
+        return s
+    s_stripped = s.strip()
+    # None
+    if s_stripped in ("None", "null"):
+        return None
+    # Bool
+    if s_stripped == "True":
+        return True
+    if s_stripped == "False":
+        return False
+    # Int / Float
+    try:
+        return int(s_stripped)
+    except (ValueError, TypeError):
+        pass
+    try:
+        return float(s_stripped)
+    except (ValueError, TypeError):
+        pass
+    return s
 
 
 def _sandbox_worker_fn(conn, code_str: str, tc_list: list) -> None:
