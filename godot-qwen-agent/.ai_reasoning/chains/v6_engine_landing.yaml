@@ -72,18 +72,18 @@ evidence:
   - Session 77: 代码块感知截断生效，输出完整
 
 alternatives:
-  - "f_fused → parallel_depth 标量映射" — 被 V6.1 致命反例废除（三篇独立论文 → 应并行但 f_fused≈0 → 标量映射判串行）
-  - "LLM 输出 depends_on 整数索引" — 被废除（LLM 结构性幻觉：越界索引、循环依赖、漏标依赖）
-  - "Mahalanobis + Ledoit-Wolf" — 被否决（384 维 × 5-10 样本 → 矩阵病态，过度工程）
-  - "单一 relax_bias 标量" — 被废除（控制耦合：能力穷尽和意图矛盾被同一种偏置处理）
-  - "句子限制继续加数字" — 被废除（代码块感知是结构修复，不是参数调优）
+  - f_fused → parallel_depth 标量映射 — 被 V6.1 致命反例废除（三篇独立论文 → 应并行但 f_fused≈0 → 标量映射判串行）
+  - LLM 输出 depends_on 整数索引 — 被废除（LLM 结构性幻觉：越界索引、循环依赖、漏标依赖）
+  - Mahalanobis + Ledoit-Wolf — 被否决（384 维 × 5-10 样本 → 矩阵病态，过度工程）
+  - 单一 relax_bias 标量 — 被废除（控制耦合：能力穷尽和意图矛盾被同一种偏置处理）
+  - 句子限制继续加数字 — 被废除（代码块感知是结构修复，不是参数调优）
 
 anti_patterns:
-  - "LLM 直接输出控制参数（parallel_depth）" — 结构幻觉，LLM 不懂系统并发约束
-  - "用认知标量（f_fused）驱动拓扑决策（parallel_depth）" — 信号错配，认知确定性 ≠ 任务并行度
-  - "标量 relax_bias 同时驱动 Planning 和 Critic" — 控制耦合，失败原因被压缩丢失
-  - "硬编码 if-round<N 解决冷启动" — 贝叶斯伪计数的渐近性质天然提供阻尼
-  - "在代码块内计句子数" — 代码行是结构不是语义，换行符 ≠ 句子边界
+  - LLM 直接输出控制参数 parallel_depth — 结构幻觉，LLM 不懂系统并发约束
+  - 用认知标量 f_fused 驱动拓扑决策 parallel_depth — 信号错配，认知确定性 ≠ 任务并行度
+  - 标量 relax_bias 同时驱动 Planning 和 Critic — 控制耦合，失败原因被压缩丢失
+  - 硬编码 if-round<N 解决冷启动 — 贝叶斯伪计数的渐近性质天然提供阻尼
+  - 在代码块内计句子数 — 代码行是结构不是语义，换行符 ≠ 句子边界
 
 future_guidance: |
   V6 完成了 V5 控制面的引擎层落地。三个引擎现在各自持有独立的充分统计量：

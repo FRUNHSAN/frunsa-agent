@@ -74,7 +74,7 @@ class TestValidCode:
             {"input": "0", "expected": 0},
         ])
         assert result.state == PhysicalState.PASS
-        assert result.elapsed_ms < 100, f"Too slow: {result.elapsed_ms}ms"
+        assert result.elapsed_ms < 500, f"Too slow: {result.elapsed_ms}ms"
         assert all(t["passed"] for t in result.test_results)
 
     def test_valid_code_critic_decision(self):

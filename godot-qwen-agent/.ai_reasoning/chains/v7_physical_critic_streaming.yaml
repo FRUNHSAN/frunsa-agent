@@ -69,7 +69,7 @@ evidence:
   - core/execution/error_mapper.py: ErrorMapper + ⊢ delimiter extraction (zero-LLM regex)
   - core/critic/dual_track.py: DualTrackCritic + PhysicalBudget (float-weighted)
   - core/track_c.py: _synthesize_stream + _build_synthesis_prompt(constraints) + hard retry loop
-  - core/track_c.py: _extract_code (π: S→C projection) + _format_retry_hint + _signature_lock_hint
+  - "core/track_c.py: _extract_code (pi: S->C projection) + _format_retry_hint + _signature_lock_hint"
   - core/repl.py: streaming callback + Track A FIR decay + --pseudo flag
   - core/config.py: --pseudo CLI flag (all steps PSEUDOCODE, skip physical verification)
   - tests/unit/test_v7_1_physical_critic.py: 24 tests
@@ -80,18 +80,18 @@ evidence:
   - Session 88: --pseudo mode skips physical verification, budget 0 consumed
 
 alternatives:
-  - "物理 Critic 一票否决语义 Critic" — 被否决 (违背自适应契约身份，乘法门控保留)
-  - "Traceback 帧快照还原犯罪现场" — 被否决 (第三方库和表达式求值是黑盒，改用 ⊢ 正则)
-  - "Track A 保持全量历史" — 被否决 (IIR 导致社交信号触发长篇技术回复，FIR 核修正)
-  - "流式前渲染 X-Ray 快照" — 被否决 (导致 X-Ray 碎片化和重复渲染)
-  - "物理验证挂在 Orch step" — 被否决 (代码在 Synthesis 生成，不在 Orch step。Phase 1 尸检发现)"
-  - "硬 retry 环注入 pad.plan" — 被否决 (Synthesis 不读 pad.plan。Phase 2 重构为 constraints 接口)
+  - 物理 Critic 一票否决语义 Critic — 被否决 (违背自适应契约身份，乘法门控保留)
+  - Traceback 帧快照还原犯罪现场 — 被否决 (第三方库和表达式求值是黑盒，改用 ⊢ 正则)
+  - Track A 保持全量历史 — 被否决 (IIR 导致社交信号触发长篇技术回复，FIR 核修正)
+  - 流式前渲染 X-Ray 快照 — 被否决 (导致 X-Ray 碎片化和重复渲染)
+  - 物理验证挂在 Orch step — 被否决 (代码在 Synthesis 生成，不在 Orch step。Phase 1 尸检发现)
+  - 硬 retry 环注入 pad.plan — 被否决 (Synthesis 不读 pad.plan。Phase 2 重构为 constraints 接口)
 
 anti_patterns:
-  - "物理替代语义 (physical veto)" — 乘法门控才是正确的融合方式
-  - "帧快照充分还原变量" — f_locals 在深层调用中不可靠
-  - "Track A 上下文无衰减" — IIR 核让已结束话题跨轮次传播
-  - "流式模式下仍做句子截断" — LLM 自调节长度，Python 端不应切
+  - 物理替代语义 physical veto — 乘法门控才是正确的融合方式
+  - 帧快照充分还原变量 — f_locals 在深层调用中不可靠
+  - Track A 上下文无衰减 — IIR 核让已结束话题跨轮次传播
+  - 流式模式下仍做句子截断 — LLM 自调节长度，Python 端不应切
 
 future_guidance: |
   V7.2+ 方向:

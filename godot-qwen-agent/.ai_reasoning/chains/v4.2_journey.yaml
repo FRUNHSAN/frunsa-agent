@@ -12,50 +12,33 @@ context: |
 
 evolution:
 
-  Phase 25 (MCP 集成): 真实 MCP 服务器连接, 17 个工具, Agent 自动调用
-    引出: 工具是二等公民, 没有引擎身份
+  "Phase 25 (MCP)": "MCP 集成 — 真实 MCP 服务器连接, 17 个工具, Agent 自动调用. 引出: 工具是二等公民, 没有引擎身份"
 
-  Phase 26 (ToolEngine): 工具晋升为第四引擎, StreamItem + trace_context
-    引出: 审计发现 7 个耦合点
+  "Phase 26 (ToolEngine)": "工具晋升为第四引擎, StreamItem + trace_context. 引出: 审计发现 7 个耦合点"
 
-  Phase 27 (解耦清理): KernelService Protocol 填补 + ToolFormatRegistry
-    引出: 引擎层仍然直接 import 具体类
+  "Phase 27 (Decoupling)": "解耦清理 — KernelService Protocol 填补 + ToolFormatRegistry. 引出: 引擎层仍然直接 import 具体类"
 
-  Phase 29 (引擎层解耦): KernelService 扩展, 契约下沉到 4 引擎
-    引出: ContractAware 包装器是幽灵代码
+  "Phase 29 (Engine Decoupling)": "引擎层解耦 — KernelService 扩展, 契约下沉到 4 引擎. 引出: ContractAware 包装器是幽灵代码"
 
-  Phase 30 (契约第 3 层补全): ContractAware 复活, trust_delta 追踪, 资源清理
-    引出: 能感知问题, 但不能修复
+  "Phase 30 (Contract Layer 3)": "ContractAware 复活, trust_delta 追踪, 资源清理. 引出: 能感知问题, 但不能修复"
 
-  Phase 31 (自修复闭环): evaluate_health→decide_repair→execute_repairs 真实化
-    引出: 只病不愈 — 系统学会降级, 但不会恢复
+  "Phase 31 (Self-Repair)": "自修复闭环 — evaluate_health→decide_repair→execute_repairs 真实化. 引出: 只病不愈, 系统学会降级但不会恢复"
+  "Phase 32 (Recovery)": "合同恢复 — healthy×3 → raise_autonomy, 降级/恢复对称闭环. 引出: 静默执行, 用户不知道权限被改了"
+  "Phase 8b (Persistence)": "跨会话持久化 — 启动时恢复合同状态, Schema Guard + Guardrail Clamp. 引出: 记忆让协商有了上下文"
+  "Phase 33 (Negotiation)": "协商式契约演化 — 小修静默/大修协商/提案保留. 引出: 协商数据没有被学习"
+  "Phase 34 (Learning)": "协商反馈学习 — 记录+抑制, 被拒绝就不重复问. 引出: 接受→加速留作 Phase 11"
 
-  Phase 32 (合同恢复): healthy×3 → raise_autonomy, 降级/恢复对称闭环
-    引出: 静默执行 — 用户不知道权限被改了
-
-  Phase 8b (跨会话持久化): 启动时恢复合同状态, Schema Guard + Guardrail Clamp
-    引出: 记忆让协商有了上下文
-
-  Phase 33 (协商式契约演化): 小修静默/大修协商/提案保留
-    引出: 协商数据没有被学习
-
-  Phase 34 (协商反馈学习): 记录+抑制, 被拒绝就不重复问
-    引出: 接受→加速留作 Phase 11
-
-current_state:
-  engines: 4 (Planning + Orchestration + Critic + Tool)
-  contract_layers: 3 layers fully closed
-    Layer 1 (What): 7 fields + BlueprintInstruction
-    Layer 2 (When): signal/command/auditor triggers
-    Layer 3 (How Far): health evaluation + self-repair + trust tracking
-  autonomy_loop: degrade↔recover symmetric
-  negotiation: consent-gated major changes, minor auto-executed
+current_state: |
+  4 engines (Planning + Orchestration + Critic + Tool)
+  3 contract layers: Layer1=7fields+BlueprintInstruction, Layer2=signal/command/auditor, Layer3=health+selfrepair+trust
+  autonomy_loop: degrade<->recover symmetric
+  negotiation: consent-gated major changes, auto-executed minor
   learning: suppression based on consent history
   kernel: KernelService Protocol, Container duck-typing
-  mcp: real filesystem server, 17 tools, agent auto-calling
+  mcp: filesystem server, 17 tools
   tests: 513 (289 unit + 224 conformance)
   chains: 28 reasoning chains
-  plan_items: 35 (34✅ + 1⏸️)
+  plan_items: 35 (34 done + 1 pending)
   commits: 291
 
 six_layer_loop:
@@ -65,5 +48,31 @@ next_phases:
   Phase 11: consent acceptance → shorten trigger interval (加速)
   Phase 25+: contract versioning, renegotiation, meta-contract
 
+decision: |
+  V4.2 was executed as a continuous 10-phase journey (Phase 25-34 + 8b) rather
+  than individual isolated features. Each phase's output naturally triggered the
+  next phase's requirements, forming a causal chain from MCP integration through
+  to consent-based learning.
+
+rationale: |
+  The interconnected nature of the phases (tool identity → engine architecture →
+  decoupling → contract completion → self-repair → recovery → memory →
+  negotiation → learning) meant they had to be treated as one continuous
+  evolution rather than separate features.
+
+future_guidance:
+  v4_2_engine_decoupling:
+    summary: "All engine-layer code MUST consume kernel through KernelService Protocol, never direct imports"
+    priority: critical
+  v4_2_contract_lifecycle:
+    summary: "Contract evolution requires consent-gating for major changes, auto-execution for minor"
+    priority: high
+
+anti_patterns:
+  - "Adding MCP integration without giving tools engine identity (must be 4th engine)"
+  - "Hardcoding autonomy changes without user consent for major modifications"
+  - "Skipping health evaluation before self-repair decisions"
+  - "Repeatedly proposing same consent action after user rejection"
+
 remaining_gap:
-  - 速度优化: Track C 50s→15s (Phase 35)
+  - "速度优化: Track C 50s→15s (Phase 35)"

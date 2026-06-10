@@ -106,7 +106,7 @@ class TestMockOrchBackend:
             DEFAULT_ROUTE_RESPONSE, DEFAULT_MERGE_RESPONSE, DEFAULT_RETRY_RESPONSE,
         ))
         r1 = backend.generate("p1", [])
-        assert "branches" in r1.text and "parallel_depth" in r1.text
+        assert "branches" in r1.text
         r2 = backend.generate("p2", [])
         assert "strategy" in r2.text
         r3 = backend.generate("p3", [])
@@ -122,7 +122,6 @@ class TestParsers:
     def test_parse_route_valid(self):
         data = _parse_route_decision(DEFAULT_ROUTE_RESPONSE)
         assert "branches" in data
-        assert "parallel_depth" in data
 
     def test_parse_merge_valid(self):
         data = _parse_merge_decision(DEFAULT_MERGE_RESPONSE)

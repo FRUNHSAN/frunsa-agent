@@ -35,3 +35,7 @@ future_guidance:
   speed_optimization:
     summary: "Track C 50s+ 太慢。瓶颈: 10+ 次 DeepSeek 请求。Phase 5 考虑: 切换更快模型/减少 LLM 调用/流式响应"
     priority: high
+anti_patterns:
+  - "Never truncate mid-sentence — always backtrack to last sentence boundary"
+  - "Do not hardcode character limits per language — use VERBOSE_CHAR_LIMITS dict"
+  - "Step indices must be contiguous integers starting from 0 — no gaps allowed"

@@ -54,14 +54,10 @@ rationale: |
   - /new 命令重置所有脊髓反射状态
 
 alternatives:
-  - "降低 Path 1 的 persistence 从 5 到 2"——被否，因为 Path 1 控制的是策略选择而非输出容量，
-    降低 persistence 会导致策略层面过度敏感
-  - "在 frustration 检测中直接提升 verbose 到 HIGH"——被否，因为挫折检测和内容需求是正交维度，
-    用户可能沮丧但不需要更多文字
-  - "让 LLM 自己决定输出长度"——被否，PLAN7 的 Environmental Physics 原则要求
-    输出约束是代码级的，不属于 LLM 决策域
-  - "不做 Path 3，等 Path 1 自然积累"——被 Session 52 数据否决，
-    6 轮中 tracking_err 从 0.500→0.566，从未触发 Path 1，用户持续承受 61-66% 截断
+  - 降低 Path 1 的 persistence 从 5 到 2 —— 被否，因为 Path 1 控制的是策略选择而非输出容量，降低 persistence 会导致策略层面过度敏感
+  - 在 frustration 检测中直接提升 verbose 到 HIGH —— 被否，因为挫折检测和内容需求是正交维度，用户可能沮丧但不需要更多文字
+  - 让 LLM 自己决定输出长度 —— 被否，PLAN7 的 Environmental Physics 原则要求输出约束是代码级的，不属于 LLM 决策域
+  - 不做 Path 3，等 Path 1 自然积累 —— 被 Session 52 数据否决，6 轮中 tracking_err 从 0.500→0.566，从未触发 Path 1，用户持续承受 61-66% 截断
 
 evidence:
   - Session 51: 7 轮对话，每轮截断 60-78%，用户 3 次显式要求更多内容，系统无响应

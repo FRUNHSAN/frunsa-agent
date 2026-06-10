@@ -4,10 +4,15 @@
 
 This project is a **contract-driven, three-platform agent system**. Every architectural decision is recorded in `.ai_reasoning/`. Before writing any code, you MUST consult the reasoning chain library. After completing complex work, you MUST archive new decisions.
 
-**Current: PLAN8 — Mathematical Adaptive Contract.** See [PLAN8.md](PLAN8.md) for the V5 Wasserstein-Schrödinger framework, structure-preserving model reduction, and the transition from "if fatigue > 0.55" to tracking-error-driven adaptation.
+**Current: V7.4 已交付 / V7.5 规划中 — 内核的时间与自我跃迁。** See [PLAN8.md](PLAN8.md) for V5 foundation.
 
-**Active PLAN:**
-- [PLAN8.md](PLAN8.md) — **V5 Mathematical Adaptive Contract**: Wasserstein-Schrödinger gradient flow + meta-adapt trigger
+**Active PLANs:**
+- [V7.4+V7.5 Plan](C:\Users\1\.claude\plans\agent-rag-prompt-temporal-petal.md) — **V7.4 Identity Manifold (delivered)** + **V7.5 Entropy Monitor (planned)**: cross-session identity continuity via M_id ⊂ ℝ¹² + active concern via sublevel set filtration
+- [PLAN8.md](PLAN8.md) — **V5 Mathematical Adaptive Contract**: Wasserstein-Schrödinger gradient flow + meta-adapt trigger (foundation)
+
+**Latest Reasoning Chains:**
+- `.ai_reasoning/chains/v7_4_identity_manifold.yaml` — V7.4: 12-dim identity flow, OU process, Betti detection, 10 patches
+- `.ai_reasoning/chains/v7_5_entropy_monitor.yaml` — V7.5: entropy monitor, information theory, natural transformation, 6 fixes
 
 **Archived PLANS** (DEPRECATED_BY_V5, see `.ai_reasoning/archive/`):
 - PLAN1-7 — Historical phases from contract kernel through environmental physics. Superseded by the variation-selection-retention Darwinian triad. Retained for reference; do not use as implementation guide.

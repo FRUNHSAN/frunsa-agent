@@ -53,13 +53,9 @@ rationale: |
   Session 65 验证：步数从永远 2 变为 1-4 动态。
 
 alternatives:
-  - "保留 SemanticTrust 作为扰动前馈注入 e(t)" — 被否。未标定传感器的
-    前馈注入等价于在控制回路串入未知方差噪声源。死区阈值本身也是猜的。
-    FEEDFORWARD_GAIN=0 在数学上是唯一正确的默认值。
-  - "保留 signal_interpreter 但降低其权重" — 被否。任何非零权重
-    都会造成执行器冲突。半保留 = 半噪声。
-  - "改造 SemanticTrust 为卡尔曼观测融合" — 被否。Embedding 的
-    噪声方差极难标定，未标定观测器融合必然发散。
+  - "保留 SemanticTrust 作为扰动前馈注入 e(t) — 被否。未标定传感器的前馈注入等价于在控制回路串入未知方差噪声源。死区阈值本身也是猜的。FEEDFORWARD_GAIN=0 在数学上是唯一正确的默认值。"
+  - "保留 signal_interpreter 但降低其权重 — 被否。任何非零权重都会造成执行器冲突。半保留 = 半噪声。"
+  - "改造 SemanticTrust 为卡尔曼观测融合 — 被否。Embedding 的噪声方差极难标定，未标定观测器融合必然发散。"
 
 evidence:
   - Session 64: frustration 检测保留在 X-Ray，不修改 Blueprint ✅

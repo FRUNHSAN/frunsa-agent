@@ -54,11 +54,9 @@ rationale: |
   ```
 
 alternatives:
-  - "修复 Track B 使其名副其实" —— 被否。半闭环在数学上不存在，
-    修 B 只会产生更难维护的 if-else 补丁堆。
-  - "保留三元控制器" —— 被否。Pontryagin 证明中间值永远非最优。
-  - "加意图探针到 Track C" —— 推迟到 V5.1。当前版本应作为纯净
-    Bang-Bang 基线封版，避免探针税、双 Planner 竞争、上下文盲区。
+  - 修复 Track B 使其名副其实 —— 被否。半闭环在数学上不存在，修 B 只会产生更难维护的 if-else 补丁堆。
+  - 保留三元控制器 —— 被否。Pontryagin 证明中间值永远非最优。
+  - 加意图探针到 Track C —— 推迟到 V5.1。当前版本应作为纯净 Bang-Bang 基线封版，避免探针税、双 Planner 竞争、上下文盲区。
 
 evidence:
   - Session 51-58: 四轮 embedding 路由迭代，从未正确分类"越长越好"→complex

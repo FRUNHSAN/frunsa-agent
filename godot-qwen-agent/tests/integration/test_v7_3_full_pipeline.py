@@ -163,7 +163,7 @@ class TestResistanceDAGPipeline:
             {"prompt": "Read existing configuration",
              "tool": "mcp__filesystem_read"},                # w=5
         ]
-        result, depth, max_r = _build_dag_and_depth(steps, RESISTANCE_WEIGHTS)
+        result, depth, max_r, _ = _build_dag_and_depth(steps, RESISTANCE_WEIGHTS)
 
         tools = [s["tool"] for s in result]
         # Reads sorted by resistance, writes at end with original order
@@ -195,7 +195,7 @@ class TestResistanceDAGPipeline:
             {"prompt": "Validate config", "tool": "sandbox_python",
              "needs": "config", "depends_on": [0]},             # w=2
         ]
-        result, depth, max_r = _build_dag_and_depth(steps, RESISTANCE_WEIGHTS)
+        result, depth, max_r, _ = _build_dag_and_depth(steps, RESISTANCE_WEIGHTS)
 
         # Step 0 (write) must come before step 1 (validate)
         write_idx = next(i for i, s in enumerate(result)
@@ -215,7 +215,7 @@ class TestResistanceDAGPipeline:
             {"prompt": "Search docs",
              "tool": "search_web"},                                   # w=0.1
         ]
-        result, depth, max_r = _build_dag_and_depth(steps, RESISTANCE_WEIGHTS)
+        result, depth, max_r, _ = _build_dag_and_depth(steps, RESISTANCE_WEIGHTS)
 
         # search_web (level 0, no deps) should be before the dependent chain
         # fetch_api_key -> call_api is serial (level 0 -> 1 or 0->0 with dep)
@@ -276,10 +276,13 @@ class TestAugmentationPipeline:
         """Augmented test cases must be executable by SandboxExecutor."""
         executor = SandboxExecutor()
 
+        # Use try/except to preserve Python's native negative-index behavior
+        # while safely catching IndexError at boundaries.
         code = """def safe_get(arr, k):
-    if k < 0 or k >= len(arr):
+    try:
+        return arr[k]
+    except IndexError:
         return None
-    return arr[k]
 """
         aug = augment_test_cases("IndexError")
 

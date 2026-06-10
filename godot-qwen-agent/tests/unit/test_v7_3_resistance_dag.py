@@ -95,7 +95,7 @@ class TestResistanceStableSort:
             {"prompt": "search web", "tool": "search_web"},               # w=0.1
             {"prompt": "read file", "tool": "mcp__filesystem_read"},      # w=5
         ]
-        result, _, _ = _build_dag_and_depth(steps, rw)
+        result, _, _, _ = _build_dag_and_depth(steps, rw)
         tools = [s["tool"] for s in result]
         assert tools == ["search_web", "mcp__filesystem_read", "mcp__network_fetch"]
 
@@ -105,7 +105,7 @@ class TestResistanceStableSort:
             {"prompt": "delete B", "tool": "mcp__filesystem_delete"},     # w=100
             {"prompt": "write C", "tool": "mcp__database_write"},         # w=100
         ]
-        result, _, _ = _build_dag_and_depth(steps, rw)
+        result, _, _, _ = _build_dag_and_depth(steps, rw)
         tools = [s["tool"] for s in result]
         # All writes -> original order preserved
         assert tools == [s["tool"] for s in steps]
@@ -117,7 +117,7 @@ class TestResistanceStableSort:
             {"prompt": "search docs", "tool": "search_web"},               # w=0.1
             {"prompt": "read config", "tool": "mcp__filesystem_read"},     # w=5
         ]
-        result, _, _ = _build_dag_and_depth(steps, rw)
+        result, _, _, _ = _build_dag_and_depth(steps, rw)
 
         # Find last read and first write indices
         read_indices = [i for i, s in enumerate(result)
@@ -139,7 +139,7 @@ class TestResistanceStableSort:
             {"prompt": "search", "tool": "search_web"},                   # w=0.1, read
             {"prompt": "read file", "tool": "mcp__filesystem_read"},      # w=5, read
         ]
-        result, _, _ = _build_dag_and_depth(steps, rw)
+        result, _, _, _ = _build_dag_and_depth(steps, rw)
         tools = [s["tool"] for s in result]
 
         # First 3 should be reads sorted by resistance
@@ -169,7 +169,7 @@ class TestCrossLevelPrecedence:
             {"prompt": "read config", "tool": "mcp__filesystem_read",
              "needs": "config"},                                            # w=5 (lower!)
         ]
-        result, depth, _ = _build_dag_and_depth(steps, rw)
+        result, depth, _, _ = _build_dag_and_depth(steps, rw)
         # Step 1 (read) depends on step 0 (write) -> must stay after step 0
         assert depth == 1  # Serial chain
         write_idx = next(i for i, s in enumerate(result)
@@ -190,7 +190,7 @@ class TestCrossLevelPrecedence:
             {"prompt": "b_write", "tool": "mcp__filesystem_write",
              "depends_on": [0]},                                            # w=50, level 1
         ]
-        result, depth, _ = _build_dag_and_depth(steps, rw)
+        result, depth, _, _ = _build_dag_and_depth(steps, rw)
         tools = [s["tool"] for s in result]
         # Level 0 sorted: search_web (0.1) then network_fetch (10)
         # Level 1 sorted: filesystem_read (5, read) then filesystem_write (50, write)
@@ -204,7 +204,7 @@ class TestCrossLevelPrecedence:
 class TestMaxResistance:
     def test_max_resistance_zero_for_no_tools(self):
         steps = [{"prompt": "a"}, {"prompt": "b"}]
-        _, _, mr = _build_dag_and_depth(steps, RESISTANCE_WEIGHTS)
+        _, _, mr, _ = _build_dag_and_depth(steps, RESISTANCE_WEIGHTS)
         assert mr == 0.0
 
     def test_max_resistance_finds_highest(self, rw):
@@ -213,12 +213,12 @@ class TestMaxResistance:
             {"prompt": "high", "tool": "mcp__filesystem_delete"},  # 100.0
             {"prompt": "mid", "tool": "mcp__filesystem_read"},     # 5.0
         ]
-        _, _, mr = _build_dag_and_depth(steps, rw)
+        _, _, mr, _ = _build_dag_and_depth(steps, rw)
         assert mr == 100.0
 
     def test_max_resistance_without_weights(self):
         steps = [{"prompt": "a", "tool": "mcp__filesystem_write"}]
-        _, _, mr = _build_dag_and_depth(steps)  # No weights passed
+        _, _, mr, _ = _build_dag_and_depth(steps)  # No weights passed
         assert mr == 0.0
 
 
@@ -227,20 +227,20 @@ class TestMaxResistance:
 class TestEdgeCases:
     def test_empty_steps(self):
         steps = []
-        result, depth, mr = _build_dag_and_depth(steps)
+        result, depth, mr, _ = _build_dag_and_depth(steps)
         assert result == []
         assert depth == 1
         assert mr == 0.0
 
     def test_single_step(self):
         steps = [{"prompt": "only step"}]
-        result, depth, mr = _build_dag_and_depth(steps)
+        result, depth, mr, _ = _build_dag_and_depth(steps)
         assert len(result) == 1
         assert depth == 1
 
     def test_single_step_with_resistance(self, rw):
         steps = [{"prompt": "only", "tool": "mcp__filesystem_delete"}]
-        result, depth, mr = _build_dag_and_depth(steps, rw)
+        result, depth, mr, _ = _build_dag_and_depth(steps, rw)
         assert len(result) == 1
         assert mr == 100.0
 
@@ -249,7 +249,7 @@ class TestEdgeCases:
             {"prompt": "a", "tool": "mcp__network_fetch"},
             {"prompt": "b", "tool": "search_web"},
         ]
-        result, depth, mr = _build_dag_and_depth(steps, rw)
+        result, depth, mr, _ = _build_dag_and_depth(steps, rw)
         tools = [s["tool"] for s in result]
         # All reads, sorted by resistance
         assert tools == ["search_web", "mcp__network_fetch"]
@@ -259,7 +259,7 @@ class TestEdgeCases:
             {"prompt": "a", "tool": "mcp__filesystem_write"},
             {"prompt": "b", "tool": "mcp__database_write"},
         ]
-        result, depth, mr = _build_dag_and_depth(steps, rw)
+        result, depth, mr, _ = _build_dag_and_depth(steps, rw)
         tools = [s["tool"] for s in result]
         # All writes, original order preserved
         assert tools == ["mcp__filesystem_write", "mcp__database_write"]
@@ -271,7 +271,7 @@ class TestEdgeCases:
             {"prompt": "a", "tool": "search_web"},
             {"prompt": "b", "tool": "mcp__filesystem_read"},
         ]
-        result, depth, mr = _build_dag_and_depth(steps)  # No weights
+        result, depth, mr, _ = _build_dag_and_depth(steps)  # No weights
         tools = [s["tool"] for s in result]
         # Original order preserved (no sort)
         assert tools == ["mcp__network_fetch", "search_web", "mcp__filesystem_read"]
@@ -280,7 +280,7 @@ class TestEdgeCases:
     def test_steps_are_not_dictionaries_survives(self):
         """Graceful: steps without 'tool' key get weight 0."""
         steps = [{"prompt": "no tool key"}, {"prompt": "also none"}]
-        result, depth, mr = _build_dag_and_depth(steps, RESISTANCE_WEIGHTS)
+        result, depth, mr, _ = _build_dag_and_depth(steps, RESISTANCE_WEIGHTS)
         assert len(result) == 2
         assert mr == 0.0
 
@@ -295,7 +295,7 @@ class TestDAGInvariantsPreserved:
             {"prompt": "A", "produces": "X", "needs": "Y"},
             {"prompt": "B", "produces": "Y", "needs": "X"},
         ]
-        _, depth, _ = _build_dag_and_depth(steps, rw)
+        _, depth, _, _ = _build_dag_and_depth(steps, rw)
         assert depth == 1  # Cycle -> fallback to sequential
 
     def test_parallel_depth_unchanged_without_weights(self):
@@ -303,7 +303,7 @@ class TestDAGInvariantsPreserved:
         steps = [
             {"prompt": "a"}, {"prompt": "b"}, {"prompt": "c"},
         ]
-        _, depth, _ = _build_dag_and_depth(steps)
+        _, depth, _, _ = _build_dag_and_depth(steps)
         assert depth == 3  # All independent, full parallel
 
     def test_oob_indices_still_sanitized(self, rw):
@@ -311,7 +311,7 @@ class TestDAGInvariantsPreserved:
             {"prompt": "A", "depends_on": [99]},  # OOB -> ignored
             {"prompt": "B"},
         ]
-        _, depth, _ = _build_dag_and_depth(steps, rw)
+        _, depth, _, _ = _build_dag_and_depth(steps, rw)
         assert depth == 2  # Both independent after sanitization
 
     def test_fallback_depth_without_resistance_is_same(self):
@@ -320,6 +320,6 @@ class TestDAGInvariantsPreserved:
             {"prompt": "a"}, {"prompt": "b"},
         ]
         # With and without weights should give same depth
-        _, d1, _ = _build_dag_and_depth(steps)
-        _, d2, _ = _build_dag_and_depth(steps, RESISTANCE_WEIGHTS)
+        _, d1, _, _ = _build_dag_and_depth(steps)
+        _, d2, _, _ = _build_dag_and_depth(steps, RESISTANCE_WEIGHTS)
         assert d1 == d2 == 2  # Only depth may differ; max_resistance differs
