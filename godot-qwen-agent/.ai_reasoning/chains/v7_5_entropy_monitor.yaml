@@ -1,0 +1,82 @@
+# Reasoning Chain: V7.5 — Entropy Monitor (Active Concern)
+chain_id: v7_5_entropy_monitor
+title: "V7.5 Entropy Monitor — active concern via sublevel set filtration on state space"
+created_at: "2026-06-10T14:00:00Z"
+status: active
+tags: [entropy, watcher, active, concern, tension, sublevel_set, filtration,
+       information_theory, control_theory, natural_transformation, sigmoid,
+       normalization, red_team, compatibility, rag, mcp]
+related_chains: [v7_4_identity_manifold, phase_23_kernel_service]
+
+context: |
+  V7.4 gave the Agent cross-session memory (knowing "who I am"). But it remains
+  passive: while True: input() — only external input breaks equilibrium. A true
+  agent needs an INTERNAL TENSION SENSOR: the ability to detect "something isn't
+  finished" and proactively inject a low-priority PlanningContext.
+
+  Mathematical: S_int is a scalar field on State × Identity space. The threshold
+  θ_active defines a sublevel set filtration. When S_int > θ_active, the system
+  enters the "concerned" region and injects a Soft Interrupt through the normal
+  Planning pipeline.
+
+  Information-theoretic: H_residual = Σ I(T_i; G) · 1_{step_i not converged}.
+  Unconverged DAG steps = information the Agent "owes" the user. The entropy
+  monitor measures this residual Shannon entropy and triggers repayment.
+
+alternatives:
+  - option: "Use a timer-based approach (check every N minutes)"
+    pros: "Simple to implement"
+    cons: "Violates P4 (Signal over Schedule). Timer doesn't know if there's anything to worry about."
+  - option: "Always interrupt at session start"
+    pros: "Never misses anything"
+    cons: "Annoying. Violates user trust. No calibration to relationship depth."
+  - option: "Make it a fifth engine"
+    pros: "Uniform architecture"
+    cons: "Same category error as v7.4 — EntropyMonitor doesn't produce StreamItem or call LLM"
+
+decision: |
+  Single module `core/watcher/entropy_monitor.py` (~130 lines). Same family
+  as WassersteinProxy and IdentityManifoldStore. Pure math, zero LLM calls.
+  REPL samples at session start only (cross-session concern — in-session
+  real-time monitoring is v8).
+
+rationale: |
+  S_int uses v7.4's StreamingPercentile for component normalization — zero
+  hardcoded thresholds. θ_active uses continuous sigmoid (no piecewise jumps).
+  Temporal decay prevents infinite accumulation of old concerns. Three-state
+  cold start prevents abrupt first→second-session transition.
+
+future_guidance:
+  v7_5_math_foundation:
+    summary: "S_int: State×M_id→ℝ⁺ is a scalar field. Sublevel sets S⁻¹[0,τ] form a filtration. θ_active defines the critical value. Natural transformation η:F⇒G preserves continuity."
+    priority: critical
+  v7_5_review_fixes:
+    summary: "Fix 1: component normalization (dimensional consistency, all∈[0,1]). Fix 2: sigmoid θ_active (no piecewise jumps). Fix 3: temporal decay e^(-0.5·age). Fixes restore Lipschitz continuity, filtration structure, natural transformation continuity."
+    priority: critical
+  v7_5_red_team:
+    summary: "R1: trust growth cap ≤0.1/session (CVSS 9.1→2.0). R2: P95 safety floor min(dangling=3.0, e_t=0.5) (CVSS 8.5→1.5). R3: session_count cross-check anti-tamper (CVSS 6.5→1.0). UX: 'ignore' command for permanent dismiss."
+    priority: critical
+  v7_5_compatibility:
+    summary: "C1: Track A updates snapshot (clear DAG/physical). C2: multi-run accumulation (max dangling, sum failures). C3: mcp_failures field in snapshot. RAG indirect (via DAG convergence). MCP natural (via Phi functor)."
+    priority: high
+  v7_5_hardening:
+    summary: "H1: failure_ratio gating (>0.1 for report, >0.7 for high severity). H2: graduated cold-start (n=1: 2×θ threshold, n=2: standard)."
+    priority: high
+  v7_5_decoupling:
+    summary: "ZERO engine imports. Engines zero refs core/watcher. Same decoupling level as WassersteinProxy. A1/A2/P4/P5/P6/P11 all compliant."
+    priority: medium
+
+anti_patterns:
+  - "Using a timer (schedule-based) instead of signal-based (S_int) triggering — violates P4"
+  - "Piecewise θ_active with trust thresholds — creates discontinuous behavior at trust boundaries"
+  - "Adding raw dangling_dag_count to S_int without normalization — destroys filtration topology"
+  - "Importing EntropyMonitor from inside engines/ — must stay in REPL layer only"
+  - "Persisting snapshot without tamper detection — attacker can freeze snapshot_age=0"
+  - "Hardcoding P95 normalization denominators — violates P6 (self-calibration)"
+
+evidence:
+  - "Plan: C:\\Users\\1\\.claude\\plans\\agent-rag-prompt-temporal-petal.md (V7.5 section)"
+  - "Test plan: tests/unit/test_v7_5_entropy_monitor.py (math + red-team + compatibility)"
+  - "Math review: 3 critical flaws found and fixed (dimensional, continuity, decay)"
+  - "Red-team: 3 weaponizable vulnerabilities found and patched (CVSS 9.1, 8.5, 6.5)"
+  - "Compatibility: RAG (indirect), MCP (Phi functor), Track A/C (C1/C2 fixes)"
