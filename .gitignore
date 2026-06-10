@@ -11,3 +11,5 @@ build/
 .vs/
 .claude/settings.local.json
 .gitignore
+*.db-shm
+*.db-wal
