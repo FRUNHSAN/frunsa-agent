@@ -234,6 +234,26 @@ These invariants govern the four control surfaces that drive the adaptive contra
 | 61 | **Bayesian Prior Smoothing, Never `if round < N`**: cold-start damping for time-varying statistics MUST use conjugate-prior pseudo-counts (e.g. `σ²_smoothed = (α·prior + n·observed)/(α+n)`) rather than hardcoded round-count guards. The math's asymptotic property does the damping — no magic-number branch. | V6.2 Wasserstein Calibration |
 | 62 | **LLM Facts vs Graph-Theoretic Control**: LLMs MAY declare topological facts (`depends_on` indices, `produces`/`needs` tags). They MUST NOT output control parameters (`parallel_depth`, `semaphore_count`). Control parameters are derived by the Orch engine via deterministic graph algorithms (Kahn's algorithm, BFS level assignment) operating on the LLM-declared facts. The LLM is a witness, not a judge. | V6.1 Orchestration DAG Design |
 
+## V7 Topological Homomorphism Metric (Phase 26-29+)
+
+The continuous mathematical structures (gradient flow, path integral, sheaf sections on S³⁸³) must map to observable discrete LLM behavior while preserving adjacency. Quantization is inevitable — but the mapping MUST be a topological homomorphism: two states that are adjacent in the continuous space must produce similar behavior in the discrete output space.
+
+| # | Invariant | Source |
+|---|----------|--------|
+| 63 | **Topological Homomorphism ≥ 50%**: every new feature that adds a continuous control variable MUST ensure that: (1) adjacent values in the continuous range produce observably different prompt text or generation parameters — not just different internal state; (2) hard thresholds are documented with their quantization gap; (3) the number of effective behavioral states per continuous variable is tracked. Current baseline: trust=6 states, e(t)=4 states, clarity=5 states, drift=4 states. Only 2 genuinely continuous paths exist (e(t)→critic θ, drift→critic θ). Target for V8.0: ≥65% via Planning LLM contract injection + continuous lambda_hint text embedding. | V7.9 Topological Homomorphism Audit ([从连续数学到离散工程.md](从连续数学到离散工程.md)) |
+
+### Quantization Debt Register
+
+Below are the known quantization gaps. Each gap is a TOPOLOGY_DEBT — a place where continuous math is truncated to a step function. New features touching these control surfaces MUST either reduce the gap or document why the gap is acceptable.
+
+| Variable | Range | Behavioral States | Gap | Debt |
+|----------|-------|-------------------|-----|------|
+| `trust` | [0,1] | 6 | [0.30, 0.55) — 0.25 span, zero behavioral difference | `_lambda_hint` continuous text embedding (V7.8) |
+| `e(t)` | [0,1] | 4 | [0, 0.55] — trivial signals invisible to routing | Critic θ continuous ramp (V7.3) |
+| `clarity` | [0,1] | 5 | [0.35, 0.70] — normal range has no prompt effect | f_fused → branch_count (V5.3) |
+| Blueprint fields | 7 enums | ~1152 prompt templates | No continuous interpolation between categories | VERBOSE_CONTINUUM + TONE_CONTINUUM (V7.8) |
+| Planning LLM | N/A | 0 | Contract state fully ignored by `_do_plan()` | TOPOLOGY_DEBT telemetry (V7.8), fix targeted V8.0 |
+
 ## Machine Enforcement (Phase 8.0)
 
 Architectural invariants are **machine-enforced**, not just documented. Before every commit, `python -m guardrails check` runs AST-based rules. Violations of severity ERROR block the commit.
