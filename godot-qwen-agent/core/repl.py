@@ -209,8 +209,12 @@ class Repl:
             }
             prev_tone = getattr(self, '_prev_tone_style', None)
             if prev_tone and prev_tone != tone:
-                # Transition: blend descriptions
-                parts.append(f"语气: {TONE_CONTINUUM.get(tone, tone)} （从{TONE_CONTINUUM.get(prev_tone, prev_tone)}过渡中）")
+                # V7.8: Natural language transition — LLM interpolates between styles
+                parts.append(
+                    f"语气: 当前正在从「{TONE_CONTINUUM.get(prev_tone, prev_tone)}」"
+                    f"向「{TONE_CONTINUUM.get(tone, tone)}」过渡。"
+                    f"请采用两者之间的中间风格，自然融合，不要生硬切换。"
+                )
             else:
                 parts.append(f"语气: {TONE_CONTINUUM.get(tone, tone)}")
             self._prev_tone_style = tone

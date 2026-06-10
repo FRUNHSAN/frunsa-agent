@@ -78,30 +78,58 @@ MAX_BUFFER_TOKENS = 2048  # ~4KB memory ceiling, NIST IR 8269 §4.3 compliant
 # ── V5.1: Lambda Gain Scheduling ───────────────────────────────────
 
 def _lambda_hint(trust: float, e_t: float) -> str:
-    """Inject system state as a dynamic prior into the Planning prompt.
+    """V7.8: Continuous lambda hint — trust and e(t) values embedded in prompt text.
 
-    lambda = f(trust, e_t): adjusts the LLM's risk aversion, not its decision.
-    Low trust or high e(t) -> lambda->0 -> conservative -> prefer FULL_DAG.
-    High trust + low e(t) -> lambda free -> efficiency-optimized -> DIRECT OK.
+    Instead of discrete bins, the continuous values {trust:.0%} and {e_t:.0%}
+    are injected directly into the prompt. The LLM sees T=0.31 and T=0.54 as
+    different numbers, producing genuinely continuous behavioral modulation.
     """
-    if trust < 0.15 or e_t > 0.65:
-        return (
-            "[SYSTEM STATE] Trust critically low or tracking error elevated. "
+    parts = []
+
+    # ── Autonomy gradient: trust-driven risk aversion ──
+    if trust < 0.15:
+        parts.append(
+            "[SYSTEM STATE] Trust critically low ({:.0%}). "
             "Be extremely conservative — use DIRECT only for trivial single-word "
-            "replies or explicit goodbyes. Default to FULL_DAG for everything else."
+            "replies or explicit goodbyes. Default to FULL_DAG for everything else.".format(trust)
         )
-    if trust < 0.30 or e_t > 0.55:
-        return (
-            "[SYSTEM STATE] Trust below comfort zone or error trending up. "
-            "Lean conservative — DIRECT only for clear format adjustments "
-            "('make it shorter', 'add more detail'). Borderline cases -> FULL_DAG."
+    elif trust < 0.30:
+        parts.append(
+            "[SYSTEM STATE] Trust below comfort zone ({:.0%}). "
+            "Lean conservative — DIRECT only for clear format adjustments. "
+            "Borderline cases -> FULL_DAG.".format(trust)
         )
-    if trust > 0.70 and e_t < 0.45:
-        return (
-            "[SYSTEM STATE] High trust, stable tracking. You have full autonomy "
-            "to optimize for efficiency. DIRECT is encouraged for simple tasks."
+    elif trust < 0.70:
+        # Continuous autonomy: trust value embedded without hard directive
+        if trust < 0.50:
+            parts.append(
+                "[SYSTEM STATE] Moderate trust ({:.0%}). "
+                "Use your judgment — no forced conservative or liberal bias.".format(trust)
+            )
+        else:
+            parts.append(
+                "[SYSTEM STATE] Trust building ({:.0%}). "
+                "You may optimize for efficiency on clear, simple tasks.".format(trust)
+            )
+    else:
+        parts.append(
+            "[SYSTEM STATE] High trust ({:.0%}), stable relationship. "
+            "Full autonomy. DIRECT is encouraged for simple tasks.".format(trust)
         )
-    return ""  # No hint — LLM uses its own semantic judgment
+
+    # ── Entropy gradient: e(t)-driven uncertainty expression ──
+    if e_t > 0.65:
+        parts.append(
+            "[UNCERTAINTY] Tracking error elevated ({:.0%}). "
+            "If you are unsure about any point, explicitly state your confidence level.".format(e_t)
+        )
+    elif e_t > 0.50:
+        parts.append(
+            "[UNCERTAINTY] Moderate uncertainty ({:.0%}). "
+            "Acknowledge ambiguity where it exists, but don't hedge on clear points.".format(e_t)
+        )
+
+    return "\n".join(parts) if parts else ""
 
 
 # ── V5.3 Path 2: Dual-Sensor Fusion (drift ⊕ clarity) ─────────────────
@@ -913,6 +941,15 @@ class TrackCEngine:
         from engines.planning.interface import PlanningContext
         from core.contracts.streaming_protocol import PaceConfig
         import os
+
+        # ── V7.8: Planning topology debt telemetry ──
+        # Records contract state ignored by Planning LLM.
+        # Does not change behavior — only accumulates data for V8.0 design.
+        if system and lambda_hint:
+            self._emit("TOPOLOGY_DEBT",
+                f"Planning executing in vacuum. "
+                f"system_len={len(system)}, hint_len={len(lambda_hint)}"
+            )
 
         state_hint = f"\n\n{lambda_hint}" if lambda_hint else ""
         min_steps = int(os.environ.get("MIN_PLAN_STEPS", MIN_PLAN_STEPS))
