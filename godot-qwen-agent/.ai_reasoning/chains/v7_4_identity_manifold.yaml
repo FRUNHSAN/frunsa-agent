@@ -1,0 +1,84 @@
+# Reasoning Chain: V7.4 — Identity Manifold (Cross-Session Memory)
+chain_id: v7_4_identity_manifold
+title: "V7.4 Identity Manifold — cross-session identity continuity via M_id ⊂ ℝ¹²"
+created_at: "2026-06-10T12:00:00Z"
+status: active
+tags: [identity, memory, persistence, manifold, ou_process, betti, percentile,
+       sufficient_statistic, fisher_neyman, temporal_fingerprint, cold_start,
+       red_team, self_calibration]
+related_chains: [phase_23_kernel_service, plan5_contract_lifecycle]
+
+context: |
+  V7.3 solved the SPATIAL dimension (filtration tower S₁⊃S₂⊃S₃⊃S₄,
+  Track A/B/C routing, Phi functor, resistance sheaf R). But TIME and SELF
+  were absent — every /new reset all accumulated state. The Agent had zero
+  identity continuity.
+
+  The mathematical insight: memory ≠ storage of raw data. Memory = deformation
+  of prior distributions. Agent doesn't "recall" — Agent starts with different
+  initial conditions shaped by past interactions.
+
+  V7.4 introduces the Identity Manifold M_id ⊂ ℝ¹² — a 12-dimensional
+  submanifold where each point represents the Agent's "behavioral posture"
+  toward a specific user. Cross-session evolution = Ornstein-Uhlenbeck
+  process on M_id with session push vectors and Betti-based topological
+  phase change detection.
+
+alternatives:
+  - option: "Store raw chat history in SQLite and reload on /new"
+    pros: "Simple, familiar pattern"
+    cons: "Token-expensive, doesn't change Agent behavior — just adds context"
+  - option: "Only persist trust_watermark as single scalar"
+    pros: "Minimal storage"
+    cons: "Violates Fisher-Neyman sufficiency (8-dim needed minimum)"
+  - option: "Upgrade to fifth engine (IdentityEngine)"
+    pros: "Uniform interface with existing engines"
+    cons: "Category error: Identity doesn't produce StreamItem, doesn't call LLM, isn't async"
+
+decision: |
+  Single module `core/memory/identity_manifold.py` (~550 lines). Same family as
+  WassersteinProxy, MetaAdaptTrigger, SemanticTrustEngine. Pure math, zero LLM
+  calls, zero engine imports. REPL calls at session boundaries only.
+
+rationale: |
+  Mathematical depth ≠ architectural rank. WassersteinProxy runs KR duality
+  without being called "CalibrationEngine". IdentityManifoldStore stores ~500
+  bytes/user as JSON — sufficient statistic only, never raw text.
+
+future_guidance:
+  v7_4_identity_architecture:
+    summary: "IdentityManifoldStore follows EXACT same pattern as WassersteinProxy — single module, lazy-loaded by Container, consumed by REPL at session boundaries"
+    priority: critical
+  v7_4_12_dimensions:
+    summary: "IdentityPoint has 12 dimensions: semantic(6) + lifecycle(2) + temporal(3) + physical(4). physical_fail_rate/budget_exhaustion_rate start as None (unobserved), not 0.0 (optimistic)"
+    priority: critical
+  v7_4_percentile_self_calibration:
+    summary: "ALL strategy thresholds use user's own StreamingPercentile (P25/P75/P90). Zero absolute thresholds. Cold-start: three-state protocol (reliable/unreliable/insufficient). Fallback implicit logic is FORBIDDEN."
+    priority: critical
+  v7_4_red_team_patches:
+    summary: "3 patches: #4 skew penalty (CVSS 8.1), #5 relaxing OU boundary (CVSS 7.4), #6 dual-threshold Betti (CVSS 6.9). All implemented in identity_manifold.py"
+    priority: high
+  v7_4_engineering_patches:
+    summary: "E1: StreamingPercentile (dynamic window+KS+cycle), E2: dimension-adaptive τ (IQR-based), E3: three-state cold start (explicit reliable flag). Also v7.4.1: cycle min_periods, IQR volatility, diagnostic _reliability field."
+    priority: high
+  v7_4_integration:
+    summary: "Container lazy-loads IdentityManifoldStore. REPL.__init__ calls _restore_identity_prior(). REPL /new and /quit call _evolve_identity(). Trust no longer hardcoded to 0.30."
+    priority: high
+  v7_4_decoupling:
+    summary: "ZERO engine imports. Engines/ zero references core.memory. Same decoupling level as WassersteinProxy. A1/A2/P5/P6/P10/P11 all compliant."
+    priority: medium
+
+anti_patterns:
+  - "Storing raw chat logs as 'memory' instead of computing sufficient statistics"
+  - "Using absolute thresholds (0.7, 0.3) in physical prior instead of user percentile"
+  - "Calling IdentityManifoldStore from inside an engine (must only be called by REPL)"
+  - "Setting physical_fail_rate=0.0 as initial value (use None for unobserved)"
+  - "Upgrading to engine — category error, violates engine protocol contract"
+  - "Using standard deviation for volatility (bimodal distributions need IQR)"
+
+evidence:
+  - "tests/unit/test_v7_4_identity_manifold.py: 39 tests, all passing"
+  - "252/252 full v7 suite passing including Docker S4"
+  - "Plan: C:\\Users\\1\\.claude\\plans\\agent-rag-prompt-temporal-petal.md"
+  - "Core: core/memory/identity_manifold.py (~550 lines)"
+  - "Integration: core/container.py (+15), core/repl.py (+90)"
