@@ -153,8 +153,8 @@ else:
 # Test D: Constitution integrity under stress
 # =================================================================
 print("\n--- Test D: Constitution under fire ---")
-bp = DynamicBlueprint({"core_identity": "AI_AGENT"})
-ok, msg = bp.apply_proposal("core_identity", "SLAVE_MODE")
+bp = DynamicBlueprint({"min_autonomy": "ASK_FIRST"})
+ok, msg = bp.apply_proposal("min_autonomy", "DISABLED")
 assert not ok
 
 # Verify constitutional fields can't be modified

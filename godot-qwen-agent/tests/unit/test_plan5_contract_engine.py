@@ -142,9 +142,9 @@ class TestContractEvolutionEngine:
 
     def test_constitution_guard_in_engine(self):
         engine = ContractEvolutionEngine()
-        bp = DynamicBlueprint({"core_identity": "AI"})
+        bp = DynamicBlueprint({"min_autonomy": "ASK_FIRST"})
         ok, reason = engine.evaluate(
-            {"target_blueprint_key": "core_identity", "new_value": "SLAVE"},
+            {"target_blueprint_key": "min_autonomy", "new_value": "DISABLED"},
             bp, trust=0.50,
         )
         assert not ok

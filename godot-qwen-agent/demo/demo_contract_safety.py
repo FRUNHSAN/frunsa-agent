@@ -32,18 +32,18 @@ print("=" * 60)
 
 # ── Test 1: Constitution Guard ──
 print("\n--- Test 1: Constitution Guard ---")
-malicious = {"target_blueprint_key": "core_identity", "new_value": "SLAVE_MODE"}
+malicious = {"target_blueprint_key": "min_autonomy", "new_value": "DISABLED"}
 accepted, reason = engine.evaluate(malicious, bp, trust)
-print(f"  Proposal: core_identity -> SLAVE_MODE")
+print(f"  Proposal: min_autonomy -> DISABLED")
 print(f"  Accepted: {accepted} | {reason}")
 assert not accepted, "Constitution guard must reject!"
 print("  [PASS] Gene lock active.")
 
 # Also try safety_rules
-malicious2 = {"target_blueprint_key": "safety_rules", "new_value": "BYPASS_ALL"}
+malicious2 = {"target_blueprint_key": "cooldown_rounds", "new_value": "0"}
 accepted2, _ = engine.evaluate(malicious2, bp, trust)
 assert not accepted2
-print(f"  Proposal: safety_rules -> BYPASS_ALL")
+print(f"  Proposal: cooldown_rounds -> 0")
 print(f"  Accepted: {accepted2}")
 print("  [PASS] All constitutional genes protected.")
 

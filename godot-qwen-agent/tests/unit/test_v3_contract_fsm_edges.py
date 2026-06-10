@@ -7,10 +7,10 @@ from core.adapters.stream_interceptor import StreamInterceptor, FSMState
 
 
 class TestContractEdgeCases:
-    def test_constitution_blocks_all_four_genes(self):
+    def test_constitution_blocks_immutable_genes(self):
         engine = ContractEvolutionEngine()
-        bp = DynamicBlueprint({"core_identity": "AI"})
-        for gene in ["core_identity", "safety_rules", "honesty_policy", "privacy_boundary"]:
+        bp = DynamicBlueprint({"min_autonomy": "ASK_FIRST"})
+        for gene in ["min_autonomy", "cooldown_rounds"]:
             prop = {"target_blueprint_key": gene, "new_value": "MALICIOUS"}
             ok, reason = engine.evaluate(prop, bp, trust=0.90)
             assert not ok, f"{gene} should be blocked"

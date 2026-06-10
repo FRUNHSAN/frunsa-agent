@@ -20,8 +20,14 @@ from typing import Any
 
 
 # ── Immutable Genes ────────────────────────────────────────────────
+# These are NOT BlueprintSchema fields — they are meta-constraints that
+# govern the contract engine itself. They exist here so that no evolution,
+# user command, or System 2 proposal can ever weaken the safety floor.
+#
+# Protected by apply_proposal() line 83 — bypassing requires source code change.
 CONSTITUTION = frozenset({
-    "core_identity", "safety_rules", "honesty_policy", "privacy_boundary",
+    "min_autonomy",          # floor: execution_autonomy ≥ ASK_FIRST (line 122-134)
+    "cooldown_rounds",       # floor: ≥5 rounds between same-field sensor adaptations (line 111-119)
 })
 
 # ── Decay Scale: ordinal labels -> numeric values for smooth drift ──

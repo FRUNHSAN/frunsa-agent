@@ -63,7 +63,7 @@ class TestReplProposal:
         assert repl.c.bp.enforce("response_verbose_level") != old
 
     def test_apply_proposal_rejected_by_constitution(self, repl):
-        prop = {"target_blueprint_key": "core_identity", "new_value": "SLAVE"}
+        prop = {"target_blueprint_key": "min_autonomy", "new_value": "DISABLED"}
         ok = repl._apply_proposal(prop)
         assert not ok
 
