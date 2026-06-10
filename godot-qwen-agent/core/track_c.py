@@ -62,6 +62,19 @@ def _signature_lock_hint() -> str:
     )
 
 
+# ── V7.5 P26: Buffer overflow guard for streaming physical verification ──
+
+class BufferOverflowError(Exception):
+    """Circuit breaker: streaming buffer exceeded hard limit.
+
+    Raised when physical verification buffer exceeds MAX_BUFFER_TOKENS.
+    Triggers semantic escape — same treatment as TIMEOUT (Patch 2).
+    """
+    pass
+
+MAX_BUFFER_TOKENS = 2048  # ~4KB memory ceiling, NIST IR 8269 §4.3 compliant
+
+
 # ── V5.1: Lambda Gain Scheduling ───────────────────────────────────
 
 def _lambda_hint(trust: float, e_t: float) -> str:
@@ -233,9 +246,30 @@ def _extract_step_fields(text: str, step: dict) -> None:
         pass  # LLM didn't output structured JSON — fields absent, no crash
 
 
+def _dep_depth(step: dict, steps: list[dict]) -> int:
+    """Dependency depth — used to break ties in resistance-equivalent tasks.
+
+    Plateau decomposition: when |R(u) - R(v)| < epsilon within the same
+    BFS fiber, secondary sort by dependency depth ensures Morse-Smale
+    well-definedness on degenerate fibers.
+    """
+    deps = step.get("_resolved_deps", [])
+    if not deps:
+        return 0
+    return 1 + max(_dep_depth_idx(d, steps) for d in deps)
+
+
+def _dep_depth_idx(idx: int, steps: list[dict]) -> int:
+    """Resolve dependency depth from a resolved index."""
+    if 0 <= idx < len(steps):
+        return _dep_depth(steps[idx], steps)
+    return 0
+
+
 def _build_dag_and_depth(steps: list[dict],
-                         resistance_weights: dict[str, float] | None = None
-                         ) -> tuple[list[dict], int, float]:
+                         resistance_weights: dict[str, float] | None = None,
+                         emit=None  # optional X-Ray callback for topological diagnostics
+                         ) -> tuple[list[dict], int, float, dict]:
     """Build DAG from step tags + indices, compute maximal safe parallel depth.
 
     V6.1: Kahn cycle detection + BFS level assignment.
@@ -299,7 +333,7 @@ def _build_dag_and_depth(steps: list[dict],
 
     if visited < n:
         # Cycle detected — LLM hallucination. Safe fallback: full sequential.
-        return steps, 1, 0.0
+        return steps, 1, 0.0, {}
 
     # ── 5. BFS level assignment on verified DAG ──
     levels: dict[int, int] = {}
@@ -330,8 +364,13 @@ def _build_dag_and_depth(steps: list[dict],
                           ("_write", "_delete", "_insert", "_update"))]
             reads = [s for s in level_steps if s not in writes]
 
-            # Reads: sort by resistance ascending (gradient descent on potential w)
-            reads.sort(key=lambda s: rw.get(s.get("tool", ""), 0.0))
+            # Reads: sort by resistance ascending (gradient descent on potential w).
+            # Secondary sort by dependency depth for resistance ties (plateau decomposition
+            # — preserves Morse-Smale well-definedness on degenerate fibers).
+            reads.sort(key=lambda s: (
+                rw.get(s.get("tool", ""), 0.0),
+                _dep_depth(s, steps),
+            ))
 
             # Merge: reads first (scout), writes last (commit)
             level_groups[level] = reads + writes
@@ -342,12 +381,53 @@ def _build_dag_and_depth(steps: list[dict],
             sorted_steps.extend(level_groups[level])
         steps[:] = sorted_steps
 
-    # ── 7. Max resistance = global section of sheaf R ──
+    # ── 6.5: Potential monotonicity assertion (Morse necessary condition) ──
+    # For all dependency edges u->v: R(u) <= R(v) + epsilon.
+    # A violation means a higher-resistance task is a prerequisite of a
+    # lower-resistance one — the Morse function has a local maximum.
+    if rw:
+        for s in steps:
+            for dep_idx in s.get("_resolved_deps", []):
+                if 0 <= dep_idx < len(steps):
+                    r_u = rw.get(steps[dep_idx].get("tool", ""), 0.0)
+                    r_v = rw.get(s.get("tool", ""), 0.0)
+                    if r_u > r_v + 1.0:  # epsilon = 1.0 tolerance
+                        msg = (
+                            f"R inversion: "
+                            f"R({steps[dep_idx].get('tool','?')})={r_u:.0f} > "
+                            f"R({s.get('tool','?')})={r_v:.0f} on edge "
+                            f"{dep_idx}->{steps.index(s)} — "
+                            f"Morse gradient violated (P24)"
+                        )
+                        if emit:
+                            emit("🔣 拓扑诊断", msg)
+                        else:
+                            import sys
+                            print(f"[TOPOLOGY WARN] {msg}", file=sys.stderr)
+
+    # ── 7. Max resistance + homotopy classes ──
     max_resistance = max(
         (rw.get(s.get("tool", ""), 0.0) for s in steps),
         default=0.0)
 
-    return steps, max_depth, max_resistance
+    # ── 7.5: BFS level -> homotopy class explicit mapping ──
+    homotopy_classes: dict[int, dict] = {}
+    level_groups_final: dict[int, list[dict]] = {}
+    for s in steps:
+        lev = levels.get(steps.index(s), 0)
+        level_groups_final.setdefault(lev, []).append(s)
+    for level in sorted(level_groups_final.keys()):
+        tasks = level_groups_final[level]
+        resistances = [rw.get(t.get("tool", ""), 0.0) for t in tasks]
+        homotopy_classes[level] = {
+            "tasks": tasks,
+            "resistance_range": (
+                min(resistances) if resistances else 0.0,
+                max(resistances) if resistances else 0.0),
+            "count": len(tasks),
+        }
+
+    return steps, max_depth, max_resistance, homotopy_classes
 
 
 # ── Safe async bridge (暗礁 1: event loop bomb) ──────────────────────
@@ -525,6 +605,23 @@ class TrackCEngine:
         ))
 
         # ── V5.1: DIRECT short-circuit ──
+        # Safety gate: block DIRECT when clarity is critically low AND
+        # the user shows significant emotional signal. Low clarity means
+        # the Planning engine can't reliably judge if the user's input is
+        # a simple continuation ("好的") or a complex grievance ("你出问题了").
+        # Forcing FULL_DAG ensures the Critic evaluates the response before
+        # it reaches the user — preventing recursive self-diagnosis spirals.
+        if is_direct and clarity < 0.20:
+            self._emit("🔀 Track C Planning",
+                f"DIRECT blocked — clarity={clarity:.2f} too low, "
+                f"forcing FULL_DAG for safety")
+            is_direct = False
+            # Synthesize a minimal plan for the Critic to evaluate
+            plan_result = [
+                {"prompt": f"用户反馈: {user}", "tool": "",
+                 "intent_type": "DEMONSTRATION"}
+            ]
+
         if is_direct:
             self._emit("🔀 Track C Planning", f"DIRECT (short-circuit, {time.time()-t0:.1f}s)")
             pad = Scratchpad(max_retries=0)
@@ -538,12 +635,22 @@ class TrackCEngine:
             return final, output_mult
 
         # ── FULL_DAG: build DAG topology, compute parallel_depth ──
-        plan_with_deps, parallel_depth, max_resistance = (
-            _build_dag_and_depth(plan_result, RESISTANCE_WEIGHTS))
+        plan_with_deps, parallel_depth, max_resistance, homotopy_classes = (
+            _build_dag_and_depth(plan_result, RESISTANCE_WEIGHTS,
+                                 emit=self._emit))
         self._emit("🔀 Track C Planning",
             f"FULL_DAG: {len(plan_result)} 步, depth={parallel_depth}"
             f"{', maxR=' + str(max_resistance) if max_resistance > 0 else ''}"
+            f"{', H-classes=' + str(len(homotopy_classes)) if homotopy_classes else ''}"
             f" ({time.time()-t0:.1f}s)")
+
+        # ── Verify fiber cross-section bounds (P25) ──
+        for hc_level, hc in homotopy_classes.items():
+            if hc["count"] > parallel_depth:
+                self._emit("🔀 Track C Planning",
+                    f"H_{hc_level} oversubscribed "
+                    f"(|H|={hc['count']} > depth={parallel_depth}, "
+                    f"R in {hc['resistance_range']}) — auto-batching")
 
         # ── V7.2 Phase 1: PhysicalBudget (DAG上的联络) ──
         from core.critic.dual_track import PhysicalBudget as _PhysicalBudget
@@ -586,6 +693,7 @@ class TrackCEngine:
         accumulated_hints: list[str] = []  # Patch 1: integral term
         augmented_tc: list[dict] = []       # V7.3: sigma-monotone test cases
         final = ""
+        chunks_buffer: list[str] = []       # Moved outside loop for post-retry scope
 
         while phys_retries <= max_phys_retries:
             if phys_retries == 0:
@@ -617,61 +725,177 @@ class TrackCEngine:
                 else:
                     constraints = [tc_hint]
 
+            # ── V7.5 P26: Buffered streaming for physical hard-gate ──
+            # Non-streaming: synthesize in-process, verify, return.
+            # Streaming: buffer tokens, verify, flush only after PASS.
+            # This prevents broken code from reaching the user before verification
+            # (NIST AI 100-2e2 §5.1: physical verification must complete before output).
+            chunks_buffer.clear()  # Reset for this retry iteration
+
             if stream_callback:
-                final = self._stream_and_collect(user, system, pad, stream_callback, constraints)
+                def _buffer_cb(token: str) -> None:
+                    if len(chunks_buffer) < MAX_BUFFER_TOKENS:
+                        chunks_buffer.append(token)
+                    else:
+                        raise BufferOverflowError(
+                            f"Physical verification buffer exceeded "
+                            f"{MAX_BUFFER_TOKENS} tokens — "
+                            f"likely infinite-loop code generation"
+                        )
+                try:
+                    final = self._stream_and_collect(
+                        user, system, pad, _buffer_cb, constraints)
+                except BufferOverflowError:
+                    self._emit("🔧 物理验证",
+                        "BUFFER OVERFLOW → semantic escape")
+                    final += (
+                        "\n\n[⚠ PHYSICAL BUFFER OVERFLOW: "
+                        "代码生成可能包含死循环, 已中断]"
+                    )
+                    break
             else:
                 final = self._synthesize(user, system, pad, constraints)
 
-            # Physical gate
-            code = _extract_code(final)
-            if not code or len(code) < 10:
-                self._emit("🔧 物理验证", "no code in Synthesis — skipping")
-                break
-
+            # ── V7.5: DualTrackCritic — unified semantic+physical gate ──
+            # The missing link: semantic score (from CriticEngine) and physical
+            # result (from SandboxExecutor) combine via multiplicative gating.
+            # θ AND q — not additive, not veto. The verdict decides next action.
+            # ── Check if any step actually uses a physical tool ──
+            _has_sandbox = any(
+                s.get("tool", "") == "sandbox_python" for s in pad.plan)
+            code = _extract_code(final) if _has_sandbox else ""
             from core.execution.sandbox import SandboxExecutor, PhysicalState
             from core.execution.error_mapper import ErrorMapper
+            from core.critic.dual_track import DualTrackCritic, CriticVerdict, CriticDecision
 
-            executor = SandboxExecutor()
-            phys_result = executor.run(
-                code, augmented_tc if augmented_tc else None,
-                "EXECUTABLE", phys_budget)
+            dual_critic = DualTrackCritic()
 
-            if phys_result.state == PhysicalState.PASS:
-                self._emit("🔧 物理验证",
-                    f"PASS (retries={phys_retries}, budget={phys_budget.remaining:.1f})"
-                    + (f", aug_tc={len(augmented_tc)}" if augmented_tc else ""))
+            if not code or len(code) < 10:
+                # No code to verify → semantic-only gate.
+                # If semantic score is already low, the Critic retry loop
+                # before Synthesis already exhausted its attempts. Continuing
+                # the physical retry loop won't fix a semantic problem — break.
+                decision = dual_critic.evaluate(
+                    pad.critic_score, theta,
+                    physical_result=None, intent_type="DEMONSTRATION")
+                self._emit("🔧 双轨验证",
+                    f"semantic-only: score={pad.critic_score:.2f} θ={theta:.2f} → {decision.verdict.value}")
+                if decision.verdict == CriticVerdict.RETRY:
+                    # Semantic retries already exhausted — force accept
+                    self._emit("🔧 双轨验证",
+                        "semantic RETRY in no-code path — retries exhausted, accept")
+                    decision = CriticDecision(
+                        verdict=CriticVerdict.PASS,
+                        semantic_score=pad.critic_score,
+                        reason="semantic retry exhausted (no physical check)")
+                # phys_result never assigned in this branch — skip physical handlers
+                phys_result = None
+            else:
+                # ── Smooth budget gate (Morse-Bott) ──
+                resistance_factor = 1.0 + 0.2 * max(0.0, (max_resistance - 10.0) / 10.0)
+                effective_cost = max(1.0, min(3.0, resistance_factor))
+                if phys_budget.remaining < effective_cost:
+                    self._emit("🔧 物理验证",
+                        f"REJECT: budget {phys_budget.remaining:.1f} < "
+                        f"effective_cost {effective_cost:.1f} (R={max_resistance:.0f})")
+                    final += (
+                        f"\n\n[⚠ PHYSICAL BUDGET: 高阻力操作 (R={max_resistance:.0f}) "
+                        f"需要 {effective_cost:.1f} 预算, 剩余 {phys_budget.remaining:.1f}]"
+                    )
+                    if stream_callback and chunks_buffer:
+                        for token in chunks_buffer:
+                            try: stream_callback(token)
+                            except Exception: pass
+                    break
+
+                # ── Physical execution ──
+                executor = SandboxExecutor()
+                phys_result = executor.run(
+                    code, augmented_tc if augmented_tc else None,
+                    "EXECUTABLE", phys_budget)
+
+                # ── Semantic + Physical multiplicative gate ──
+                mapper = ErrorMapper()
+                mapping = mapper.map(phys_result, code) if phys_result.state != PhysicalState.PASS else None
+                fix_hint = mapping.fix_hint if mapping else ""
+
+                decision = dual_critic.evaluate(
+                    semantic_score=pad.critic_score,
+                    theta=theta,
+                    physical_result=phys_result,
+                    intent_type="EXECUTABLE",
+                    fix_hint=fix_hint,
+                )
+                self._emit("🔧 双轨验证",
+                    f"sem={pad.critic_score:.2f} θ={theta:.2f} phys={phys_result.state.value} "
+                    f"→ {decision.verdict.value} ({decision.reason[:50]})")
+
+            # ── Act on dual-track verdict ──
+            if decision.verdict == CriticVerdict.PASS:
+                if phys_retries > 0:
+                    self._emit("🔧 双轨验证",
+                        f"PASS after {phys_retries} retries, "
+                        f"budget={phys_budget.remaining:.1f}"
+                        + (f", aug_tc={len(augmented_tc)}" if augmented_tc else ""))
+                # Flush buffered tokens to user
+                if stream_callback and chunks_buffer:
+                    for token in chunks_buffer:
+                        try: stream_callback(token)
+                        except Exception: pass
                 break
 
-            # Patch 2: TIMEOUT → semantic escape
-            if phys_result.state == PhysicalState.TIMEOUT:
-                self._emit("🔧 物理验证", "TIMEOUT → semantic escape")
-                final += "\n\n[⚠ PHYSICAL TIMEOUT: 代码可能存在死循环或复杂度过高]"
+            if decision.verdict == CriticVerdict.FAIL_FATAL:
+                self._emit("🔧 双轨验证",
+                    f"FAIL_FATAL: {decision.reason} — Rigid Contract #5, aborting")
+                final += (
+                    f"\n\n[⛔ PHYSICAL FATAL: {decision.reason}. "
+                    f"刚性契约 #5 — 无条件终止.]"
+                )
+                if stream_callback and chunks_buffer:
+                    for token in chunks_buffer:
+                        try: stream_callback(token)
+                        except Exception: pass
                 break
 
-            # Physical FAIL — accumulate constraint (Patch 1: integral term)
-            phys_retries += 1
-            mapper = ErrorMapper()
-            mapping = mapper.map(phys_result, code)
+            # ── CriticVerdict.RETRY: only physical failures count against budget ──
+            # Semantic retries (low critic score, no physical issue) don't
+            # consume physical retry quota — they bounce back to Synthesis
+            # with accumulated constraints.
+            is_physical_fail = "physical" in decision.reason.lower()
+            if is_physical_fail:
+                phys_retries += 1
 
-            # ── V7.3: sigma-monotone test case augmentation ──
-            # T_{n+1} = T_n + sigma(error_type) -> acceptance region shrinks
-            from core.execution.error_mapper import augment_test_cases
-            new_tc = augment_test_cases(
-                mapping.error_type,
-                failed_test=phys_result.test_results[0] if phys_result.test_results else None,
-            )
-            if new_tc:
-                augmented_tc.extend(new_tc)
-                self._emit("🔧 物理验证",
-                    f"augmented {len(new_tc)} boundary tests (total={len(augmented_tc)})")
-
-            hint = mapping.fix_hint
+            # Patch 1: integral term — accumulate all historical constraints
             accumulated_hints.append(
-                f"PHYSICAL FAIL {phys_result.state.value}: {hint}"
+                f"PHYSICAL RETRY ({phys_retries}/{max_phys_retries}): "
+                f"{decision.fix_hint or decision.reason}"
                 f" — 修复时必须保持函数名、参数、返回类型完全不变，只改内部逻辑。"
             )
-            self._emit("🔧 物理验证",
-                f"FAIL ({phys_retries}/{max_phys_retries}): {phys_result.state.value} — {hint[:60]}")
+
+            # V7.3: sigma-monotone test case augmentation
+            # (only when physical execution actually ran)
+            if phys_result is not None and phys_result.test_results:
+                from core.execution.error_mapper import augment_test_cases
+                new_tc = augment_test_cases(
+                    mapping.error_type if mapping else "",
+                    failed_test=phys_result.test_results[0] if phys_result.test_results else None,
+                )
+                if new_tc:
+                    augmented_tc.extend(new_tc)
+                    self._emit("🔧 双轨验证",
+                        f"augmented {len(new_tc)} boundary tests (total={len(augmented_tc)})")
+
+            self._emit("🔧 双轨验证",
+                f"RETRY ({phys_retries}/{max_phys_retries}): {decision.reason[:80]}")
+
+        # ── Post-retry: flush buffer if streaming (max retries exhausted) ──
+        if stream_callback and chunks_buffer and phys_retries >= max_phys_retries:
+            final += "\n\n[⚠ PHYSICAL RETRIES EXHAUSTED: 代码可能仍有问题]"
+            for token in chunks_buffer:
+                try:
+                    stream_callback(token)
+                except Exception:
+                    pass
 
         self._emit("🔀 Track C 合成", f"完成 ({time.time()-t0:.1f}s)")
         return final, output_mult
@@ -777,11 +1001,23 @@ class TrackCEngine:
         self, plan: list[dict], user: str, system: str, prev_context: str,
         parallel_depth: int = 1,
     ) -> list[str]:
-        """Execute plan steps via OrchestrationEngine — V6.1 DAG-aware concurrency."""
+        """Execute plan steps via OrchestrationEngine — DAG-aware concurrency.
+
+        Semaphore(parallel_depth) enforces fiber cross-section bound (P25):
+        at most parallel_depth tasks run concurrently within each BFS level.
+        This is not cosmetic — it's the topological constraint that prevents
+        resource oversubscription across homotopy classes.
+        """
         import asyncio as _asyncio
-        tasks = [self._orchestrate_one(step, user, system, prev_context,
-                                       parallel_depth=parallel_depth)
-                 for step in plan]
+        _sem = _asyncio.Semaphore(parallel_depth)
+
+        async def _run_gated(step):
+            async with _sem:
+                return await self._orchestrate_one(
+                    step, user, system, prev_context,
+                    parallel_depth=parallel_depth)
+
+        tasks = [_run_gated(s) for s in plan]
         raw = await _asyncio.gather(*tasks, return_exceptions=True)
         # Safety clamp: explicit error marking for downstream Critic/Synth
         return [r if isinstance(r, str) else f"[STEP_FAILED: {type(r).__name__}: {r}]" for r in raw]

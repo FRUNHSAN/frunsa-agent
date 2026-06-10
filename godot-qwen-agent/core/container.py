@@ -29,6 +29,12 @@ class Container:
         self.profile = UserProfile.load(cfg.user_id)
         self.learner = EMALearner(user_id=cfg.user_id)
 
+        # ── V7.4: Cross-session identity manifold ──
+        self._identity_store = None  # Lazy-loaded
+
+        # ── V7.5: Entropy monitor for active concern ──
+        self._entropy_monitor = None  # Lazy-loaded
+
         # ── Contract engine ──
         self.bp = DynamicBlueprint(blueprint_defaults())
         self.engine = ContractEvolutionEngine(trust_threshold=0.10, rollback_window=3)
@@ -88,6 +94,24 @@ class Container:
         self._cloud_llm = None
         self._local_llm = None
         self._auditor = None
+
+    # ── V7.4: Identity manifold (lazy) ──
+
+    @property
+    def identity_store(self):
+        """Lazy-load IdentityManifoldStore — pure math, zero API calls."""
+        if self._identity_store is None:
+            from core.memory.identity_manifold import IdentityManifoldStore
+            self._identity_store = IdentityManifoldStore()
+        return self._identity_store
+
+    @property
+    def entropy_monitor(self):
+        """Lazy-load EntropyMonitor — pure math, zero API calls."""
+        if self._entropy_monitor is None:
+            from core.watcher.entropy_monitor import EntropyMonitor
+            self._entropy_monitor = EntropyMonitor()
+        return self._entropy_monitor
 
     @property
     def cloud_llm(self):
@@ -260,19 +284,33 @@ class Container:
         return actions
 
     def kernel_execute_repairs(self, actions: list) -> None:
-        """Execute repair actions — modify DynamicBlueprint in-place."""
+        """Execute repair actions — modify DynamicBlueprint in-place.
+
+        V7.6: After repair, emit contract_synced event to close the
+        nominal-actual divergence gap (裂缝 3). Kernel repairs skip
+        ContractEvolutionEngine.evaluate() by design (they ARE the immune
+        system), but the audit trail must still reflect the state change.
+        """
+        modified = False
         for action in actions:
             if action["action"] == "lower_autonomy":
                 self.bp.apply_proposal("execution_autonomy", action["target"])
                 self.bus.emit("自修复", f"autonomy → {action['target']} ({action.get('reason','健康恶化')})")
+                modified = True
             elif action["action"] == "lock_failed_tools":
                 self.bus.emit("自修复", "failed tools locked by backlash")
+                modified = True
             elif action["action"] == "raise_autonomy":
                 self.bp.apply_proposal("execution_autonomy", action["target"], ignore_cooldown=True)
                 report_info = f"连续健康 {action.get('healthy_rounds', 0)} 轮" if action.get("healthy_rounds") else "恢复"
                 self.bus.emit("自修复", f"autonomy → {action['target']} ({report_info})")
+                modified = True
             elif action["action"] == "suggest_trust_recalibration":
                 self.bus.emit("自修复", "建议信任校准")
+        # V7.6: sync nominal state for audit consistency (裂缝 3)
+        if modified:
+            self.bus.emit("契约同步",
+                f"kernel_repair applied, autonomy={self.bp.enforce('execution_autonomy')}")
 
     @property
     def auditor(self) -> ContractAuditor | None:
