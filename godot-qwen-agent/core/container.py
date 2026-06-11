@@ -64,6 +64,8 @@ class Container:
         import core.adapters.keyword_chunker  # noqa: triggers @register_component
         import core.adapters.semantic_chunker  # noqa: triggers @register_component
         import core.execution.sandbox_tool     # noqa: V7.2 — register sandbox_python
+        import components.tools.run_powershell  # noqa: V8.4 — register run_powershell
+        import components.tools.filesystem_tools # noqa: V8.4 — register write_file, read_file
 
         # ── Mock MCP tools (always available for demo) ──
         try:
