@@ -316,7 +316,8 @@ class Repl:
     # tone_style, conversational_initiative, contextual_anchoring → Synthesis domain
     PLANNING_SEMANTIC_MAP = {
         "response_verbose_level": (
-            "📏 预期最终回复长度: {}（仅供参考，不影响任务分解粒度）"
+            "📏 预期最终回复长度: {}。如果该长度显著短于默认值，"
+            "你可以适当减少规划步数或降低分解粒度。"
         ),
     }
 
@@ -1677,6 +1678,8 @@ class Repl:
             # T(t) = T(t-1) + Δt_penalty + σ(r_t) — additive on penalized base
             self.trust = self._trust_breathe(sigma)
             trust = self.trust  # Sync local variable for next round's X-Ray display
+            # ── V8.0: Continuous trust-driven output attenuation ──
+            self.c.output_pipeline.set_trust_attenuation(self.trust)
             delta = self.trust - old_trust
             if abs(delta) > 0.001:
                 self.c.profile.record_trust_delta(delta, self.c.profile.session_count)

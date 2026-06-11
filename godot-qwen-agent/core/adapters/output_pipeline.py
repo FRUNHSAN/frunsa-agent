@@ -55,6 +55,16 @@ class OutputPipeline:
         self.sentence_limit_multiplier: float = 1.0
         self._base_char_multiplier: float = 1.0   # 快照基线，用于恢复
         self._base_sentence_multiplier: float = 1.0
+        self._trust_attenuation: float = 1.0       # V8.0: continuous trust-driven output cap
+
+    def set_trust_attenuation(self, trust: float) -> None:
+        """V8.0: Continuous trust-driven output attenuation.
+
+        trust ∈ [0, 1] → attenuation ∈ [0.6, 1.0]
+        trust=0.0 → output capped at 60% of normal (crisis restraint)
+        trust=1.0 → output at 100% of normal (full confidence)
+        """
+        self._trust_attenuation = 0.6 + 0.4 * trust
 
     def process(self, raw: str) -> tuple[str, float]:
         """Process raw LLM output through contract-enforced pipeline.
@@ -65,7 +75,7 @@ class OutputPipeline:
         verbose = self._bp.enforce("response_verbose_level") or "HIGH"
         tone = self._bp.enforce("tone_style") or "WARM"
         base_sent = VERBOSE_SENTENCE_LIMITS.get(verbose, 999)
-        max_sent = (int(base_sent * self.sentence_limit_multiplier)
+        max_sent = (int(base_sent * self.sentence_limit_multiplier * self._trust_attenuation)
                     if base_sent < 999 else 999)
 
         result = raw
@@ -79,7 +89,7 @@ class OutputPipeline:
 
         # ── 2b. Character cap (semantic — finds last sentence boundary) ──
         base_chars = VERBOSE_CHAR_LIMITS.get(verbose, 0)
-        max_chars = int(base_chars * self.char_limit_multiplier) if base_chars > 0 else 0
+        max_chars = int(base_chars * self.char_limit_multiplier * self._trust_attenuation) if base_chars > 0 else 0
         if max_chars > 0:
             result = self._truncate_chars(result, max_chars)
 
