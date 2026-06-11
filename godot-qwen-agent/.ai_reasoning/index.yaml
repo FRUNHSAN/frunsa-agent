@@ -462,6 +462,13 @@ chains:
     tags: [v8.0, trust_attenuation, output_pipeline, continuous_decay, semantic_authorization, planning_hint, over_damping, self_attention_trap, pseudo_continuity]
     status: active
 
+  - chain_id: v8_1_loop_category_theory
+    file: chains/v8_1_loop_category_theory.yaml
+    title: "V8.1 自适应 Loops 数学背板 — 1-2 范畴论（Galois连接+自然变换+Bang-bang控制）"
+    layer: plan
+    tags: [v8.1, loops, category_theory, galois_connection, natural_transformation, bang_bang_control, pontryagin, schmitt_trigger, sliding_mode_control, theory_only]
+    status: active
+
   # ── Real LLM Orchestration + Critic Engines ──
   - chain_id: phase_18_real_orch_critic
     file: chains/phase_18_real_orch_critic.yaml
