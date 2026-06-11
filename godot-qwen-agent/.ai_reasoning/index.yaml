@@ -469,6 +469,13 @@ chains:
     tags: [v8.1, loops, category_theory, galois_connection, natural_transformation, bang_bang_control, pontryagin, schmitt_trigger, sliding_mode_control, theory_only]
     status: active
 
+  - chain_id: v8_3_cross_subsystem_coupling
+    file: chains/v8_3_cross_subsystem_coupling.yaml
+    title: "V8.3 跨子系统耦合 — 多速率信号流拓扑（相变+前馈增益调度+积分器门控）"
+    layer: plan
+    tags: [v8.3, cross_subsystem, signal_flow, phase_transition, feedforward, gain_scheduling, integrator_gating, supervisory_control, boundary_telemetry, theory_only]
+    status: active
+
   # ── Real LLM Orchestration + Critic Engines ──
   - chain_id: phase_18_real_orch_critic
     file: chains/phase_18_real_orch_critic.yaml

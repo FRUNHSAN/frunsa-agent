@@ -46,6 +46,11 @@ class OutputPipeline:
             trust -= penalty
     """
 
+    # V8.3: Absolute floor for effective multiplier — prevents multiplication
+    # deadlock when char_limit_multiplier=0.5 (MINIMAL) × _trust_attenuation=0.6
+    # (crisis) = 0.3, which would violently truncate code blocks and JSON.
+    EFFECTIVE_MULT_MIN: float = 0.5
+
     def __init__(self, bp: object) -> None:
         self._bp = bp  # DynamicBlueprint — read via enforce()
         # ── V5 Path 3: Execution Constraint Reflex ──
@@ -75,7 +80,7 @@ class OutputPipeline:
         verbose = self._bp.enforce("response_verbose_level") or "HIGH"
         tone = self._bp.enforce("tone_style") or "WARM"
         base_sent = VERBOSE_SENTENCE_LIMITS.get(verbose, 999)
-        max_sent = (int(base_sent * self.sentence_limit_multiplier * self._trust_attenuation)
+        max_sent = (int(base_sent * max(self.sentence_limit_multiplier * self._trust_attenuation, self.EFFECTIVE_MULT_MIN))
                     if base_sent < 999 else 999)
 
         result = raw
@@ -89,7 +94,7 @@ class OutputPipeline:
 
         # ── 2b. Character cap (semantic — finds last sentence boundary) ──
         base_chars = VERBOSE_CHAR_LIMITS.get(verbose, 0)
-        max_chars = int(base_chars * self.char_limit_multiplier * self._trust_attenuation) if base_chars > 0 else 0
+        max_chars = int(base_chars * max(self.char_limit_multiplier * self._trust_attenuation, self.EFFECTIVE_MULT_MIN)) if base_chars > 0 else 0
         if max_chars > 0:
             result = self._truncate_chars(result, max_chars)
 

@@ -108,6 +108,8 @@ class Repl:
         self._restore_streaks()
         self._sem = None  # V7.7: unified semantic observer (set in run())
         self._semantic_confidence: float = 1.0  # V7.9: continuous ⊥ confidence (replaces bool)
+        self._last_boundary_emit_round: int = -999  # V8.3: debounce for threshold telemetry
+        self._prev_trust_telemetry: float = 0.5    # V8.3: trust delta for boundary data
         # Embedding model loads lazily on first _route_task() or _classify_command() call
 
     # ── V5 Status dashboard ──
@@ -453,6 +455,23 @@ class Repl:
         if trust_var > 0.3 and cur != "A":
             self._route_track = "A"
             return "A", "variance_safety"
+
+        # ── V8.3: Boundary telemetry for V9.0 sliding mode control ──
+        # Edge-triggered with 3-round cooldown to prevent log flooding.
+        # Emits AFTER routing decision (records THIS round's actual route).
+        _trust_band = 0.08 <= trust <= 0.15
+        _var_band = 0.25 <= trust_var <= 0.40
+        _boundary_hit = _trust_band or _var_band
+        _boundary_cooled = (self.round_count - self._last_boundary_emit_round) >= 3
+        if _boundary_hit and _boundary_cooled:
+            zone = "trust" if _trust_band else "var"
+            delta_trust = trust - self._prev_trust_telemetry
+            self.c.bus.emit("边界遥测",
+                f"{zone}_boundary trust={trust:.3f} Δ={delta_trust:+.3f} "
+                f"e_t={e_t:.3f} trust_var={trust_var:.3f} "
+                f"route={self._route_track} round={self.round_count}")
+            self._last_boundary_emit_round = self.round_count
+            self._prev_trust_telemetry = trust
 
         return cur, "hold"
     def _execute_tool(self, tool_name: str, params: dict, xray: XRay) -> str:

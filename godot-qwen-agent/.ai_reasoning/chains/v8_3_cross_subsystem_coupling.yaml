@@ -1,0 +1,149 @@
+# Reasoning Chain: V8.3 — Cross-Subsystem Coupling (Multi-Rate Signal Flow Topology)
+chain_id: v8_3_cross_subsystem_coupling
+title: "V8.3 跨子系统耦合 — 多速率信号流拓扑（相变触发+前馈增益调度+积分器门控）"
+created_at: "2026-06-11T23:45:00Z"
+status: active
+tags: [v8.3, cross_subsystem, signal_flow, phase_transition, feedforward,
+       gain_scheduling, integrator_gating, supervisory_control, control_theory,
+       boundary_telemetry, sliding_mode_prep, theory_only]
+related_chains: [v8_1_loop_category_theory, v7_9_planning_contract_injection,
+                  v7_7_sheaf_semantic_translator, v7_6_adaptive_contract_closed_loop]
+
+context: |
+  V7.7, V7.6→V8.0, and V8.1 gave the three adaptive subsystems independent
+  mathematical backbones (sheaf theory, gradient flow, Galois connections).
+  But the signals flowing BETWEEN them — trust→route, ⊥→contract, e(t)→critic,
+  verbosity→planning — were described only as flat if/elif blocks in the REPL
+  coordinator.
+
+  An earlier draft attempted to frame these as "natural transformations" in
+  a 2-category of subsystems. Red team review rejected this: natural
+  transformations require parallel functors with identical target categories.
+  Cross-subsystem signals connect DIFFERENT target categories (continuous
+  parameter spaces vs discrete routing states). Calling parameter passing a
+  "natural transformation" is math-washing.
+
+  The correct mathematical language is CONTROL THEORY. The REPL coordinator
+  is not a family of natural transformations — it is a MULTI-RATE SIGNAL
+  FLOW TOPOLOGY with three distinct coupling mechanisms.
+
+mathematical_framework:
+  phase_transitions:
+    - name: "η: trust crisis → route collapse"
+      mechanism: "Supervisory Control (Reaching Condition)"
+      signal: "trust < 0.10"
+      effect: "All routing collapses to Track A (absorbing state)"
+      math: |
+        This is a non-continuous phase transition. The system state space
+        has a critical manifold at trust=0.10. Below this manifold, the
+        normal dynamics (Schmitt trigger on e(t)) are suspended and the
+        system is forced to the safe absorbing state A.
+
+        In Sliding Mode Control theory, this is a REACHING CONDITION:
+        s(x) = 0.10 - trust → when s(x) > 0, the sliding surface is
+        breached and the supervisory controller overrides normal operation.
+      v9_plan: "Replace hard threshold with boundary layer sigmoid: P(A) = σ(k·(0.10-trust)) for trust ∈ [0.05, 0.15]"
+
+    - name: "μ: ⊥ vacuum → route collapse"
+      mechanism: "Supervisory Control (Safety Override)"
+      signal: "obs.null_region or obs.gap_region"
+      effect: "Route forced to A when user intent is undecidable"
+      math: |
+        Same mechanism as η but triggered by semantic vacuum rather than
+        trust crisis. When the sheaf observer declares ⊥ (section undefined),
+        the supervisor overrides routing to Track A — no computational
+        resources should be expended on undecidable input.
+
+  feedforward_gain_scheduling:
+    - name: "ξ: e(t) → Critic threshold θ"
+      mechanism: "Continuous Gain Scheduling"
+      signal: "e_t ∈ [0, 1]"
+      effect: "θ = max(0.50, 0.75 - 0.25·f_drift·g(e_t))"
+      math: |
+        The tracking error e(t) acts as a continuous feedforward signal that
+        modulates the Critic's acceptance threshold. This is classic gain
+        scheduling: a system state variable continuously adjusts a downstream
+        controller parameter. No categorical structure needed — it's an
+        algebraic mapping g(e_t) = clamp((e_t-0.55)/0.15, 0, 1).
+
+    - name: "ρ: trust → output attenuation"
+      mechanism: "Continuous Feedforward"
+      signal: "trust ∈ [0, 1]"
+      effect: "attenuation = 0.6 + 0.4·trust"
+      math: |
+        Linear mapping from trust to output cap multiplier. Pure feedforward —
+        no feedback loop, no state dependence beyond the trust value itself.
+
+    - name: "π: verbosity → Planning step authorization"
+      mechanism: "Prompt-Level Delegative Gain"
+      signal: "response_verbose_level ∈ {HIGH, MEDIUM, LOW, MINIMAL}"
+      effect: "Planning hint text delegates step count decision to LLM"
+      math: |
+        Unlike ξ and ρ which are algebraic mappings, π is a SEMANTIC mapping.
+        The discrete verbosity level is translated into a natural language
+        authorization ("you may reduce planning steps") that the LLM's
+        internal continuous reasoning space interprets. This is the V8.0
+        pattern: leverage the LLM's implicit continuity rather than
+        external if-else.
+
+  integrator_gating:
+    - name: "ν: ⊥ → contract freeze"
+      mechanism: "Integrator Gate Control"
+      signal: "obs.confidence < threshold"
+      effect: "η=0 — contract gradient descent frozen"
+      math: |
+        The contract is an integrator with memory: c(t) = c(0) - ∫η·∇V dt.
+        ⊥ acts as a GATE on the integrator: when semantic confidence is low,
+        the gate closes (η→0), preventing noise from accumulating in the
+        long-term memory. This is identical in structure to a track-and-hold
+        circuit in analog electronics.
+
+anti_patterns:
+  - "Calling parameter passing a 'natural transformation' — natural transformations require identical target categories. trust→route and verbosity→planning have different targets."
+  - "Using category theory for signal flow — control theory (gain scheduling, supervisory control, integrator gating) is the correct mathematical language"
+  - "Emitting boundary telemetry every round — edge-triggered debounce (>3 round cooldown) is mandatory to prevent log flooding"
+
+decision: |
+  The six cross-subsystem couplings are classified into three control-theoretic
+  categories. No category theory is used where it doesn't belong. The REPL
+  coordinator is honestly described as a multi-rate signal flow topology —
+  an imperative event bus, not a family of natural transformations.
+
+  C part: boundary telemetry with edge-triggered debounce. Emits AFTER routing
+  decision (records THIS round's actual route, not previous). Includes trust
+  delta and round number for V9.0 state distribution analysis.
+
+rationale: |
+  The shift from "natural transformations" to "control theory signal flow"
+  is not a downgrade — it's a mathematical upgrade. Control theory provides:
+  - Reachable, provable stability conditions (Lyapunov functions)
+  - Well-defined composition rules (block diagram algebra)
+  - Direct mapping to V9.0 RL state space (observation matrix, reset maps)
+
+  Category theory is the right tool for STATIC structure (V8.1's Galois
+  connection). Control theory is the right tool for DYNAMIC coupling.
+
+future_guidance:
+  v8_3_signal_flow_topology:
+    summary: "Six cross-subsystem signals classified: phase transitions (η,μ), feedforward gain scheduling (ξ,ρ,π), integrator gating (ν). REPL is multi-rate event bus, not natural transformation family."
+    priority: critical
+  v8_3_boundary_telemetry:
+    summary: "Edge-triggered telemetry with 3-round cooldown. Emits trust/var boundary state AFTER routing decision. Includes Δtrust. Accumulates V9.0 sliding mode control training data."
+    priority: critical
+  v8_3_archaeological_scars:
+    summary: "Scar 1: _clarification_needed verified fully deleted (V7.9 completeness confirmed). Scar 2: EFFECTIVE_MULT_MIN=0.5 floor prevents 0.3× deadlock when char_limit×trust_attenuation underflows."
+    priority: high
+  v9_0_sliding_mode_prep:
+    summary: "Boundary telemetry data enables: (1) estimating k (sigmoid steepness) from observed boundary crossing frequency, (2) computing optimal sliding surface s(x)=0 from state distributions, (3) calibrating boundary layer width to minimize chattering."
+    priority: medium
+
+evidence:
+  - file: "core/repl.py"
+    symbols:
+      - "_route_controller: boundary telemetry at lines 459-472 (after routing decision)"
+      - "_last_boundary_emit_round: 3-round cooldown debounce (init line 111)"
+      - "_prev_trust_telemetry: trust delta tracking (init line 112)"
+  - file: "core/adapters/output_pipeline.py"
+    symbols:
+      - "EFFECTIVE_MULT_MIN = 0.5: absolute floor preventing multiplication deadlock (line 57)"
+      - "process(): max() applied to both sentence and char effective multipliers"
