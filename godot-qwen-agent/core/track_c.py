@@ -1088,6 +1088,7 @@ class TrackCEngine:
         )
         # ── V8.4: Real tool dispatch via ToolEngine (4th engine) ──
         tool_name = step.get("tool", "")
+        self._emit("🔧 V8.4 Tool", f"step_tool={repr(tool_name)} has_engine={self._tool_engine is not None}")
         if tool_name and tool_name != "default" and self._tool_engine is not None:
             try:
                 from engines.tool.interface import ToolContext
