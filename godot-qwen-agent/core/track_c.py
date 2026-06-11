@@ -644,24 +644,6 @@ class TrackCEngine:
         # a simple continuation ("好的") or a complex grievance ("你出问题了").
         # Forcing FULL_DAG ensures the Critic evaluates the response before
         # it reaches the user — preventing recursive self-diagnosis spirals.
-        # V8.4: DIRECT safety gate — force FULL_DAG when tools exist and
-        # request is not clearly a trivial social/continuation message.
-        # DIRECT bypasses ToolEngine entirely — tool-capable requests must
-        # go through FULL_DAG or the LLM will hallucinate [TOOL:xxx] in text.
-        if is_direct and self._tool_engine is not None:
-            t = user.strip()
-            is_trivial = (len(t) <= 10 or
-                          any(t.startswith(w) for w in
-                              ("你好", "拜拜", "再见", "好的", "嗯", "哦", "行", "ok",
-                               "谢谢", "继续", "hi", "hello", "bye")))
-            if not is_trivial:
-                self._emit("🔀 Track C Planning",
-                    "DIRECT overridden — tools available, forcing FULL_DAG")
-                is_direct = False
-                plan_result = [
-                    {"prompt": f"{user}", "tool": "",
-                     "produces": "", "needs": "", "test_cases": []}]
-
         if is_direct and clarity < 0.20:
             self._emit("🔀 Track C Planning",
                 f"DIRECT blocked — clarity={clarity:.2f} too low, "
@@ -1145,31 +1127,30 @@ class TrackCEngine:
         return result
 
     def _build_tools_hint(self) -> str:
-        """V8.4: List available tools in planning prompt.
+        """V8.4: Describe available tools so Planning LLM can match intent to tool.
 
-        Strongly biases Planning toward FULL_DAG when a tool-relevant
-        request is detected. Without this, the LLM defaults to DIRECT
-        for simple-sounding tool requests ('write hello world').
+        Lists tools with their descriptions from the TOOLS registry.
+        Planning LLM uses these to decide FULL_DAG vs DIRECT — no
+        code-level gates needed when the LLM understands tool capabilities.
         """
         if not self._tool_engine:
             return ""
         try:
-            from core.contracts import COMPONENT_REGISTRY
-            tools = COMPONENT_REGISTRY.list("tool")
-            if not tools:
-                tool_list = [k for k in COMPONENT_REGISTRY._registry.get("tool", {})]
-            else:
-                tool_list = tools[:6]
-            if not tool_list:
+            from core.contracts.tool_contract import TOOLS
+            lines = []
+            for name, spec in TOOLS.items():
+                if name.startswith("mcp__"):
+                    continue  # MCP tools have their own descriptions
+                desc = spec.get("description", name)
+                lines.append(f"  - {name}: {desc}")
+            if not lines:
                 return ""
-            names = ", ".join(tool_list)
             return (
-                f"\n\n[可用工具] {names}。"
-                f"重要规则：任何涉及文件操作（创建、读取、修改、删除）、"
-                f"系统命令执行、代码运行、搜索查询的请求，"
-                f"必须选择 FULL_DAG 模式并在 steps 中设置 tool 字段。"
-                f"即使是简单的文件创建（如'写一个hello world到文件'）也必须用 FULL_DAG。"
-                f"只有纯文本闲聊、格式微调、确认回复才可以用 DIRECT。"
+                f"\n\n[可用工具] 你可以通过 FULL_DAG 模式调用以下工具：\n"
+                + "\n".join(lines) +
+                f"\n重要：涉及文件创建/读取、命令执行、代码运行等操作时，"
+                f"必须选择 FULL_DAG 并在 steps 中设置 tool 字段。"
+                f"DIRECT 模式下无法调用工具——禁止在 DIRECT 回复中写 [TOOL:xxx]。"
             )
         except Exception:
             return ""
