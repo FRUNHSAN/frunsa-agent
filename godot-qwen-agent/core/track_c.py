@@ -1090,12 +1090,16 @@ class TrackCEngine:
             items=1,
         )
         # ── V8.4: Real tool dispatch via ToolEngine (4th engine) ──
-        tool_name = step.get("tool", "")
+        # step may be a dict (DIRECT path) or PlanningStep (FULL_DAG path)
+        tool_name = (step.get("tool", "") if isinstance(step, dict)
+                     else getattr(step, "tool", ""))
+        tool_params = (step if isinstance(step, dict)
+                       else getattr(step, "params", {}))
         if tool_name and tool_name not in ("default", "none") and self._tool_engine is not None:
             try:
                 from engines.tool.interface import ToolContext
                 items = await _collect(self._tool_engine.execute(
-                    ToolContext(tool_name=tool_name, parameters=step),
+                    ToolContext(tool_name=tool_name, parameters=tool_params),
                     deadline=30.0, pace_config=PaceConfig(),
                 ))
                 result = "".join(item.delta for item in items)

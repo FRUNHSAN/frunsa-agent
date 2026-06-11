@@ -68,6 +68,8 @@ class PlanningStep:
     reasoning_depth: int
     parent_step_id: Optional[str]
     content: str
+    tool: str = ""          # V8.4: tool name from [可用工具] list, "" = none
+    params: dict = field(default_factory=dict)  # V8.4: tool params (path, content, ...)
     is_terminal: bool = False
 
 

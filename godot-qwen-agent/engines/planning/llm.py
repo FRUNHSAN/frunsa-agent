@@ -167,9 +167,14 @@ def _parse_planning_steps(
             dag_steps = data.get("steps", [])
             steps = []
             for i, s in enumerate(dag_steps):
+                # Preserve tool + all extra fields as params for ToolEngine
+                extra = {k: v for k, v in s.items()
+                         if k not in ("prompt", "tool")}
                 steps.append(PlanningStep(
                     step_index=i, reasoning_depth=1, parent_step_id=None,
                     content=s.get("prompt", str(s)),
+                    tool=s.get("tool", ""),
+                    params=extra,
                     is_terminal=(i == len(dag_steps) - 1),
                 ))
             if steps:
