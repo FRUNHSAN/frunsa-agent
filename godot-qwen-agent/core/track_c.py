@@ -644,6 +644,24 @@ class TrackCEngine:
         # a simple continuation ("好的") or a complex grievance ("你出问题了").
         # Forcing FULL_DAG ensures the Critic evaluates the response before
         # it reaches the user — preventing recursive self-diagnosis spirals.
+        # V8.4: DIRECT safety gate — force FULL_DAG when tools exist and
+        # request is not clearly a trivial social/continuation message.
+        # DIRECT bypasses ToolEngine entirely — tool-capable requests must
+        # go through FULL_DAG or the LLM will hallucinate [TOOL:xxx] in text.
+        if is_direct and self._tool_engine is not None:
+            t = user.strip()
+            is_trivial = (len(t) <= 10 or
+                          any(t.startswith(w) for w in
+                              ("你好", "拜拜", "再见", "好的", "嗯", "哦", "行", "ok",
+                               "谢谢", "继续", "hi", "hello", "bye")))
+            if not is_trivial:
+                self._emit("🔀 Track C Planning",
+                    "DIRECT overridden — tools available, forcing FULL_DAG")
+                is_direct = False
+                plan_result = [
+                    {"prompt": f"{user}", "tool": "",
+                     "produces": "", "needs": "", "test_cases": []}]
+
         if is_direct and clarity < 0.20:
             self._emit("🔀 Track C Planning",
                 f"DIRECT blocked — clarity={clarity:.2f} too low, "
@@ -969,7 +987,8 @@ class TrackCEngine:
                 f"[规划指令] 根据用户意图的复杂度选择输出格式：\n\n"
                 f"如果用户意图是格式微调、简单追问、闲聊或延续已有内容"
                 f"（如'字多一点'、'继续'、'好的'），输出 DIRECT：\n"
-                f'  {{"type": "DIRECT", "action": "直接基于上下文生成回复"}}\n\n'
+                f'  {{"type": "DIRECT", "action": "直接基于上下文生成回复"}}\n'
+                f"  DIRECT 模式下禁止在回复中写 [TOOL:xxx]——工具调用只能通过 FULL_DAG 完成。\n\n"
                 f"如果用户意图需要新增知识、多步推理或工具调用，输出 FULL_DAG：\n"
                 f'  {{"type": "FULL_DAG", "steps": [{{"prompt": "...", "tool": "", '
                 f'"produces": "标签(可选)", "needs": "标签(可选)", '
@@ -1126,19 +1145,31 @@ class TrackCEngine:
         return result
 
     def _build_tools_hint(self) -> str:
-        """V8.4: List available tools in planning prompt so LLM knows when to use FULL_DAG."""
+        """V8.4: List available tools in planning prompt.
+
+        Strongly biases Planning toward FULL_DAG when a tool-relevant
+        request is detected. Without this, the LLM defaults to DIRECT
+        for simple-sounding tool requests ('write hello world').
+        """
         if not self._tool_engine:
             return ""
         try:
             from core.contracts import COMPONENT_REGISTRY
             tools = COMPONENT_REGISTRY.list("tool")
             if not tools:
+                tool_list = [k for k in COMPONENT_REGISTRY._registry.get("tool", {})]
+            else:
+                tool_list = tools[:6]
+            if not tool_list:
                 return ""
-            tool_list = ", ".join(tools[:6])  # Top 6 to avoid prompt bloat
+            names = ", ".join(tool_list)
             return (
-                f"\n\n[可用工具] 你可以调用以下工具（需要 FULL_DAG 模式）：{tool_list}。"
-                f"涉及文件操作、系统命令、代码执行、搜索查询时，"
-                f"请务必选择 FULL_DAG 并在 steps 中设置 tool 字段。"
+                f"\n\n[可用工具] {names}。"
+                f"重要规则：任何涉及文件操作（创建、读取、修改、删除）、"
+                f"系统命令执行、代码运行、搜索查询的请求，"
+                f"必须选择 FULL_DAG 模式并在 steps 中设置 tool 字段。"
+                f"即使是简单的文件创建（如'写一个hello world到文件'）也必须用 FULL_DAG。"
+                f"只有纯文本闲聊、格式微调、确认回复才可以用 DIRECT。"
             )
         except Exception:
             return ""
