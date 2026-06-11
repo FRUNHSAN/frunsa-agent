@@ -277,7 +277,13 @@ class Repl:
         # Gate: null region, gap region, or low confidence → no command
         # ── V7.9: continuous ⊥ confidence (replaces V7.8 boolean flag) ──
         if obs.null_region:
-            self._semantic_confidence = obs.confidence
+            # null_region = "not a command", NOT necessarily "unclear".
+            # Structured inputs (>10 chars) are likely non-command requests
+            # (tool use, open-ended questions) — don't penalize confidence.
+            if len(text.strip()) > 10:
+                self._semantic_confidence = 0.8  # clear non-command
+            else:
+                self._semantic_confidence = obs.confidence  # genuinely ambiguous
             self.c.bus.emit("语义真空", f"⊥ region, confidence={obs.confidence:.2f}")
             return None
         if obs.gap_region:
