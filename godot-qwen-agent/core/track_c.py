@@ -972,11 +972,14 @@ class TrackCEngine:
                 f'  {{"type": "DIRECT", "action": "直接基于上下文生成回复"}}\n'
                 f"  DIRECT 模式下禁止在回复中写 [TOOL:xxx]——工具调用只能通过 FULL_DAG 完成。\n\n"
                 f"如果用户意图需要新增知识、多步推理或工具调用，输出 FULL_DAG：\n"
-                f'  {{"type": "FULL_DAG", "steps": [{{"prompt": "...", "tool": "", '
+                f'  {{"type": "FULL_DAG", "steps": [{{"prompt": "...", "tool": "工具名", '
                 f'"produces": "标签(可选)", "needs": "标签(可选)", '
                 f'"intent_type": "EXECUTABLE|PSEUDOCODE|DEMONSTRATION", '
                 f'"test_cases": [{{"input": "...", "expected": ...}}]}}, ...]}}\n'
-                f"  （拆解为 {min_steps}-5 步，每步包含 prompt 和 tool 字段。\n"
+                f"  （拆解为 {min_steps}-5 步。tool 字段必须填写 [可用工具] 列表中的工具名，"
+                f"不可留空——如需创建文件填 write_file，执行命令填 run_powershell，"
+                f"运行 Python 代码填 sandbox_python。"
+                f"不需要工具时填 \"none\"。\n"
                 f"  可选字段 produces: 本步骤产出的数据标签（如 'paper_list', 'code_v1'）。\n"
                 f"  可选字段 needs: 本步骤需要的前序数据标签。标签命名必须一致。\n"
                 f"  V7.2: 如果步骤涉及代码生成，必须设置 tool=\"sandbox_python\"\n"
@@ -1088,8 +1091,7 @@ class TrackCEngine:
         )
         # ── V8.4: Real tool dispatch via ToolEngine (4th engine) ──
         tool_name = step.get("tool", "")
-        self._emit("🔧 V8.4 Tool", f"step_tool={repr(tool_name)} has_engine={self._tool_engine is not None}")
-        if tool_name and tool_name != "default" and self._tool_engine is not None:
+        if tool_name and tool_name not in ("default", "none") and self._tool_engine is not None:
             try:
                 from engines.tool.interface import ToolContext
                 items = await _collect(self._tool_engine.execute(
