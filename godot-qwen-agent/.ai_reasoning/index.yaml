@@ -455,6 +455,13 @@ chains:
     tags: [v7.9, planning, contract_injection, semantic_domain_isolation, planning_hint, semantic_confidence, boolean_collapse, topological_homomorphism, boundary_precomputation]
     status: active
 
+  - chain_id: v8_0_trust_attenuation
+    file: chains/v8_0_trust_attenuation.yaml
+    title: "V8.0 做减法 — 连续信任衰减 + 语义授权升级（消灭最后两个硬开关）"
+    layer: plan
+    tags: [v8.0, trust_attenuation, output_pipeline, continuous_decay, semantic_authorization, planning_hint, over_damping, self_attention_trap, pseudo_continuity]
+    status: active
+
   # ── Real LLM Orchestration + Critic Engines ──
   - chain_id: phase_18_real_orch_critic
     file: chains/phase_18_real_orch_critic.yaml
