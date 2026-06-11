@@ -448,6 +448,13 @@ chains:
     tags: [v7.7, semantic_translator, sheaf_theory, fiber_bundle, local_section, null_region, product_fiber, joint_distribution, radon_nikodym, angular_distance, geodesic, injectivity_radius, cohomology, adaptive_contract]
     status: active
 
+  - chain_id: v7_9_planning_contract_injection
+    file: chains/v7_9_planning_contract_injection.yaml
+    title: "V7.9 Planning LLM 契约注入 — 语义域隔离 + 边界预计算 + 连续置信度"
+    layer: plan
+    tags: [v7.9, planning, contract_injection, semantic_domain_isolation, planning_hint, semantic_confidence, boolean_collapse, topological_homomorphism, boundary_precomputation]
+    status: active
+
   # ── Real LLM Orchestration + Critic Engines ──
   - chain_id: phase_18_real_orch_critic
     file: chains/phase_18_real_orch_critic.yaml

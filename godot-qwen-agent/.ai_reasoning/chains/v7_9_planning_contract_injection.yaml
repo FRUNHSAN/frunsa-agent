@@ -1,0 +1,123 @@
+# Reasoning Chain: V7.9 — Planning LLM Contract Injection (Semantic Domain Isolation)
+chain_id: v7_9_planning_contract_injection
+title: "V7.9 Planning LLM 契约注入 — 语义域隔离 + 边界预计算 + 连续置信度"
+created_at: "2026-06-11T22:00:00Z"
+status: active
+tags: [v7.9, planning, contract_injection, semantic_domain_isolation, planning_hint,
+       semantic_confidence, boolean_collapse, topological_homomorphism,
+       boundary_precomputation, explicit_parameter]
+related_chains: [v7_7_sheaf_semantic_translator, v7_6_adaptive_contract_closed_loop,
+                  v5_3_dual_sensor_fusion]
+
+context: |
+  V7.8's topological homomorphism audit identified the biggest remaining
+  single-point fracture: `_do_plan()` received the complete contract directive
+  as the `system` parameter but had zero references to it in the function body.
+  Planning LLM decomposed tasks in a vacuum — unaware of trust level,
+  clarification needs, or verbosity targets.
+
+  The REPL→Track C boundary acted as a ONE-WAY MEMBRANE: structured contract
+  state (blueprint fields, trust, clarification flag) was serialized into the
+  `system` string for Synthesis consumption, but Track C's internal methods
+  had no access to the original structured state. Reverse-engineering the
+  string (Option C) was fragile. Adding REPL-layer imports to Track C (Option A)
+  violated P55 (Engine Must Not Import Observer).
+
+  V7.9 chose Plan B: REPL-layer pre-computation + explicit parameter passing.
+  The REPL (which owns all structured state) translates contract fields into
+  Planning-domain natural language hints. Track C receives only flat text —
+  it knows nothing about Blueprint, trust, or clarification. This mirrors
+  V7.7's architecture: V7.7 translates User→System, V7.9 translates System→Planning.
+
+  V7.9 also fixed a V7.8 artifact: `_clarification_needed` was a boolean
+  collapsed from the continuous `obs.confidence ∈ [0,1]`. Replaced with
+  `_semantic_confidence` (float), giving Planning genuinely continuous
+  behavioral modulation from ⊥ detection.
+
+alternatives:
+  - option: "Option A: Add blueprint/trust parameters to Track C internals"
+    pros: "Rich structured access inside Planning"
+    cons: "Violates P55 (Engine Must Not Import Observer). Track C would need to import blueprint types."
+  - option: "Option C: Parse system string inside _do_plan() to extract contract state"
+    pros: "Zero signature changes"
+    cons: "Fragile regex-based reverse engineering. System format changes break Planning silently."
+  - option: "Option B: REPL pre-computation + explicit parameter (CHOSEN)"
+    pros: "Clean boundary separation. Semantic domain isolation. Zero engine knowledge of REPL types."
+    cons: "Three signatures to update. Explicit parameter passing through the call chain."
+  - option: "Inject contract state into PlanningContext dataclass"
+    pros: "Structurally clean — a new field on the context"
+    cons: "Would require Planning engine to opt in. Touches the protocol layer. Overkill for a ~30 line change."
+
+decision: |
+  Plan B: REPL-layer `_build_planning_contract_hint()` pre-computes a flat
+  text string from structured contract state. This is passed as `planning_hint`
+  through `_run_track_c()` → `TrackCEngine.run()` → `_do_plan()`, where it's
+  appended to the Planning `goal` string (same channel as `lambda_hint`).
+
+  Semantic domain isolation via `PLANNING_SEMANTIC_MAP`: only `response_verbose_level`
+  enters Planning. `execution_autonomy` stays as hard `branch_count` constraint.
+  `tone_style`/`conversational_initiative` stay in Synthesis. Trust stays in `lambda_hint`.
+
+  Boolean collapse fixed: `_semantic_confidence` (float) replaces `_clarification_needed`
+  (bool). Two thresholds (0.4 crisis, 0.8 gap) define three behavioral regions with
+  genuinely continuous text modulation within each region via `{confidence:.0%}`.
+
+rationale: |
+  The Planning vacuum was the last remaining topology debt from the V7.9 audit.
+  Every other LLM call in Track C (Synthesis, Critic, Orchestration) already
+  received contract state. Planning — the pipeline entry point — was the only
+  blind spot.
+
+  Semantic domain isolation is the key architectural innovation: different LLM
+  calls receive different contract subsets based on their semantic domain.
+  Planning gets verbosity target (informational) and semantic confidence
+  (risk-aware). Synthesis gets tone and full verbosity (generative). Critic
+  gets trust gate (evaluative). No field is double-counted across domains.
+
+  The continuous confidence injection (0.35 vs 0.60 vs 0.90 → three different
+  Planning hints) is the first genuinely continuous behavioral path for ⊥
+  detection. Before V7.9, ⊥ was a boolean flag that either added a fixed
+  string or didn't. Now, Planning sees a confidence percentage and can
+  modulate its decomposition strategy proportionally.
+
+future_guidance:
+  v7_9_semantic_domain_isolation:
+    summary: "PLANNING_SEMANTIC_MAP enforces that only Planning-domain fields reach Planning LLM. execution_autonomy→branch_count (hard), tone_style→Synthesis (soft), trust→lambda_hint (separate channel). No double-counting. Architecture symmetric with V7.7."
+    priority: critical
+  v7_9_boundary_precomputation:
+    summary: "REPL layer (owns structured state) pre-computes planning_hint. Track C receives flat text. Engine knows nothing about Blueprint/trust/clarification. Complies with P55. Same pattern as lambda_hint."
+    priority: critical
+  v7_9_boolean_collapse_fix:
+    summary: "_semantic_confidence (float ∈ [0,1]) replaces _clarification_needed (bool). Two thresholds at 0.4 and 0.8 define three behavioral regions. Continuous text modulation via {confidence:.0%}. First genuinely continuous ⊥→Planning path."
+    priority: critical
+  v7_9_topology_score:
+    summary: "Topological homomorphism: 50% → ~55%. Planning LLM from vacuum (0 behavioral states) → continuous semantic-domain-matched context injection. Remaining gap: response_verbose_level still 4 discrete values in Planning (CONTINUUM only in Synthesis)."
+    priority: high
+
+anti_patterns:
+  - "Injecting all contract fields into Planning — tone_style and conversational_initiative are Synthesis-domain fields. Use semantic domain isolation."
+  - "Using a boolean flag for ⊥ detection in Planning — confidence is continuous. Two thresholds + percentage embedding give genuine behavioral modulation."
+  - "Parsing the system string inside Track C to recover contract state — fragile reverse engineering. Pre-compute at the boundary where structured state exists."
+  - "Double-counting execution_autonomy — it's already enforced as hard branch_count constraint. Adding it to prompt is over-damping."
+  - "Double-counting trust — lambda_hint already communicates trust comprehensively. planning_hint is for Planning-domain fields lambda_hint doesn't cover."
+
+evidence:
+  - file: "core/repl.py"
+    symbols:
+      - "PLANNING_SEMANTIC_MAP: semantic domain filter for Planning"
+      - "SEMANTIC_CONFIDENCE_GAP=0.8, SEMANTIC_CONFIDENCE_CRISIS=0.4"
+      - "_build_planning_contract_hint(): REPL-layer pre-computation"
+      - "_semantic_confidence replaces _clarification_needed (bool→float)"
+      - "_build_prompt() uses continuous _semantic_confidence"
+      - "_run_track_c() signature includes planning_hint"
+  - file: "core/track_c.py"
+    symbols:
+      - "TrackCEngine.run() accepts planning_hint parameter"
+      - "_do_plan() appends planning_hint to goal string"
+      - "TOPOLOGY_DEBT telemetry deleted (vacuum patched)"
+  - test_file: "tests/unit/test_v3_container_repl.py"
+    test_cases:
+      - "All existing Repl tests pass — planning_hint defaults to ''"
+  - test_file: "tests/unit/test_v4_repl.py"
+    test_cases:
+      - "All existing command detection tests pass"
