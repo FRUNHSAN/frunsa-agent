@@ -102,6 +102,11 @@ class RegistryToolEngine:
                     "tool.error": result.error,
                     "tool.data_preview": delta[:200],
                     "tool.elapsed_ms": elapsed * 1000,
+                    "tool.semantic_summary": (
+                        f"{tool_name}: {'成功' if result.success else '失败'}"
+                        f"{' — ' + str(result.error) if result.error else ''}"
+                        f" ({len(delta)} chars, {elapsed*1000:.0f}ms)"
+                    ),
                     "agent.identity": identity_value,
                 },
             )

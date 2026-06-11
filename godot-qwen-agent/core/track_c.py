@@ -548,6 +548,7 @@ class TrackCEngine:
         adapter=None,  # GenerationAdapter for synthesis fallback
         bus=None,  # XRayBus for observability
         stream_llm=None,  # V7 Phase 1: raw LLM client for streaming synthesis
+        tool_engine=None,  # V8.4: ToolEngine for real tool dispatch (4th engine)
     ) -> None:
         self._planning = planning_engine
         self._orch = orch_engine
@@ -555,6 +556,8 @@ class TrackCEngine:
         self._adapter = adapter
         self._bus = bus
         self._stream_llm = stream_llm
+        self._tool_engine = tool_engine
+        self._tool_results: list[dict] = []  # V8.4: accumulated per-run
 
     def _emit(self, stage: str, detail: str) -> None:
         if self._bus:
@@ -594,6 +597,7 @@ class TrackCEngine:
 
         Flow: Planning → {DIRECT: Synthesis} | {FULL_DAG: Orch → Critic → (retry?) → Synthesize}
         """
+        self._tool_results.clear()  # V8.4: reset per-run
         t0 = time.time()
         lambda_hint = _lambda_hint(trust, e_t)
 
@@ -1080,6 +1084,28 @@ class TrackCEngine:
             pool=step.get("tool", "default"),
             items=1,
         )
+        # ── V8.4: Real tool dispatch via ToolEngine (4th engine) ──
+        tool_name = step.get("tool", "")
+        if tool_name and tool_name != "default" and self._tool_engine is not None:
+            try:
+                from engines.tool.interface import ToolContext
+                items = await _collect(self._tool_engine.execute(
+                    ToolContext(tool_name=tool_name, parameters=step),
+                    deadline=30.0, pace_config=PaceConfig(),
+                ))
+                result = "".join(item.delta for item in items)
+                if items:
+                    tc = items[-1].trace_context if hasattr(items[-1], 'trace_context') else {}
+                    self._tool_results.append({
+                        "success": tc.get("tool.success", False),
+                        "tool_name": tool_name,
+                        "semantic_summary": tc.get("tool.semantic_summary", ""),
+                        "latency_ms": tc.get("tool.elapsed_ms", 0),
+                    })
+                return result
+            except Exception:
+                pass  # Fall through to LLM simulation on ToolEngine failure
+
         ctx = OrchestrationContext(
             branches=(branch,),
             agent_identity=OrchestratorIdentity(id="orch-v1", role="orchestration", version="1.0.0"),
@@ -1093,8 +1119,7 @@ class TrackCEngine:
         result = "".join(item.delta for item in items)
 
         # ── V7.3: Phi functor — physical verification for side-effect tools ──
-        tool_name = step.get("tool", "")
-        if tool_name:
+        if tool_name and tool_name != "default":
             result = self._verify_physical_tool(tool_name, result)
 
         return result

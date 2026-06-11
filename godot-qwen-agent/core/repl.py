@@ -110,6 +110,7 @@ class Repl:
         self._semantic_confidence: float = 1.0  # V7.9: continuous ⊥ confidence (replaces bool)
         self._last_boundary_emit_round: int = -999  # V8.3: debounce for threshold telemetry
         self._prev_trust_telemetry: float = 0.5    # V8.3: trust delta for boundary data
+        self._tool_failure_streak: int = 0          # V8.4: hysteresis for tool failure feedback
         # Embedding model loads lazily on first _route_task() or _classify_command() call
 
     # ── V5 Status dashboard ──
@@ -814,6 +815,8 @@ class Repl:
             "physical_attempts": getattr(engine, '_physical_attempts', 0),
             "mcp_failures": getattr(engine, '_mcp_failures', 0),
             "mcp_attempts": getattr(engine, '_mcp_attempts', 0),
+            # V8.4: tool execution results for adaptive feedback
+            "tool_results": list(getattr(engine, '_tool_results', [])),
         }
         return response, cog_mult, snap
 
@@ -851,6 +854,7 @@ class Repl:
                 adapter=adapter,
                 bus=self.c.bus,
                 stream_llm=self.c.cloud_llm,  # V7 Phase 1: streaming synthesis
+                tool_engine=getattr(self.c, 'tool_engine', None),  # V8.4: tool dispatch
             )
         return self._track_c_engine
 
@@ -1000,6 +1004,11 @@ class Repl:
             confidence = max(0.0, 1.0 - sarcasm)
             if pos_score > 0.6:
                 sigma += 0.02 * confidence
+
+        # ── V8.4: σ_tool — tool execution feedback (with hysteresis) ──
+        tool_streak = getattr(self, '_tool_failure_streak', 0)
+        if tool_streak >= 2:
+            sigma -= 0.01  # Consecutive tool failures → negative pressure
 
         # Hard clamp: asymmetric bounds (penalty can be slightly larger)
         return max(-0.05, min(0.03, sigma))
@@ -1507,6 +1516,14 @@ class Repl:
                 # V7.6: capture phys stats for selection pressure σ_competence
                 self._last_phys_attempts = track_snap.get("physical_attempts", 0)
                 self._last_phys_failures = track_snap.get("physical_failures", 0)
+                # V8.4: tool execution feedback → adaptive cycle
+                for tr in track_snap.get("tool_results", []):
+                    self.c.action_pipeline.record_result(
+                        tr["tool_name"], tr["success"])
+                    if not tr["success"]:
+                        self._tool_failure_streak += 1
+                    else:
+                        self._tool_failure_streak = 0
                 _sys.stdout.write('\n')
                 _sys.stdout.flush()
                 if live:
@@ -1681,10 +1698,11 @@ class Repl:
             self._prev_gratitude = gratitude_v
             self._prev_sarcasm = sarcasm_v
 
-            # σ_competence: all physical ops passed this round
+            # σ_competence: all physical ops + tool ops passed this round
             _phys_a = getattr(self, '_last_phys_attempts', 0)
             _phys_f = getattr(self, '_last_phys_failures', 0)
-            phys_pass = (_phys_a > 0 and _phys_f == 0)
+            _tool_f = getattr(self, '_tool_failure_streak', 0)
+            phys_pass = (_phys_a > 0 and _phys_f == 0 and _tool_f == 0)
 
             # ── Capture per-round trust penalties (sycophancy, etc.) ──
             old_trust = self.trust
