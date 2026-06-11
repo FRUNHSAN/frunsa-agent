@@ -107,7 +107,7 @@ class Repl:
         self._sensor_cooldown: dict[str, int] = {}
         self._restore_streaks()
         self._sem = None  # V7.7: unified semantic observer (set in run())
-        self._clarification_needed = False  # V7.8: ⊥ → clarification meta-action
+        self._semantic_confidence: float = 1.0  # V7.9: continuous ⊥ confidence (replaces bool)
         # Embedding model loads lazily on first _route_task() or _classify_command() call
 
     # ── V5 Status dashboard ──
@@ -247,11 +247,13 @@ class Repl:
         context = _build_context(self.history, self.contract_events)
         now = datetime.now().strftime("%H:%M")
         system = f"{contract}\n当前时间: {now}\n{context}".strip()
-        # ── V7.8: ⊥ clarification injection ──
-        if getattr(self, '_clarification_needed', False):
+        # ── V7.9: continuous ⊥ clarification injection ──
+        conf = getattr(self, '_semantic_confidence', 1.0)
+        if conf < self.SEMANTIC_CONFIDENCE_GAP:
             system += (
-                "\n[语义状态] 上一轮用户输入处于语义模糊区域。"
-                "如果你不确定用户意图，请礼貌地请用户澄清，不要猜测。"
+                f"\n[语义状态] 上一轮用户输入处于语义模糊区域"
+                f"（置信度 {conf:.0%}）。"
+                f"如果你不确定用户意图，请礼貌地请用户澄清，不要猜测。"
             )
         return system
 
@@ -270,18 +272,17 @@ class Repl:
         except Exception:
             return self._keyword_fallback(text)
         # Gate: null region, gap region, or low confidence → no command
-        # ── V7.8: ⊥ → clarification meta-action ──
+        # ── V7.9: continuous ⊥ confidence (replaces V7.8 boolean flag) ──
         if obs.null_region:
-            self._clarification_needed = True
+            self._semantic_confidence = obs.confidence
             self.c.bus.emit("语义真空", f"⊥ region, confidence={obs.confidence:.2f}")
             return None
         if obs.gap_region:
-            self._clarification_needed = True
+            self._semantic_confidence = obs.confidence
             self.c.bus.emit("语义歧义", f"gap region, {len(obs.command_candidates)} candidates")
             return None
-        # ── End V7.8 ──
 
-        self._clarification_needed = False
+        self._semantic_confidence = 1.0
         if obs.confidence < 0.55:
             return None
         if obs.command is None:
@@ -305,6 +306,54 @@ class Repl:
         if any(w in t for w in ("你问", "问问题", "反问", "问我", "问几个", "继续问", "多问")):
             return ("conversational_initiative", "PROACTIVE")
         return None
+
+    # ═══════════════════════════════════════════════════════════════════
+    # V7.9: Planning semantic adapter — translate contract state for Planning LLM
+    # ═══════════════════════════════════════════════════════════════════
+
+    # Only fields whose semantic domain matches Planning enter this map.
+    # execution_autonomy → hard branch_count constraint (not in prompt)
+    # tone_style, conversational_initiative, contextual_anchoring → Synthesis domain
+    PLANNING_SEMANTIC_MAP = {
+        "response_verbose_level": (
+            "📏 预期最终回复长度: {}（仅供参考，不影响任务分解粒度）"
+        ),
+    }
+
+    SEMANTIC_CONFIDENCE_GAP = 0.8    # Below → Planning should note ambiguity
+    SEMANTIC_CONFIDENCE_CRISIS = 0.4  # Below → strongly suggest clarification
+
+    def _build_planning_contract_hint(self) -> str:
+        """Translate structured contract state into Planning-domain context.
+
+        Uses _semantic_confidence (continuous ∈ [0,1]) — no boolean collapse.
+        Track C receives this as flat text; it knows nothing about Blueprint.
+        """
+        hints = []
+
+        # 1. Semantic confidence — continuous injection
+        confidence = getattr(self, '_semantic_confidence', 1.0)
+        if confidence < self.SEMANTIC_CONFIDENCE_CRISIS:
+            hints.append(
+                f"⚠️ 语义置信度极低 ({confidence:.0%})，"
+                f"强烈建议优先规划澄清步骤，暂停复杂任务分解"
+            )
+        elif confidence < self.SEMANTIC_CONFIDENCE_GAP:
+            hints.append(
+                f"⚠️ 语义存在轻微歧义（置信度 {confidence:.0%}），"
+                f"规划时请保留一定的容错分支"
+            )
+
+        # 2. Response length expectation — parametric template
+        verbose = self.c.bp.enforce("response_verbose_level")
+        if verbose:
+            hints.append(
+                self.PLANNING_SEMANTIC_MAP["response_verbose_level"].format(verbose)
+            )
+
+        if not hints:
+            return ""
+        return "\n\n[Planning Context] " + " | ".join(hints)
 
     # ═══════════════════════════════════════════════════════════════════
     # V5 Phase B: State-Feedback Route Controller
@@ -724,6 +773,7 @@ class Repl:
                      session_gain: float = 1.0,
                      explore_bias: float = 0.0,
                      compromise_bias: float = 0.0,
+                     planning_hint: str = "",
                      stream_callback=None):
         """Track C: full engine pipeline. V7 Phase 1: streaming synthesis.
         Returns (response, output_mult, snapshot_dict)."""
@@ -733,6 +783,7 @@ class Repl:
                           trust=trust, e_t=e_t, raw_drift=raw_drift,
                           clarity=clarity, session_gain=session_gain,
                           explore_bias=explore_bias, compromise_bias=compromise_bias,
+                          planning_hint=planning_hint,
                           stream_callback=stream_callback)
         # V7.5: build snapshot from engine state after execution
         snap = {
@@ -1422,11 +1473,14 @@ class Repl:
                 import sys as _sys
                 _sys.stdout.write('\n[agent] ')
                 _sys.stdout.flush()
+                # ── V7.9: Planning contract hint ──
+                planning_hint = self._build_planning_contract_hint()
                 full_response, cog_mult, track_snap = self._run_track_c(
                     user, system, xray, live,
                     trust=trust, e_t=e_t, raw_drift=raw_drift,
                     clarity=clarity, session_gain=session_gain,
                     explore_bias=explore_bias, compromise_bias=compromise_bias,
+                    planning_hint=planning_hint,
                     stream_callback=lambda t: (_sys.stdout.write(t), _sys.stdout.flush()),
                 )
                 self._update_snapshot_after_track(track_snap)

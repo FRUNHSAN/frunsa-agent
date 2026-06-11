@@ -573,6 +573,7 @@ class TrackCEngine:
             session_gain: float = 1.0,
             explore_bias: float = 0.0,
             compromise_bias: float = 0.0,
+            planning_hint: str = "",   # V7.9: Planning-domain contract context
             stream_callback=None):  # V7 Phase 1: callable(token_str) per chunk
         """Execute Track C pipeline. Returns (response_text, output_capacity_mult).
 
@@ -621,7 +622,7 @@ class TrackCEngine:
         # ── Phase 1: Planning ──
         self._emit("🔀 Track C Planning", "⏳ 动态规划中...")
         plan_result = safe_async_run(self._do_plan(
-            user, system, lambda_hint, branch_count))
+            user, system, lambda_hint, planning_hint, branch_count))
         is_direct = plan_result and len(plan_result) == 1 and plan_result[0].get("type") == "DIRECT"
 
         self._emit_trace(TraceNode(
@@ -931,25 +932,21 @@ class TrackCEngine:
     # ── Async engine wrappers ───────────────────────────────────────
 
     async def _do_plan(self, user: str, system: str, lambda_hint: str = "",
+                       planning_hint: str = "",
                        branch_count: int = 1, retry: bool = False) -> list[dict]:
-        """V6: Complexity-routing Planning with lambda + Path 2 gain scheduling.
+        """V7.9: Complexity-routing Planning with lambda + contract context.
 
         LLM chooses between DIRECT (shallow) and FULL_DAG (deep).
         When branch_count > 1, FULL_DAG generates parallel exploration paths
         from different perspectives — each a distinct hypothesis.
+
+        planning_hint carries Planning-domain contract context (semantic
+        confidence, response length target). Built by REPL layer — Track C
+        knows nothing about Blueprint or trust.
         """
         from engines.planning.interface import PlanningContext
         from core.contracts.streaming_protocol import PaceConfig
         import os
-
-        # ── V7.8: Planning topology debt telemetry ──
-        # Records contract state ignored by Planning LLM.
-        # Does not change behavior — only accumulates data for V8.0 design.
-        if system and lambda_hint:
-            self._emit("TOPOLOGY_DEBT",
-                f"Planning executing in vacuum. "
-                f"system_len={len(system)}, hint_len={len(lambda_hint)}"
-            )
 
         state_hint = f"\n\n{lambda_hint}" if lambda_hint else ""
         min_steps = int(os.environ.get("MIN_PLAN_STEPS", MIN_PLAN_STEPS))
@@ -987,12 +984,14 @@ class TrackCEngine:
                 f"在 JSON 之前用 <!-- reasoning --> 注释简要说明选择理由。）"
                 f"{' ' + branch_hint if branch_hint else ''}"
                 f"{state_hint}"
+                f"{chr(10) + chr(10) + planning_hint if planning_hint else ''}"
             )
         else:
             goal = (
                 f"{user}\n\n"
                 f"[约束: 必须拆解为至少 {min_steps} 个独立子任务。"
                 f"每步包含 prompt 和 tool 字段。返回 JSON 数组。]"
+                f"{chr(10) + chr(10) + planning_hint if planning_hint else ''}"
             )
 
         ctx = PlanningContext(goal=goal, max_parallel_branches=2)
