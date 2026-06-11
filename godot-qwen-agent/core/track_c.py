@@ -987,6 +987,7 @@ class TrackCEngine:
                 f"  可选字段 intent_type: EXECUTABLE(需物理验证)|PSEUDOCODE(仅语法)|DEMONSTRATION(纯展示)。\n"
                 f"在 JSON 之前用 <!-- reasoning --> 注释简要说明选择理由。）"
                 f"{' ' + branch_hint if branch_hint else ''}"
+                f"{self._build_tools_hint()}"
                 f"{state_hint}"
                 f"{chr(10) + chr(10) + planning_hint if planning_hint else ''}"
             )
@@ -1123,6 +1124,24 @@ class TrackCEngine:
             result = self._verify_physical_tool(tool_name, result)
 
         return result
+
+    def _build_tools_hint(self) -> str:
+        """V8.4: List available tools in planning prompt so LLM knows when to use FULL_DAG."""
+        if not self._tool_engine:
+            return ""
+        try:
+            from core.contracts import COMPONENT_REGISTRY
+            tools = COMPONENT_REGISTRY.list("tool")
+            if not tools:
+                return ""
+            tool_list = ", ".join(tools[:6])  # Top 6 to avoid prompt bloat
+            return (
+                f"\n\n[可用工具] 你可以调用以下工具（需要 FULL_DAG 模式）：{tool_list}。"
+                f"涉及文件操作、系统命令、代码执行、搜索查询时，"
+                f"请务必选择 FULL_DAG 并在 steps 中设置 tool 字段。"
+            )
+        except Exception:
+            return ""
 
     def _verify_physical_tool(self, tool_name: str, result: str) -> str:
         """V7.3: Post-hoc physical verification via Phi: Tool -> Phys.
