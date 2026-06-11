@@ -130,6 +130,14 @@ TOOLS: dict[str, dict[str, Any]] = {
         "blocked_keywords": ["机密", "confidential", "裁员", "layoff", "高管", "executive"],
         "max_results": 3,
     },
+    # V8.4: First real (non-simulated) tool for closed-loop testing
+    "run_powershell": {
+        "name": "run_powershell",
+        "description": "Execute a PowerShell command on the local machine",
+        "risk_level": RiskLevel.WRITE,
+        "min_trust": 0.30,
+        "category": "execution",
+    },
 }
 
 # Permanent constitutional ban: these categories are NEVER allowed
