@@ -72,7 +72,7 @@ def _emergency_wait_output(
         }),
     ), KernelState(
         prev_state_vector=safe_sv, prev_raw_state_vector=safe_sv,
-        current_mode=SystemMode.CRISIS, round_count=state.round_count + 1,
+        current_mode=SystemMode.TRUST_CRISIS, round_count=state.round_count + 1,
         e_inc_streak=0, e_dec_streak=0, slot_registry=state.slot_registry,
     )
 

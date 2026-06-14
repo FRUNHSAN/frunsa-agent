@@ -92,8 +92,12 @@ def validate_slot(slot_name: str, policy: Any, protocol_cls: type) -> None:
     proto_sig = inspect.signature(getattr(protocol_cls, method_name))
     impl_sig = inspect.signature(getattr(policy, method_name))
 
-    proto_params = list(proto_sig.parameters.keys())[1:]  # skip self
-    impl_params = list(impl_sig.parameters.keys())[1:]
+    proto_params = list(proto_sig.parameters.keys())
+    impl_params = list(impl_sig.parameters.keys())
+
+    # Skip 'self' from both sides (Protocol may or may not show it)
+    proto_params = [p for p in proto_params if p != 'self']
+    impl_params = [p for p in impl_params if p != 'self']
 
     if proto_params != impl_params:
         raise TypeError(

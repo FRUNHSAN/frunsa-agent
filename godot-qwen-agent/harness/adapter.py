@@ -23,56 +23,10 @@ from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Any, Mapping
 
-STATE_DIMENSION = 16
+from protocol.v9_types import StateVector, RouteSignals, STATE_DIMENSION
+
 MAX_DT_WINDOW = 10
 MAX_TRUST_WINDOW = 20
-
-
-# ═══════════════════════════════════════════════════════════════
-# 协议类型（占位 — 最终需移到 protocol/v9_types.py）
-# ═══════════════════════════════════════════════════════════════
-
-class StateVector:
-    """16 维实向量。绝对不可变。"""
-    __slots__ = ("data",)
-
-    def __init__(self, data: tuple[float, ...]) -> None:
-        if len(data) != STATE_DIMENSION:
-            raise ValueError(f"StateVector: expected {STATE_DIMENSION}, got {len(data)}")
-        for i, v in enumerate(data):
-            if math.isnan(v) or math.isinf(v):
-                raise ValueError(f"StateVector[{i}]: NaN/Inf")
-        object.__setattr__(self, "data", data)
-
-    def __setattr__(self, name: str, value: Any) -> None:
-        raise AttributeError("StateVector is frozen")
-
-    def __delattr__(self, name: str) -> None:
-        raise AttributeError("StateVector is frozen")
-
-    def __getitem__(self, idx: int) -> float:
-        return self.data[idx]
-
-
-class RouteSignals:
-    """外部信号摘要。绝对不可变。"""
-    __slots__ = ("is_social_signal", "meta_escalated", "meta_is_relaxed", "trust_var")
-
-    def __init__(
-        self, is_social_signal: bool = False,
-        meta_escalated: bool = False, meta_is_relaxed: bool = False,
-        trust_var: float = 0.0,
-    ) -> None:
-        object.__setattr__(self, "is_social_signal", is_social_signal)
-        object.__setattr__(self, "meta_escalated", meta_escalated)
-        object.__setattr__(self, "meta_is_relaxed", meta_is_relaxed)
-        object.__setattr__(self, "trust_var", trust_var)
-
-    def __setattr__(self, name: str, value: Any) -> None:
-        raise AttributeError("RouteSignals is frozen")
-
-    def __delattr__(self, name: str) -> None:
-        raise AttributeError("RouteSignals is frozen")
 
 
 # ═══════════════════════════════════════════════════════════════
