@@ -13,7 +13,7 @@
 # Schema: schemas/reasoning_chain.schema.json
 
 library_version: 1
-last_updated: "2026-06-10T16:00:00Z"
+last_updated: "2026-06-14T18:00:00Z"
 
 # ── Chains by architectural layer ────────────────────────────────────
 
@@ -482,6 +482,14 @@ chains:
     title: "Real LLM Orchestration + Critic Engines: 全链路真枪实弹"
     layer: engine
     tags: [real_engine, orchestration, critic, factory_di, contract_locking, metadata_slot, engine_isolation, deterministic_mock, adapter_reuse, stub_reference, sufficiency_report, multi_agent]
+    status: active
+
+  # ── V9.0: Harness Architecture ──
+  - chain_id: v9_0_harness_architecture
+    file: chains/v9_0_harness_architecture.yaml
+    title: "V9.0 Harness 架构 — MPC 内核隔离 + 五层架构 + 四条总线 + 七铁律"
+    layer: architecture
+    tags: [v9.0, harness, kernel_isolation, bus_architecture, mpc_kernel, ode, route_controller, safety_arbiter, policy_slots, five_layers, four_buses, pure_function, frozen_protocol, control_data_separation]
     status: active
 
 # ── Tag index for quick lookup ───────────────────────────────────────

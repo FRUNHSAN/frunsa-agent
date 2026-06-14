@@ -1,0 +1,126 @@
+# Reasoning Chain: V9.0 — Harness Architecture (MPC Kernel Isolation + Bus Topology)
+chain_id: v9_0_harness_architecture
+title: "V9.0 Harness 架构 — MPC 内核隔离 + 五层架构 + 四条总线"
+created_at: "2026-06-14T12:00:00Z"
+status: active
+tags: [v9.0, harness, kernel_isolation, bus_architecture, mpc_kernel,
+       llm_bridge, tool_bridge, event_bridge, telemetry_bus,
+       control_data_separation, pure_function, frozen_protocol,
+       ode_integrator, route_controller, safety_arbiter,
+       policy_slots, five_layer_architecture, topological_homomorphism]
+related_chains: [v7_9_planning_contract_injection, v7_7_sheaf_semantic_translator,
+                  v7_6_adaptive_contract_closed_loop, v8_1_loop_category_theory,
+                  v8_3_cross_subsystem_coupling, v5_math_adaptive_contract]
+
+context: |
+  V8.4 experienced 6 rounds of iterative debugging for tool dispatch.
+  Root cause was NOT code quality — it was the COMPLETE ABSENCE of
+  architectural boundaries. REPL (1700 lines), Track C, ToolEngine,
+  and LLM Planning were all coupled in a single monolithic file.
+
+  The user realized that patching V8.4 further was futile. The system
+  needed fundamental architectural decomposition — like how Linux
+  separates kernel (scheduling/memory/VFS) from user-space (bash/ssh/nginx).
+
+  V9.0 defines a NEW architectural paradigm:
+
+  FIVE LAYERS:
+    Layer 5: UI (arbitrary carrier — CLI, VSCode, Web)
+    Layer 4: Observer (semantic translation — text → structured signal)
+    Layer 3: Harness (bus matrix — routing, bridges, session)
+    Layer 2: MPC Kernel (pure math — ODE, routing, arbitration)
+    Layer 1: Synthesis + Tool Executor (LLM calls, tool dispatch)
+
+  SEVEN IRON LAWS:
+    1. Pure Function Boundary — adapter does spatial mapping (stateless),
+       kernel owns time evolution (stateful)
+    2. Continuous Control — all control quantities from state vector
+       continuous derivation, no lookup tables (route A/C exempted)
+    3. Zero Natural Language — kernel I/O contains no NL strings
+    4. Formal Replayability — every ControlFrame carries DecisionTrace,
+       same input → same output
+    5. Zero Dynamic Allocation — no malloc/new/list.append in kernel
+    6. Gradient Bounded — ‖Δs‖ ≤ MAX_GRADIENT_NORM, vector norm + rescale
+    7. Information Loss Auditable — cross-version dimension compression
+       rules declared in metadata
+
+  FOUR BUSES (Harness physical layer):
+    LLM Bus (AHB-class): Planning, Synthesis, Critic — shared LLM Provider
+    Tool Bus (APB-class): write_file, read_file, MCP tools — Tool Registry (HAL)
+    Event Bus (NVIC-class): Dirac δ pulses — TOOL_FAILURE, LLM_TIMEOUT, USER_ABORT
+    Telemetry Bus (CoreSight-class): (s,a,r) triples → JSONL — RL training source
+
+  BUS CONSTITUTION:
+    1. State Preservation — pipeline abort packs completed checkpoints
+    2. Interrupt Boundary — MAC-layer retry stays internal; only
+       exhausted steady-state failures enter Event Bus
+    3. Merge by (type, tool_name) — equivalence class merging
+    4. Hard reserved slots — 4 slots protected for priority ≤ 1 events
+
+decision: |
+  Adopt a full five-layer architecture with MPC kernel isolation,
+  JSON protocol boundaries, and four independent buses.
+
+  Kernel (Layer 2) is a PURE FUNCTION — no LLM calls, no tool execution,
+  no file I/O, no natural language. It consumes 16-dim StateVector and
+  event queue, produces ControlFrame (NextAction + DataPolicy + DecisionTrace).
+
+  Harness (Layer 3) is the BUS MATRIX — routing kernel decisions to
+  physical execution (LLM calls, tool dispatch) without making decisions.
+
+  Three subsystems from V7.x preserved:
+    Semantic Translation (V7.7) → Layer 4 (Observer)
+    Adaptive Contract (V7.6-V8.0) → Layer 2 (ODE Integrator)
+    Adaptive Loops (V8.1) → Layer 2 (Route Controller)
+
+  Protocol frozen at 16-dim StateVector, 3 NextAction values,
+  8 gates (pluggable priority chain), 3 policy slots.
+
+rationale: |
+  The 6 rounds of V8.4 debugging demonstrated that without architectural
+  boundaries, every fix creates a new upstream problem. Kernel isolation
+  via pure function protocol enables:
+  - Independent testing of ODE, routing, arbitration
+  - Pluggable gates (add gate = add function + insert in tuple)
+  - Pluggable RL policies (hot-swap via slot_registry)
+  - Multi-Agent scaling (same protocol, different Harness configurations)
+  - Formal auditability (DecisionTrace through entire pipeline)
+
+future_guidance: |
+  - V9.0 protocol is Frozen. State vector dimension (16), NextAction enum (3),
+    and gate priority order are immutable within the V9.x lifecycle.
+  - New dimensions → metadata compression rules (Iron Law 7)
+  - New gates → insert in DEFAULT_GATES tuple — no kernel changes
+  - New RL policies → implement BoundaryPolicy/CostPolicy/ValuePolicy Protocol
+    and mount via slot_registry — no kernel changes
+  - New buses → register to Harness with URI namespace — no kernel changes
+  - V10: RL training pipeline fills policy slots with learned parameters
+  - V11: Multi-Agent session manager (kernel "MMU")
+  - V12: Embodied intelligence — state vector expansion + physical safety gates
+  - V13: Fluid pool model — internal vascular bus + interstitial pool + lymph pool
+
+anti_patterns:
+  - "Put LLM call in kernel" — Iron Law 3. Kernel knows no text.
+  - "Add new NextAction enum value" — 3 modalities are mathematically complete.
+    New behaviors = new Track pipeline under EXECUTE_TOOL.
+  - "Adapter holds dialogue history" — Adapter is a pure translator.
+    Dialogue history = Harness plugin.
+  - "Bridge makes business decisions" — Bridges execute; kernel decides.
+  - "Skip DecisionTrace in production" — Iron Law 4. Every decision must be replayable.
+
+design_principles:
+  - Kernel = MCU-level simplicity (no MMU, single-session in V9)
+  - Kernel = STM32 on Python — 2μs pure computation, no I/O
+  - Harness = SoC Bus Matrix — routes, bridges, doesn't decide
+  - Adapter = CPU Socket pin definition — protocol version ≡ pin layout
+  - Observer = Sensor array — pluggable (Chinese/English/multimodal)
+  - Bus = Physical channel — LLM/AHB, Tool/APB, Event/NVIC, Telemetry/CoreSight
+
+evidence:
+  - 13 frozen source files (~3000 lines) passing red-team adversarial review
+  - Full data/control flow separation across all layers
+  - DecisionTrace with complete audit chain: gate_id + operands + shield_flags
+  - Frame-rate-independent EMA (1−e^(-dt/τ)) in ODE integrator
+  - Hoyer sparsity discriminator on 8 independent dimensions for fault vs. change detection
+  - Schmitt trigger Galois connection (2-up / 3-down) in route controller
+  - Three policy slots with mount-time signature validation (validate_slot)
