@@ -19,6 +19,11 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(__file__))
 
+# 模块级导入 — _AdapterWrapper / _KernelWrapper 依赖
+from protocol.v9_types import KernelInput, KernelState, SystemMode, TrustDynamics, StateVector
+from mpc_kernel.kernel import kernel_step
+from mainboard.cpu.adapter import adapter_step, AdapterState
+
 
 def boot():
     """V9 Agent 入口。"""
@@ -34,8 +39,6 @@ def boot():
                     os.environ.setdefault(key.strip(), val.strip())
 
     # ── 2. 初始化 L2/L3/L4 ──
-    from protocol.v9_types import KernelInput, KernelState, SystemMode, TrustDynamics
-    from mpc_kernel.kernel import kernel_step
     from observer.observer import SemanticTrustObserver
     from mainboard.cpu.adapter import adapter_step, AdapterState
     from mainboard.bus.event import EventBridge
@@ -136,7 +139,6 @@ class _KernelWrapper:
 
     def step(self, state, input, signals):
         if state is None:
-            from protocol.v9_types import StateVector
             sv = StateVector(data=tuple([0.30, 0.0, 0.5, 1.0, 0.5, 0.5, 1.0, 1.0] + [0.0]*8))
             state = KernelState(
                 prev_state_vector=sv, prev_raw_state_vector=sv,

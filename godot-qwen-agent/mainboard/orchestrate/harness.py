@@ -223,9 +223,17 @@ class Harness:
 
         不是 Planning——不决定"该不该"，只做路径解析。
         """
+        # 动态查询可用的工具签名
+        available_tools = ""
+        if hasattr(self.tool, 'registry'):
+            available_tools = self.tool.registry.tool_descriptions()
+
         resp = await self.llm.execute(
             target="llm://tool_resolver",
-            context={"user_query": user_text},
+            context={
+                "user_query": user_text,
+                "available_tools": available_tools,
+            },
             policy=policy,
             op_id=f"resolve_{self._round_count}",
         )

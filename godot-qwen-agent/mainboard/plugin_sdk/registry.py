@@ -517,6 +517,30 @@ class HarnessToolRegistry:
 
         return _ToolWrapper(instance, name)
 
+    def list_tools(self) -> list[str]:
+        """返回所有已注册工具的名称列表。供 _resolve_tools 动态查询。"""
+        try:
+            return self._registry.list_strategies("tool")
+        except Exception:
+            return []
+
+    def tool_descriptions(self) -> str:
+        """返回工具签名摘要。供 LLM tool_resolver 提示词使用。
+
+        例: "write_file(path, content), read_file(path, max_chars), ..."
+        """
+        descriptions = []
+        for name in self.list_tools():
+            params = [
+                p for p in self._extract_params(
+                    self._registry.get("tool", name).execute
+                )
+            ]
+            # 只保留前 2 个参数名，避免提示词过长
+            sig = ", ".join(params[:2])
+            descriptions.append(f"{name}({sig})")
+        return ", ".join(descriptions) if descriptions else "无可用工具"
+
     @staticmethod
     def _extract_params(execute_fn) -> tuple[str, ...]:
         """从 execute 签名提取参数名 (排除 self 和 cancellation_token)。"""
