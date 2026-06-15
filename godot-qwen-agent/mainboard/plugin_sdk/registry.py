@@ -123,6 +123,7 @@ class PluginRegistry:
 
         loader 必须实现 load() → instance | None。
         加载失败记录警告，绝不中断启动。
+        多 manifest 声明同一插件时，第一个 wins，后续静默跳过。
         """
         with self._lock:
             if self._frozen:
@@ -131,6 +132,15 @@ class PluginRegistry:
                 raise PluginValidationError(f"Unsupported slot_type: {slot_type}")
 
             key = f"{slot_type}/{name}"
+
+            # 去重：已在即时注册表或延迟列表中的，静默跳过
+            if name in self._store.get(slot_type, {}):
+                logger.debug(f"跳过重复注册: {key} (已即时注册)")
+                return
+            if key in self._lazy_loaders:
+                logger.debug(f"跳过重复注册: {key} (已在延迟加载列表)")
+                return
+
             self._lazy_loaders[key] = loader
             logger.debug(f"Lazy loader registered: {key}")
 
