@@ -1,0 +1,72 @@
+# V9.2b 推理链：硬编码消除 + 能力断崖修复
+# 日期: 2026-06-15
+
+chain:
+  id: v9_2b_hardcoded_elimination
+  title: "V9.2b — 六处硬编码消除 + Lipschitz 基线修正"
+  parent: v9_1_realtrackc_pipeline
+  status: completed
+
+decisions:
+  - id: d1_track_c_two_phase
+    title: "Track C 两阶段点火 — inject_context() 依赖注入"
+    problem: "RealTrackC 需要 llm_bridge/tool_bridge/event_bridge 依赖，LazyPluginLoader 的无参 cls() 构造失败"
+    solution: "RealTrackCPlugin 包装器: __init__() 无参 + inject(context) + run() 委托。Registry.inject_context() 在 freeze 后统一喂食。"
+    why: "Track C 是有状态单例。不能每次 registry.get() 都 new。依赖注入必须在 Harness 启动前完成。"
+    impact: "mainboard/slots/tracks/real_track_c/main.py, registry.py inject_context()"
+
+  - id: d2_event_bus_constitution
+    title: "事件优先级表 — 宪法模式，拒绝 EventTypeSlot 插件"
+    problem: "PRIORITY 表硬编码为 MappingProxyType，但做成插件会导致 NMI 槽位被篡改（优先级反转）"
+    solution: "_BUILTIN_EVENTS 内置宪法 + register_event_type() 受控注册 + freeze() 物理锁。priority <= 1 拒绝任何插件染指。"
+    why: "ARM NVIC 的中断向量表也是硬件固化。NMI 槽位必须物理保护。"
+    impact: "mainboard/bus/event.py"
+
+  - id: d3_observer_manifest
+    title: "L4 Observer 接入 PluginRegistry — 单阶段点火"
+    problem: "SemanticTrustObserver 缺 manifest → LazyPluginLoader 加载失败 → 每次启动 WARNING"
+    solution: "属性注入 PluginManifest + get_instance() 工厂。无状态 Observer 不需要两阶段点火。"
+    why: "Observer 是无状态的纯函数。过度设计是罪恶。YAGNI。"
+    impact: "observer/observer.py"
+
+  - id: d4_mock_eradication
+    title: "Mock 死代码焚化 — 共享 boot() 心脏"
+    problem: "app.py 的 _make_mock_registry 和 v9_cli.py 的 MockToolRegistry 已成为死代码"
+    solution: "删除两处 Mock。v9_cli.py 直接复用 app.boot()。DRY。"
+    why: "Dead code must die。两条启动路径必须物理同构。"
+    impact: "app.py, v9_cli.py"
+
+  - id: d5_p4_capability_cliff
+    title: "P4 能力断崖 — 移除 round_count <= 2 限制"
+    problem: "P4_COLD_START 只在 round ≤ 2 触发 → 第三轮起 Agent 失去工具调用能力 → 空跳"
+    solution: "移除 round_count 检查。context_depth > 0.40 终身有效。安全网: P0(社交) + P1(信任衰减) + context_depth 阈值。"
+    why: "工具调用是终身生存技能，不是新手福利。YAGNI — 不需要 Track C 记忆手交。"
+    impact: "mpc_kernel/route_controller.py"
+
+  - id: d6_deterministic_tool_resolver
+    title: "确定性工具匹配 — 规则引擎 + LLM 兜底"
+    problem: "_resolve_tools 100% 用 LLM → ~25% 返回空列表 → P4 触发但执行层拉胯"
+    solution: "规则优先: 工具类声明 match_patterns + extract_params → 路由层正则碰撞。命中 → 0ms 返回。未命中 → LLM 兜底。"
+    why: "5 个工具不需要 LLM 匹配。工具匹配是模式识别，不是自然语言理解。"
+    impact: "components/tools/*.py, harness.py _resolve_tools_deterministic(), registry.py get_match_patterns()"
+
+  - id: d7_lipschitz_baseline_fix
+    title: "Lipschitz 基线修正 — prev_state_vector 替代 prev_raw"
+    problem: "长时间 LLM 调用 (7s) → 大 dt → ODE 松弛积累 → raw_delta 虚高 → 安全仲裁器误判 (CRITICAL_CLAMP + WAIT)"
+    root_cause: "raw_delta = sv_full - prev_raw_state_vector。prev_raw 是上轮 ODE 之前的原始输入。两轮之间的 7 秒 ODE 漂移被算进了 delta。"
+    solution: "raw_delta = sv_full - prev_state_vector。只量本轮真正变化，排除 ODE 时间漂移。delta: 1.53 → 0.12 (缩小 12 倍)。"
+    why: "安全仲裁器应该检测真正的危险波动，不是自然的 ODE 松弛。"
+    impact: "mpc_kernel/kernel.py Step 3"
+
+bugs_fixed:
+  - "KernelEvent 重复定义 — protocol.v9_types vs event.py (event_type vs type)"
+  - "_extract_params 把所有参数当必填 — timeout=15 有默认值却被当作 required"
+  - "_ToolWrapper 注入 cancellation_token 到不接受它的旧工具 → TypeError"
+  - "LLM 幻觉参数 (_high_safety_mode) 导致工具调用崩溃 → _filter_params 签名过滤"
+
+lessons:
+  - "Lipschitz 比较基线必须是 ODE-to-ODE，不能是 raw-to-ODE"
+  - "LLM 永远不该做简单模式识别。规则优先，LLM 兜底。"
+  - "死代码必须焚化——留着会产生维护者幻觉。"
+  - "Freeze 后的依赖注入 (inject_context) 是两阶段点火的关键创新。"
+  - "YAGNI — Track C 记忆手交、EventTypeSlot 插件、LegacyToolAdapter 都是过度设计。"
