@@ -8,10 +8,41 @@ from __future__ import annotations
 
 import os
 import time
+from pathlib import Path
 from typing import ClassVar
 
 from core.contracts import COMPONENT_REGISTRY, SemVer, register_component
 from core.contracts.tool import ToolResult
+
+# ═══════════════════════════════════════════════════════════════
+# V9.2c: 沙盒防御 — 防目录穿越攻击
+# ═══════════════════════════════════════════════════════════════
+
+SAFE_SANDBOX = Path(os.getenv("AGENT_SANDBOX", "./workspace")).resolve()
+
+
+def _validate_sandbox_path(requested_path: str) -> Path:
+    """防弹级路径校验 — 免疫前缀欺骗与符号链接穿越。
+
+    使用 Path.relative_to 替代 str.startswith，
+    彻底杜绝 /workspace_evil 绕过 /workspace 的经典攻击。
+    """
+    SAFE_SANDBOX.mkdir(parents=True, exist_ok=True)
+
+    target = Path(requested_path).resolve()
+
+    try:
+        target.relative_to(SAFE_SANDBOX)
+        is_safe = True
+    except ValueError:
+        is_safe = False
+
+    if not is_safe:
+        # 越权路径 → 剥夺目录结构，强制收拢到沙盒根
+        safe_name = target.name if target.name else "unnamed_file"
+        target = SAFE_SANDBOX / safe_name
+
+    return target
 
 
 @register_component("tool", "write_file")
@@ -40,16 +71,14 @@ class WriteFile:
         call_id = f"wf_{int(t0 * 1000)}"
 
         try:
-            full_path = os.path.join(self._base_dir, path)
-            os.makedirs(os.path.dirname(full_path) or ".", exist_ok=True)
-            with open(full_path, "w", encoding="utf-8") as f:
-                f.write(content)
-            size = os.path.getsize(full_path)
+            safe_path = _validate_sandbox_path(path)
+            safe_path.write_text(content, encoding="utf-8")
+            size = safe_path.stat().st_size
             return ToolResult(
                 call_id=call_id,
                 tool_name="write_file",
                 success=True,
-                data=f"写入成功: {full_path} ({size} bytes)",
+                data=f"写入成功: {safe_path} ({size} bytes)",
             )
         except PermissionError as e:
             return ToolResult(
@@ -91,14 +120,13 @@ class ReadFile:
         call_id = f"rf_{int(t0 * 1000)}"
 
         try:
-            full_path = os.path.join(self._base_dir, path)
-            if not os.path.exists(full_path):
+            safe_path = _validate_sandbox_path(path)
+            if not safe_path.exists():
                 return ToolResult(
                     call_id=call_id, tool_name="read_file",
-                    success=False, data="", error=f"文件不存在: {full_path}",
+                    success=False, data="", error=f"文件不存在: {safe_path}",
                 )
-            with open(full_path, "r", encoding="utf-8") as f:
-                content = f.read(max_chars)
+            content = safe_path.read_text(encoding="utf-8")[:max_chars]
             return ToolResult(
                 call_id=call_id,
                 tool_name="read_file",
