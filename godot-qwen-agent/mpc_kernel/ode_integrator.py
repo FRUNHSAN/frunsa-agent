@@ -77,12 +77,12 @@ def integrate_state(
     for evt in events:
         mass = max(evt.count, 1)
 
-        if evt.event_type == "TOOL_EXECUTION_FAILURE":
+        if evt.event_type == "TOOL_FAILURE":
             trust += dynamics.eta_trust_fail * trust * mass
             e_t = 1.0
             tsr   += dynamics.eta_tsr_fail * tsr * mass
 
-        elif evt.event_type == "TOOL_EXECUTION_SUCCESS":
+        elif evt.event_type == "TOOL_SUCCESS":
             trust += dynamics.eta_trust_adopt * (1.0 - trust) * mass
             tsr   += dynamics.eta_tsr_success * (1.0 - tsr) * mass
 

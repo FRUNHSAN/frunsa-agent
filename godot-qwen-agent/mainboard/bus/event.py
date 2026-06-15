@@ -92,20 +92,8 @@ def _normal_capacity(cfg: EventBridgeConfig) -> int:
 # 事件载体 — 狄拉克 δ 脉冲
 # ═══════════════════════════════════════════════════════════════
 
-@dataclass(frozen=True)
-class KernelEvent:
-    """内核事件 — 离散脉冲。进入事件总线的最小单元。
-
-    合并后 count > 1 表示 "同源事件发生了 N 次"。
-    内核 ODE 积分器消费时: trust += η × count × (target − trust)。
-    """
-    type: str                   # "TOOL_FAILURE" | "LLM_TIMEOUT" | ...
-    priority: int               # 偏序集的秩 — 越小越高
-    lamport_ts: int             # 严格单调递增 — emit() 原子分配
-    tool_name: str = ""         # 工具事件专用 — 合并分组键
-    metadata: MappingProxyType = field(default_factory=lambda: MappingProxyType({}))
-    count: int = 1              # 合并计数 — 保留 "多少次" 的语义信息
-    unmergeable: bool = False   # True → 不参与合并（如 USER_ABORT）
+# 从协议层导入 — 确保与内核 ODE 积分器的字段名一致
+from protocol.v9_types import KernelEvent
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -201,7 +189,7 @@ class EventBridge:
         unmergeable = event_type in self.cfg.unmergeable_types
 
         event = KernelEvent(
-            type=event_type,
+            event_type=event_type,
             priority=priority,
             lamport_ts=self._lamport,
             tool_name=tool_name,
@@ -268,14 +256,14 @@ class EventBridge:
 
         for evt in events:
             if evt.unmergeable:
-                key = (evt.type, evt.tool_name, evt.lamport_ts)  # 唯一键
+                key = (evt.event_type, evt.tool_name, evt.lamport_ts)  # 唯一键
                 groups[key] = evt
             else:
-                key = (evt.type, evt.tool_name)
+                key = (evt.event_type, evt.tool_name)
                 if key in groups:
                     merged = groups[key]
                     groups[key] = KernelEvent(
-                        type=merged.type,
+                        event_type=merged.event_type,
                         priority=merged.priority,
                         lamport_ts=min(merged.lamport_ts, evt.lamport_ts),
                         tool_name=merged.tool_name,
