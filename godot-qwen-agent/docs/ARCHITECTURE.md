@@ -82,36 +82,51 @@ Layer 4 (observer):       slots/ — 观察器后端
 | 6 | 梯度有界律 | ‖Δs‖ ≤ 0.30 (Lipschitz) |
 | 7 | 信息损失可审计律 | 降维压缩规则显式声明 |
 
-## 目录约定
+## 目录约定 — 双平面架构
 
 ```
+# ═══════════════════════════════════════════════
+# 控制平面 (Control Plane) — 纯代码与协议
+# ═══════════════════════════════════════════════
 godot-qwen-agent/
-  mpc_kernel/          # Layer 2: MPC 内核（纯函数）
-    kernel.py
-    ode_integrator.py / route_controller.py / safety_arbiter.py
-    slots/             # 🔴 L2 挂载点 — 策略插件 (BoundaryPolicy/CostPolicy/ValuePolicy)
-      policy_slots.py
-      manifest.json
+  mpc_kernel/          # Layer 2: MPC 内核（纯函数决策）
+    kernel.py / ode_integrator.py / route_controller.py / safety_arbiter.py
+    slots/             # 🔴 L2 挂载点 — 策略插件
+
   mainboard/           # Layer 3: 主板 — 编排 + 总线 + 插件
-    orchestrate/       #   编排器主循环 (harness.py)
-    cpu/               #   CPU socket (adapter_step 纯函数)
+    orchestrate/       #   编排器主循环
+    cpu/               #   CPU socket (adapter_step)
     bus/               #   四条总线 (llm/tool/event/telemetry)
-    track/             #   Track 管道 (track_c.py)
-    plugin_sdk/        #   插件 SDK — 协议 + 注册表 + 发现 + 校验
+    track/             #   Track 管道
+    plugin_sdk/        #   插件 SDK (Protocol + Registry + Discovery + Validator)
     slots/             #   🔴 L3 挂载点 — 工具/提示词/Track/事件
-      manifest.json
-      prompts/ / events/ / tracks/
-    config/            #   主板配置（供用户态快速加载）
+      tools/           #     ToolSlot 实例 (薄包装器 → 调用子系统)
+    config/            #   主板级配置 (总线参数、LLM provider)
+
   observer/            # Layer 4: 语义观察器
     observer.py
     slots/             # 🔴 L4 挂载点 — 观察器后端
-      semantic_trust.py
-      manifest.json
+
+  rag/                 # 独立子系统: 检索增强生成引擎
+    chunker.py         #   分块逻辑
+    vector_store.py    #   向量库接口
+    retriever.py       #   检索逻辑
+    # 非插件 — 被 mainboard/slots/tools/knowledge_search.py 薄包装调用
+
   protocol/            # 跨层冻结 ABI (v9_types.py)
-  core/                # 旧合约层（桥接依赖 — 逐步迁移）
-  components/          # 工具实现（桥接依赖）
-  engines/             # 引擎实现（桥接依赖）
+
+  core/                # 旧合约层（桥接依赖）
+  components/          # 旧工具实现（桥接依赖）
+  engines/             # 旧引擎（桥接依赖）
   LLM/                 # LLM 客户端（桥接依赖）
+
+# ═══════════════════════════════════════════════
+# 资产平面 (Asset Plane) — 数据与配置
+# ═══════════════════════════════════════════════
+  data/                # 纯数据 (大文件进 .gitignore)
+    knowledge/         #   知识库原始文件 (wiki, docs)
+    vector_db/         #   本地向量库持久化 (ChromaDB/FAISS)
+
   tests/               # 测试
   _legacy/             # V8 旧代码隔离区
   .ai_reasoning/       # 推理链 + 计划归档

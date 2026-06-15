@@ -17,6 +17,12 @@ gh.zip
 data/stress_test_telemetry.jsonl
 !data/judge_results.json
 
+# 资产平面 — 大文件不进 Git (保留目录结构)
+data/knowledge/*
+data/vector_db/*
+!data/knowledge/.gitkeep
+!data/vector_db/.gitkeep
+
 # Runtime artifacts (produced during agent operation)
 session_*.txt
 *.db
