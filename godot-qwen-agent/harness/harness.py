@@ -33,6 +33,10 @@ import logging
 from dataclasses import dataclass, field
 from types import MappingProxyType
 
+from protocol.v9_types import KernelInput, KernelState, NextAction
+from harness.telemetry_bus import TraceRecord
+from harness.track_c import RealTrackC
+
 logger = logging.getLogger(__name__)
 
 
@@ -83,7 +87,7 @@ class Harness:
         self.tool = tool_bridge
         self.event = event_bridge
         self.telemetry = telemetry
-        self.track_c = track_c or _DefaultTrackC(llm_bridge, tool_bridge, event_bridge)
+        self.track_c = track_c or RealTrackC(llm_bridge, tool_bridge, event_bridge)
         self.cfg = config
 
         # 运行时状态
@@ -102,7 +106,7 @@ class Harness:
         # ═══════════════════════════════════════════════════
         # Phase 1: Observer
         # ═══════════════════════════════════════════════════
-        obs = self.observer.observe(user_text)
+        obs = await self.observer.observe(user_text)
 
         # ═══════════════════════════════════════════════════
         # Phase 2: Adapter
