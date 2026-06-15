@@ -15,6 +15,7 @@ V9.3:  增加优雅降级、重试机制、健康检查门控
 import asyncio
 import sys
 import os
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -54,11 +55,28 @@ def boot():
         print("[BOOT] FAIL: LLM/deepseek.py 不可用")
         return
 
-    # ── 四条总线 ──
+    # ── 阶段 1: 唤醒海关 (PluginRegistry) ──
+    from mainboard.plugin_sdk.registry import PluginRegistry
+    from mainboard.plugin_sdk.discovery import discover_and_register
+
+    registry = PluginRegistry()
+
+    # ── 阶段 2: 扫描三层 slots/ ──
+    base_dir = Path(os.path.dirname(__file__))
+    results = discover_and_register(registry, base_dir)
+    print(f"[BOOT] Discovery: {len(results['success'])} loaded, "
+          f"{len(results['failed'])} failed")
+    for err in results["failed"]:
+        print(f"[BOOT]   FAIL: {err}")
+
+    # ── 阶段 3: 锁死舱门 (Freeze) ──
+    registry.freeze()
+
+    # ── 四条总线 (注入 registry) ──
     event_bridge = EventBridge()
     telemetry = TelemetryBus(TelemetryConfig(storage_path="./v9_telemetry.jsonl"))
 
-    llm_bridge = LLMBridge(provider, event_bridge)
+    llm_bridge = LLMBridge(provider, event_bridge, registry=registry)
     tool_bridge = ToolBridge(_make_mock_registry(), event_bridge)
     # V9.2a: PluginRegistry 替换 MockToolRegistry 后将自动桥接 COMPONENT_REGISTRY
 

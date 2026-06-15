@@ -107,13 +107,15 @@ class LLMBridge:
         config: LLMBridgeConfig = LLMBridgeConfig(),
         prompt_templates: dict[str, str] | None = None,
         http_client=None,          # httpx.AsyncClient — 外部配置好 connect/read 超时
+        registry=None,             # PluginRegistry — V9.2a 插件系统 (可选，向后兼容)
     ):
         self.provider = provider
         self.event = event_bridge
         self.cfg = config
-        self._http = http_client   # 底层通用 HTTP 客户端
+        self._http = http_client
+        self._registry = registry  # V9.2a: 注入的 PluginRegistry
 
-        # 地址解码表 — 默认模板。Harness 可通过构造函数注入
+        # 硬编码 Fallback — 当 Registry 不可用时的最后防线
         self._prompts = {
             "planning": (
                 "你是一个严谨的任务规划师。根据用户意图输出 JSON 格式的执行计划。"
@@ -142,6 +144,46 @@ class LLMBridge:
         """地址解码：target 是否属於本总线。"""
         return target.startswith(self.NAMESPACE)
 
+    # ── 提示词渲染 — 优先插件，降级硬编码 ─────────────────
+
+    def _render_prompt(self, template_name: str, context: dict) -> str | None:
+        """安全渲染提示词：优先走 PluginRegistry，失败则降级到硬编码。
+
+        Args:
+            template_name: "planning" | "synthesis" | "critic" | "tool_resolver"
+            context:       用户输入 + 历史 + 工具结果
+
+        Returns:
+            渲染后的系统提示词字符串。None 表示未知目标。
+        """
+        # 1. 尝试从 PluginRegistry 获取 Bundle
+        if self._registry is not None:
+            bundle = self._registry.get("prompt", "core_prompts")
+            if bundle is not None:
+                try:
+                    ctx = {
+                        "template_name": template_name,
+                        "user_input": context.get("user_query", ""),
+                        "context": "{}",
+                        "tool_results": str(context.get("tool_results", [])),
+                        "available_tools": context.get("available_tools", ""),
+                        "policy_hint": context.get("policy_hint", ""),
+                    }
+                    return bundle.build(ctx)
+                except Exception as e:
+                    logger.warning(
+                        f"Prompt plugin render failed for '{template_name}': {e}. "
+                        f"Falling back to hardcoded."
+                    )
+
+        # 2. 降级：使用硬编码 Fallback
+        fallback = self._prompts.get(template_name)
+        if fallback is not None:
+            logger.debug(f"Using hardcoded fallback for '{template_name}'")
+            return fallback
+
+        return None
+
     # ── 公共接口 ────────────────────────────────────────
 
     async def execute(
@@ -166,7 +208,7 @@ class LLMBridge:
 
         # ── 1. 地址解码 ──
         agent_name = target.replace(self.NAMESPACE, "")
-        system_prompt = self._prompts.get(agent_name)
+        system_prompt = self._render_prompt(agent_name, context)
         if system_prompt is None:
             return BusResponse(
                 op_id=op_id, status="ERROR",
