@@ -80,6 +80,7 @@ def boot():
 
     # ── 四条总线 ──
     event_bridge = EventBridge()
+    event_bridge.freeze()  # 锁死中断向量表 — NMI 槽位物理保留
     telemetry = TelemetryBus(TelemetryConfig(storage_path="./v9_telemetry.jsonl"))
 
     llm_bridge = LLMBridge(provider, event_bridge, registry=registry)

@@ -52,19 +52,36 @@ class EventBridgeConfig:
 # 数值越小 → 优先级越高。0 = NMI（不可屏蔽中断）。
 # ═══════════════════════════════════════════════════════════════
 
-PRIORITY = MappingProxyType({
-    "USER_ABORT":        0,   # NMI — 不可合并、不可丢弃、硬保留槽位保护
-    "LLM_TIMEOUT":       1,   # LLM 总线故障 — 硬保留槽位保护
-    "LLM_API_ERROR":     1,
-    "TOOL_FAILURE":      2,   # 工具执行失败
-    "POLICY_VIOLATION":  2,   # 安全策略拦截
-    "BRIDGE_OVERLOAD":   2,   # 总线过载
-    "TOOL_SUCCESS":      3,   # 工具执行成功
-    "TOOL_RETRYING":    99,   # 遥测级 — V11
-})
+# ═══════════════════════════════════════════════════════════════
+# 总线宪法 — 内置事件类型 (不可被覆盖)
+# ═══════════════════════════════════════════════════════════════
+# 优先级定义:
+#   0     = NMI (不可屏蔽中断) — 硬保留槽位, 不可合并, 不可丢弃
+#   1     = 总线致命故障 — 硬保留槽位
+#   2     = 普通中断 — 可合并, 可驱逐
+#   3-98  = 遥测级 — 最低优先级
+#   99    = 未知/野事件 — 默认降级
+#
+# NMI 槽位 (0, 1) 是内核物理保留区。
+# 任何 register_event_type() 调用若 priority <= 1 → ValueError。
+# ═══════════════════════════════════════════════════════════════
 
-# 硬保留槽位只接受这些优先级的事件
-RESERVED_SLOT_MAX_PRIORITY = 1
+_BUILTIN_EVENTS: dict[str, int] = {
+    "USER_ABORT":        0,   # NMI
+    "LLM_TIMEOUT":       1,   # 总线故障
+    "LLM_API_ERROR":     1,
+    "TOOL_FAILURE":      2,   # 工具失败
+    "POLICY_VIOLATION":  2,   # 安全拦截
+    "BRIDGE_OVERLOAD":   2,   # 总线过载
+    "TOOL_SUCCESS":      3,   # 工具成功
+    "TOOL_RETRYING":    99,   # 遥测 — V11
+}
+
+# NMI 阈值 — priority <= 此值的事件享有硬保留槽位保护
+NMI_PRIORITY_THRESHOLD: int = 1
+
+# 未知事件的默认优先级
+DEFAULT_PRIORITY: int = 99
 
 # 普通事件最多占据的物理槽位数
 def _normal_capacity(cfg: EventBridgeConfig) -> int:
@@ -111,7 +128,57 @@ class EventBridge:
     def __init__(self, config: EventBridgeConfig = EventBridgeConfig()):
         self.cfg = config
         self._buffer: list[KernelEvent] = []
-        self._lamport: int = 0  # 内部严格单调时钟 — 每次 emit 递增
+        self._lamport: int = 0
+        self._is_frozen: bool = False
+
+        # 加载宪法 — 内置事件优先级表
+        self._priority_map: dict[str, int] = dict(_BUILTIN_EVENTS)
+
+    # ── 制宪会议 — 受控注册 (仅 Boot 阶段) ─────────────
+
+    def register_event_type(self, name: str, priority: int) -> None:
+        """注册自定义事件类型。仅 Boot 阶段可用（freeze 前）。
+
+        物理锁死:
+          priority <= NMI_PRIORITY_THRESHOLD → ValueError
+          NMI 槽位 (0, 1) 是内核保留区，严禁插件染指。
+          防止优先级反转和中断风暴。
+
+        同名覆盖: 警告但不拒绝（允许 Track 升级遥测事件的优先级）。
+        """
+        if self._is_frozen:
+            raise RuntimeError(
+                "EventBus is frozen. Cannot register new event types after boot."
+            )
+
+        if priority <= NMI_PRIORITY_THRESHOLD:
+            raise ValueError(
+                f"Kernel Panic: Priority {priority} is reserved for NMI. "
+                f"(USER_ABORT / LLM_FAULT). Event '{name}' rejected."
+            )
+
+        if name in self._priority_map:
+            old = self._priority_map[name]
+            logger.warning(
+                f"Event type '{name}' priority changed: {old} → {priority}"
+            )
+
+        self._priority_map[name] = priority
+        logger.debug(f"Event registered: {name} (priority={priority})")
+
+    def freeze(self) -> None:
+        """锁死事件表。Bootloader 完成初始化后必须调用。"""
+        if not self._is_frozen:
+            self._is_frozen = True
+            logger.info(
+                f"EventBus frozen. {len(self._priority_map)} event types locked "
+                f"(builtin: {len(_BUILTIN_EVENTS)}, "
+                f"custom: {len(self._priority_map) - len(_BUILTIN_EVENTS)})"
+            )
+
+    @property
+    def is_frozen(self) -> bool:
+        return self._is_frozen
 
     # ── 注入 — 同步，非阻塞 ──────────────────────────
 
@@ -129,7 +196,7 @@ class EventBridge:
         # 原子递增 — 保证因果律
         self._lamport += 1
 
-        priority = PRIORITY.get(event_type, 50)
+        priority = self._priority_map.get(event_type, DEFAULT_PRIORITY)
         tool_name = payload.get("tool", "")
         unmergeable = event_type in self.cfg.unmergeable_types
 
@@ -143,13 +210,13 @@ class EventBridge:
             unmergeable=unmergeable,
         )
 
-        is_high_pri = priority <= RESERVED_SLOT_MAX_PRIORITY
+        is_high_pri = priority <= NMI_PRIORITY_THRESHOLD
         normal_cap = _normal_capacity(self.cfg)
 
         # 物理硬保留 — 普通事件不能占满全缓冲
         if not is_high_pri:
             normal_count = sum(
-                1 for e in self._buffer if e.priority > RESERVED_SLOT_MAX_PRIORITY
+                1 for e in self._buffer if e.priority > NMI_PRIORITY_THRESHOLD
             )
             if normal_count >= normal_cap:
                 if self.cfg.enable_priority_eviction:
@@ -231,7 +298,7 @@ class EventBridge:
         """
         candidates = [
             (i, e) for i, e in enumerate(self._buffer)
-            if e.priority > RESERVED_SLOT_MAX_PRIORITY
+            if e.priority > NMI_PRIORITY_THRESHOLD
         ]
         if not candidates:
             return  # 无普通事件可驱逐
@@ -248,7 +315,7 @@ class EventBridge:
         """
         candidates = [
             (i, e) for i, e in enumerate(self._buffer)
-            if e.priority > RESERVED_SLOT_MAX_PRIORITY
+            if e.priority > NMI_PRIORITY_THRESHOLD
         ]
         if not candidates:
             return  # 全部是高优事件 — 无法驱逐，丢弃新事件
