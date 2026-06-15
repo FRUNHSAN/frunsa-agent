@@ -178,12 +178,6 @@ class Harness:
             signals,
         )
 
-        # ── DEBUG: 安全仲裁器追踪 ──
-        print(f"[TRACE] action={control_frame.next_action.value} "
-              f"gate={control_frame.trace.gate_id} "
-              f"shield={control_frame.trace.shield_flags} "
-              f"delta={control_frame.metadata.get('lipschitz_delta', -1):.4f} "
-              f"dt={dt_ms:.0f}ms")
 
         # ═══════════════════════════════════════════════════
         # Phase 5: 执行 — 硬件级异常隔离
