@@ -125,6 +125,13 @@ class LLMBridge:
                 "你是一个质量审查员。检查执行结果是否满足所有约束。"
                 "输出 JSON: {\"pass\": bool, \"reason\": str}。"
             ),
+            "tool_resolver": (
+                "你是一个工具调用解析器。分析用户意图，决定需要调用哪些工具。\n"
+                "输出 JSON: {\"tools\": [{\"tool\": \"工具名\", \"params\": {...}}]}\n"
+                "可用工具: write_file(path, content), read_file(path), "
+                "search_web(query), run_powershell(command)\n"
+                "如果没有合适的工具，返回 {\"tools\": []}。"
+            ),
         }
         if prompt_templates:
             self._prompts.update(prompt_templates)
@@ -176,9 +183,12 @@ class LLMBridge:
 
         for attempt in range(self.cfg.connect_retries + 1):
             try:
-                raw = await self.provider.chat.completions.create(
+                # 清理 Unicode 代理字符（部分 LLM SDK 不兼容）
+                clean_messages = _sanitize_surrogates(messages)
+                raw = await asyncio.to_thread(
+                    self.provider.chat.completions.create,
                     model=api_params["model"],
-                    messages=messages,
+                    messages=clean_messages,
                     temperature=api_params["temperature"],
                     max_tokens=api_params["max_tokens"],
                 )
@@ -400,6 +410,17 @@ class LLMBridge:
 # ═══════════════════════════════════════════════════════════════
 # 辅助函数
 # ═══════════════════════════════════════════════════════════════
+
+def _sanitize_surrogates(messages: list[dict]) -> list[dict]:
+    """清理 Unicode 代理字符 — DeepSeek 等 SDK 的已知问题。"""
+    clean = []
+    for m in messages:
+        content = m.get("content", "")
+        if isinstance(content, str):
+            content = content.encode("utf-8", errors="surrogateescape").decode("utf-8", errors="replace")
+        clean.append({**m, "content": content})
+    return clean
+
 
 def _get_status(e: Exception) -> int:
     """安全提取 HTTP 状态码。"""

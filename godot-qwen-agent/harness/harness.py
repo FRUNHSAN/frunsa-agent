@@ -202,6 +202,24 @@ class Harness:
 
         return response
 
+    # ── 工具解析 — 用户意图 → 工具列表 ───────────────
+
+    async def _resolve_tools(self, user_text: str, policy) -> tuple[dict, ...]:
+        """翻译用户意图 → 具体工具列表。Harness 层桥接。
+
+        内核决定"该不该走工具路径"（SHOULD we go?）。
+        Harness 翻译"调哪个工具"（WHICH tools?）。
+
+        不是 Planning——不决定"该不该"，只做路径解析。
+        """
+        resp = await self.llm.execute(
+            target="llm://tool_resolver",
+            context={"user_query": user_text},
+            policy=policy,
+            op_id=f"resolve_{self._round_count}",
+        )
+        return _parse_tool_calls(resp.payload.get("text", ""))
+
     # ── 执行分叉 ──────────────────────────────────────
 
     async def _execute(self, frame, obs, user_text: str) -> ResponsePacket:
@@ -227,10 +245,14 @@ class Harness:
             )
 
         elif frame.next_action == NextAction.EXECUTE_TOOL:
+            # 内核只决定"该走工具路径"——不决定"调哪个工具"
+            # Harness 翻译用户意图 → 具体工具列表
+            tool_calls = frame.tool_calls or await self._resolve_tools(
+                user_text, frame.data_policy)
             result = await self.track_c.run(
                 user_text=user_text,
                 policy=frame.data_policy,
-                tool_calls=frame.tool_calls,
+                tool_calls=tool_calls,
                 round_count=self._round_count,
             )
             return ResponsePacket(
@@ -255,6 +277,29 @@ class Harness:
 
     def _compute_reward(self, _user_text: str, _response: ResponsePacket) -> float:
         return 0.0  # V10 由 RL reward model 替代
+
+
+# ═══════════════════════════════════════════════════════════════
+# 工具调用解析器 — LLM 文本 → tool_calls
+# ═══════════════════════════════════════════════════════════════
+
+def _parse_tool_calls(text: str) -> tuple[dict, ...]:
+    """从 LLM 输出中提取工具调用列表。
+
+    LLM 输出 JSON: {"tools": [{"tool": "search_web", "params": {...}}, ...]}
+    或纯文本 → 返回空元组。
+    """
+    import json, re
+    try:
+        m = re.search(r'\{.*"tools"\s*:\s*\[.*\]\s*\}', text, re.DOTALL)
+        if m:
+            data = json.loads(m.group())
+            tools = data.get("tools", [])
+            if isinstance(tools, list):
+                return tuple(t for t in tools if isinstance(t, dict) and t.get("tool"))
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        pass
+    return ()
 
 
 # ═══════════════════════════════════════════════════════════════
