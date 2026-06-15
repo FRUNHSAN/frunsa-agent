@@ -390,7 +390,7 @@ class TestBoundaryConditions:
         corrupted = object.__new__(StateVector)
         object.__setattr__(corrupted, "data", tuple([float('nan')]*16))
         state = KernelState(
-            prev_state_vector=sv, prev_raw_state_vector=corrupted,
+            prev_state_vector=corrupted, prev_raw_state_vector=sv,
             current_mode=SystemMode.NORMAL, round_count=5,
         )
         kernel_input = KernelInput(state_vector=sv, event_queue=(), dt_ms=500.0)

@@ -143,8 +143,9 @@ def kernel_step(
     sv_full = sv_integrated
 
     # Step 3: Lipschitz 裁剪 + 数学崩溃熔断
-    prev_raw = state.prev_raw_state_vector.data
-    raw_delta_vector = tuple(sv_full[i] - prev_raw[i] for i in range(STATE_DIMENSION))
+    # 使用上轮的 ODE 状态 (非 raw) 作为基线 —— 排除大 dt 造成的 ODE 虚高漂移
+    prev_ode = state.prev_state_vector.data
+    raw_delta_vector = tuple(sv_full[i] - prev_ode[i] for i in range(STATE_DIMENSION))
     raw_delta = math.sqrt(sum(x * x for x in raw_delta_vector))
 
     if math.isnan(raw_delta) or math.isinf(raw_delta):
