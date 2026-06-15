@@ -541,6 +541,27 @@ class HarnessToolRegistry:
             descriptions.append(f"{name}({sig})")
         return ", ".join(descriptions) if descriptions else "无可用工具"
 
+    # ── 规则引擎接口 ─────────────────────────────────
+
+    def get_match_patterns(self, name: str) -> tuple[str, ...]:
+        """返回工具的规则匹配指纹。无声明 → 空元组。"""
+        try:
+            cls = self._registry.get("tool", name)
+            return getattr(cls, "match_patterns", ())
+        except KeyError:
+            return ()
+
+    def extract_params(self, name: str, user_text: str) -> dict:
+        """调用工具的 extract_params。无声明 → 空 dict。"""
+        try:
+            cls = self._registry.get("tool", name)
+            fn = getattr(cls, "extract_params", None)
+            if callable(fn):
+                return fn(user_text)
+        except KeyError:
+            pass
+        return {}
+
     @staticmethod
     def _extract_params(execute_fn) -> tuple[str, ...]:
         """从 execute 签名提取参数名 (排除 self 和 cancellation_token)。"""

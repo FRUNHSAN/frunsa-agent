@@ -25,6 +25,20 @@ class RunPowershell:
 
     VERSION: ClassVar[SemVer] = SemVer(1, 0, 0)
 
+    # V9.2b: 规则引擎匹配指纹
+    match_patterns: ClassVar[tuple[str, ...]] = (
+        "几点", "时间", "日期", "星期", "几号", "年月",
+        "执行", "运行", "命令", "cmd", "powershell",
+    )
+
+    @staticmethod
+    def extract_params(user_text: str) -> dict:
+        import re
+        m = re.search(r"(?:执行|运行)\s*[：:]*\s*(.+)", user_text)
+        if m:
+            return {"command": m.group(1).strip()}
+        return {"command": "Get-Date"}
+
     def execute(self, command: str, timeout: int = 15) -> ToolResult:
         """Run a PowerShell command. Returns ToolResult with stdout/stderr."""
         t0 = time.perf_counter()

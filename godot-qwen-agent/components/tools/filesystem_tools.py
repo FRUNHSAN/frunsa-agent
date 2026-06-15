@@ -26,6 +26,15 @@ class WriteFile:
     VERSION: ClassVar[SemVer] = SemVer(1, 0, 0)
     _base_dir: str = "."
 
+    # V9.2b: 规则引擎匹配指纹
+    match_patterns: ClassVar[tuple[str, ...]] = (
+        "写", "保存", "创建文件", "写入", "输出到", "write", "save",
+    )
+
+    @staticmethod
+    def extract_params(user_text: str) -> dict:
+        return {"path": "/tmp/output.txt", "content": user_text}
+
     def execute(self, path: str, content: str) -> ToolResult:
         t0 = time.perf_counter()
         call_id = f"wf_{int(t0 * 1000)}"
@@ -65,6 +74,17 @@ class ReadFile:
 
     VERSION: ClassVar[SemVer] = SemVer(1, 0, 0)
     _base_dir: str = "."
+
+    # V9.2b: 规则引擎匹配指纹
+    match_patterns: ClassVar[tuple[str, ...]] = (
+        "读", "查看文件", "打开文件", "读取", "read",
+    )
+
+    @staticmethod
+    def extract_params(user_text: str) -> dict:
+        import re
+        m = re.search(r"([A-Za-z]:[\\/\w.\-]+|/[\w/.\-]+)", user_text)
+        return {"path": m.group(1) if m else "unknown.txt"}
 
     def execute(self, path: str, max_chars: int = 3000) -> ToolResult:
         t0 = time.perf_counter()

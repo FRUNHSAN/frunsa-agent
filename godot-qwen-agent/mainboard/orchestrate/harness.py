@@ -30,6 +30,7 @@ import time
 import asyncio
 import itertools
 import logging
+import re
 from dataclasses import dataclass, field
 from types import MappingProxyType
 
@@ -218,12 +219,21 @@ class Harness:
     async def _resolve_tools(self, user_text: str, policy) -> tuple[dict, ...]:
         """翻译用户意图 → 具体工具列表。Harness 层桥接。
 
-        内核决定"该不该走工具路径"（SHOULD we go?）。
-        Harness 翻译"调哪个工具"（WHICH tools?）。
-
-        不是 Planning——不决定"该不该"，只做路径解析。
+        规则优先 (100% 确定, 零延迟) → LLM 兜底 (处理未知意图)。
         """
-        # 动态查询可用的工具签名
+        # 1. 规则引擎 — 遍历工具指纹, 正则碰撞
+        if hasattr(self.tool, 'registry'):
+            result = _resolve_tools_deterministic(
+                user_text, self.tool.registry
+            )
+            if result:
+                logger.info(
+                    "RuleEngine: '%s' -> %s",
+                    user_text[:50], result[0].get("tool"),
+                )
+                return result
+
+        # 2. LLM 兜底 — 真正的未知意图
         available_tools = ""
         if hasattr(self.tool, 'registry'):
             available_tools = self.tool.registry.tool_descriptions()
@@ -296,6 +306,34 @@ class Harness:
 
     def _compute_reward(self, _user_text: str, _response: ResponsePacket) -> float:
         return 0.0  # V10 由 RL reward model 替代
+
+
+# ═══════════════════════════════════════════════════════════════
+# 确定性工具匹配 — 规则引擎 (100% 命中, 零延迟)
+# ═══════════════════════════════════════════════════════════════
+
+
+def _resolve_tools_deterministic(
+    user_text: str, registry,
+) -> tuple[dict, ...] | None:
+    """规则引擎 — 遍历工具的 match_patterns 指纹进行正则碰撞。
+
+    工具自己声明"我能匹配什么" → 路由层只管遍历。
+    命中 → 立即返回。未命中 → None, 交给 LLM。
+
+    Args:
+        user_text: 用户原始输入
+        registry:  HarnessToolRegistry (提供 list_tools + get_match_patterns + extract_params)
+
+    Returns:
+        工具列表元组 或 None
+    """
+    for tool_name in registry.list_tools():
+        for pattern in registry.get_match_patterns(tool_name):
+            if re.search(pattern, user_text):
+                params = registry.extract_params(tool_name, user_text)
+                return ({"tool": tool_name, "params": params},)
+    return None
 
 
 # ═══════════════════════════════════════════════════════════════

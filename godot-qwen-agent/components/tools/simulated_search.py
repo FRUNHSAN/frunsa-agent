@@ -50,6 +50,15 @@ class SimulatedWebSearch:
     _global_call_count: ClassVar[int] = 0
     _global_fail_on_call: ClassVar[int | None] = 3  # fails on 3rd+ call
 
+    # V9.2b: 规则引擎匹配指纹
+    match_patterns: ClassVar[tuple[str, ...]] = (
+        "搜索", "查一下", "搜", "上网", "百度", "谷歌", "search",
+    )
+
+    @staticmethod
+    def extract_params(user_text: str) -> dict:
+        return {"query": user_text}
+
     def __init__(self) -> None:
         pass
 
@@ -125,6 +134,15 @@ class SimulatedBraveSearch:
             },
         },
     }
+
+    # V9.2b: 规则引擎匹配指纹
+    match_patterns: ClassVar[tuple[str, ...]] = (
+        "搜索", "查一下", "搜", "上网", "百度", "谷歌", "search",
+    )
+
+    @staticmethod
+    def extract_params(user_text: str) -> dict:
+        return {"query": user_text}
 
     def execute(self, **params) -> ToolResult:
         query = params.get("query", "")
