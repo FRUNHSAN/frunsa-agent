@@ -1,0 +1,15 @@
+{
+  "layer": "L4",
+  "layer_name": "Observer",
+  "protocol_version": "9.2.0",
+  "slot_types": ["observer"],
+  "plugins": {
+    "observer": {
+      "semantic_trust": {
+        "module": "observer.observer",
+        "class": "SemanticTrustObserver",
+        "description": "ML-based semantic trust observer (V7.7 sheaf theory)"
+      }
+    }
+  }
+}

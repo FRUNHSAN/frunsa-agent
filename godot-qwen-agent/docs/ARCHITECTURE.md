@@ -55,20 +55,17 @@ Layer 1: Execution ── LLM Synthesis / Tool Execution / Track C
 | **Event Bus** | NVIC (中断控制器) | 外设→内核 | 中断脉冲：优先级仲裁 + Lamport 时钟 + 合并去重 | `mainboard/bus/event.py` |
 | **Telemetry Bus** | CoreSight (调试跟踪) | 单向出 | (s,a,r) 三元组 → JSONL 异步写入 | `mainboard/bus/telemetry.py` |
 
-## 插件协议 (V9.2)
+## 插件协议 (V9.2) — 三层挂载点
 
 ```
-mainboard/
-  plugin/
-    protocol.py         — PROTOCOL_VERSION + PluginManifest + 6 Slot Protocols
-    registry.py         — PluginRegistry + HarnessToolRegistry (桥接 COMPONENT_REGISTRY)
-    discovery.py        — manifest.json 驱动 + LazyPluginLoader
-    validator.py        — validate_slot() 挂载时校验
-  plugins/
-    prompts/            — PromptSlot 实现
-    events/             — EventTypeSlot 实现
-    observers/          — ObserverSlot 实现
-    tracks/             — TrackSlot 实现
+Layer 2 (mpc_kernel):     slots/ — 策略插件
+Layer 3 (mainboard):      slots/ — 工具 + 提示词 + Track + 事件
+Layer 4 (observer):       slots/ — 观察器后端
+
+统一规范:
+  - 每层 slots/__init__.py — 空壳，禁止硬编码 import
+  - 每层 slots/manifest.json — 插件清单（LazyPluginLoader 驱动）
+  - mainboard/plugin_sdk/ — 共享 SDK (protocol/registry/discovery/validator)
 ```
 
 六个 Slot 类型: `tool`, `prompt`, `track`, `observer`, `event`, `policy`
@@ -89,17 +86,28 @@ mainboard/
 
 ```
 godot-qwen-agent/
-  mpc_kernel/          # Layer 2: V9 内核（纯函数）
+  mpc_kernel/          # Layer 2: MPC 内核（纯函数）
+    kernel.py
+    ode_integrator.py / route_controller.py / safety_arbiter.py
+    slots/             # 🔴 L2 挂载点 — 策略插件 (BoundaryPolicy/CostPolicy/ValuePolicy)
+      policy_slots.py
+      manifest.json
   mainboard/           # Layer 3: 主板 — 编排 + 总线 + 插件
-    orchestrate/       #   编排器主循环
+    orchestrate/       #   编排器主循环 (harness.py)
     cpu/               #   CPU socket (adapter_step 纯函数)
-    bus/               #   四条总线 (LLM/Tool/Event/Telemetry)
-    track/             #   Track 管道
-    plugin/            #   插件 SDK (协议 + 注册表 + 发现 + 校验)
-    plugins/           #   已安装插件实现
+    bus/               #   四条总线 (llm/tool/event/telemetry)
+    track/             #   Track 管道 (track_c.py)
+    plugin_sdk/        #   插件 SDK — 协议 + 注册表 + 发现 + 校验
+    slots/             #   🔴 L3 挂载点 — 工具/提示词/Track/事件
+      manifest.json
+      prompts/ / events/ / tracks/
     config/            #   主板配置（供用户态快速加载）
-  observer/            # Layer 4: 观察器
-  protocol/            # 冻结 ABI 类型
+  observer/            # Layer 4: 语义观察器
+    observer.py
+    slots/             # 🔴 L4 挂载点 — 观察器后端
+      semantic_trust.py
+      manifest.json
+  protocol/            # 跨层冻结 ABI (v9_types.py)
   core/                # 旧合约层（桥接依赖 — 逐步迁移）
   components/          # 工具实现（桥接依赖）
   engines/             # 引擎实现（桥接依赖）

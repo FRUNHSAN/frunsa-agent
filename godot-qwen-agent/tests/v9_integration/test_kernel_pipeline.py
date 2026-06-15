@@ -241,7 +241,7 @@ class TestSafetyArbiter:
 
 class TestPolicySlots:
     def test_hard_threshold(self):
-        from mpc_kernel.policy_slots import HardThresholdBoundary
+        from mpc_kernel.slots.policy_slots import HardThresholdBoundary
         p = HardThresholdBoundary(threshold=0.10)
         sv_bad = _make_state_vector(trust=0.08).data
         sv_ok = _make_state_vector(trust=0.30).data
@@ -249,7 +249,7 @@ class TestPolicySlots:
         assert p.evaluate(sv_ok) == 0.0
 
     def test_schmitt_cost_continuous(self):
-        from mpc_kernel.policy_slots import SchmittTriggerCost
+        from mpc_kernel.slots.policy_slots import SchmittTriggerCost
         p = SchmittTriggerCost()
         sv = _make_state_vector(e_t=0.60).data
         cost_tool = p.cost(sv, NextAction.EXECUTE_TOOL, 3, 0)
@@ -258,7 +258,7 @@ class TestPolicySlots:
         assert cost_gen == 0.0
 
     def test_validate_slot_ok(self):
-        from mpc_kernel.policy_slots import (
+        from mpc_kernel.slots.policy_slots import (
             HardThresholdBoundary, BoundaryPolicy, validate_slot,
         )
         policy = HardThresholdBoundary()
@@ -266,7 +266,7 @@ class TestPolicySlots:
 
     def test_validate_slot_bad(self):
         """签名不匹配 → TypeError。"""
-        from mpc_kernel.policy_slots import BoundaryPolicy, validate_slot
+        from mpc_kernel.slots.policy_slots import BoundaryPolicy, validate_slot
 
         class BadPolicy:
             metadata = None

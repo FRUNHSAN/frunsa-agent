@@ -1,0 +1,46 @@
+{
+  "layer": "L3",
+  "layer_name": "Mainboard",
+  "protocol_version": "9.2.0",
+  "slot_types": ["tool", "prompt", "track", "observer", "event"],
+  "plugins": {
+    "prompt": {
+      "planning": {
+        "module": "mainboard.slots.prompts.planning_prompt",
+        "class": "PlanningPrompt",
+        "description": "Task planning agent system prompt"
+      },
+      "synthesis": {
+        "module": "mainboard.slots.prompts.synthesis_prompt",
+        "class": "SynthesisPrompt",
+        "description": "Content synthesis agent system prompt"
+      },
+      "critic": {
+        "module": "mainboard.slots.prompts.critic_prompt",
+        "class": "CriticPrompt",
+        "description": "Quality review agent system prompt"
+      },
+      "tool_resolver": {
+        "module": "mainboard.slots.prompts.tool_resolver_prompt",
+        "class": "ToolResolverPrompt",
+        "description": "Tool call resolver system prompt"
+      }
+    },
+    "track": {
+      "C": {
+        "module": "mainboard.track.track_c",
+        "class": "RealTrackC",
+        "description": "Tool Execution → Critic pipeline (no planning)"
+      }
+    },
+    "observer": {
+      "semantic_trust": {
+        "module": "observer.observer",
+        "class": "SemanticTrustObserver",
+        "description": "ML-based semantic trust observer"
+      }
+    },
+    "event": {},
+    "tool": {}
+  }
+}

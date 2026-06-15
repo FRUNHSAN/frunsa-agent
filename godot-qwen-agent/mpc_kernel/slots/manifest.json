@@ -1,0 +1,25 @@
+{
+  "layer": "L2",
+  "layer_name": "MPC Kernel",
+  "protocol_version": "9.2.0",
+  "slot_types": ["policy"],
+  "plugins": {
+    "policy": {
+      "hard_threshold_boundary": {
+        "module": "mpc_kernel.slots.policy_slots",
+        "class": "HardThresholdBoundary",
+        "description": "Hard threshold boundary policy at trust=0.10"
+      },
+      "schmitt_trigger_cost": {
+        "module": "mpc_kernel.slots.policy_slots",
+        "class": "SchmittTriggerCost",
+        "description": "Schmitt trigger (2 up / 3 down) continuous cost"
+      },
+      "zero_padding_value": {
+        "module": "mpc_kernel.slots.policy_slots",
+        "class": "ZeroPaddingValue",
+        "description": "Zero-padding value estimator (placeholder)"
+      }
+    }
+  }
+}
