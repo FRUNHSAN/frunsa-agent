@@ -139,7 +139,7 @@ def safety_arbiter(
             action = NextAction.WAIT
             flags |= ShieldFlag.CRITICAL_CLAMP | ShieldFlag.ACTION_DOWNGRADED
 
-    elif raw_delta > 2 * MAX_GRADIENT_NORM and action == NextAction.EXECUTE_TOOL:
+    elif raw_delta > 3.5 * MAX_GRADIENT_NORM and action == NextAction.EXECUTE_TOOL:
         if sparsity > SPARSITY_ANOMALY:
             flags |= ShieldFlag.LIPSCHITZ_CLIPPED
         else:
