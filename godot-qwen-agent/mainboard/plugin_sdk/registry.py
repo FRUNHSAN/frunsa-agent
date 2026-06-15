@@ -568,19 +568,31 @@ class _ToolWrapper:
         self._name = name
         manifest = getattr(instance, "PLUGIN_MANIFEST", None)
         self._cancellable = getattr(manifest, "cancellable", True) if manifest else True
-        # 检测旧工具的 execute 是否接受 cancellation_token 参数
         self._accepts_token = _exec_accepts_cancellation_token(instance)
+        # 缓存工具接受的参数名，用于过滤 LLM 幻觉参数
+        self._accepted_params = _get_accepted_params(instance)
+
+    def _filter_params(self, params: dict[str, Any]) -> dict[str, Any]:
+        """过滤 params，只保留工具实际接受的参数。
+
+        LLM (tool_resolver) 可能幻觉多余参数 (如 _high_safety_mode)。
+        不报错——静默丢弃，避免因 LLM 的小错误阻断整个工具调用。
+        """
+        if not self._accepted_params:
+            return dict(params)  # 无法检测签名 → 全部透传
+        return {k: v for k, v in params.items() if k in self._accepted_params}
 
     async def execute(self, params: dict[str, Any]) -> str:
-        """执行工具。注入取消令牌（若工具支持），序列化结果为 JSON。"""
+        """执行工具。过滤未知参数 + 注入取消令牌 + 序列化结果。"""
         token = threading.Event()
 
         def _run():
-            params_with_token = params
+            # 过滤：只传工具实际接受的参数 (LLM 可能幻觉多余参数)
+            filtered = self._filter_params(params)
             if self._cancellable and self._accepts_token:
-                params_with_token = {**params, "cancellation_token": token}
+                filtered["cancellation_token"] = token
             try:
-                return self._inst.execute(**params_with_token)
+                return self._inst.execute(**filtered)
             except Exception as e:
                 logger.exception(f"[{self._name}] 工具执行异常")
                 return _ToolResultStub(
@@ -606,6 +618,22 @@ def _exec_accepts_cancellation_token(instance: Any) -> bool:
         return "cancellation_token" in sig.parameters
     except (ValueError, TypeError):
         return False
+
+
+def _get_accepted_params(instance: Any) -> frozenset[str] | None:
+    """提取工具 execute 方法接受的参数名集合。
+
+    返回 None 表示无法检测签名（此时 _filter_params 透传所有参数）。
+    """
+    import inspect
+    try:
+        sig = inspect.signature(instance.execute)
+        return frozenset(
+            p for p in sig.parameters
+            if p != "self"
+        )
+    except (ValueError, TypeError):
+        return None
 
 
 class _ToolResultStub:
