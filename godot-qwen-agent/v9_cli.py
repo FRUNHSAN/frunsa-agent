@@ -18,12 +18,12 @@ if os.path.exists(_env_path):
 from protocol.v9_types import KernelInput, KernelState, SystemMode, TrustDynamics
 from mpc_kernel.kernel import kernel_step
 from observer.observer import SemanticTrustObserver, ObservationResult
-from harness.adapter import adapter_step, AdapterState
-from harness.event_bridge import EventBridge
-from harness.telemetry_bus import TelemetryBus, TelemetryConfig
-from harness.llm_bridge import LLMBridge, LLMBridgeConfig
-from harness.tool_bridge import ToolBridge, ToolBridgeConfig, ToolMetadata
-from harness.harness import Harness
+from mainboard.cpu.adapter import adapter_step, AdapterState
+from mainboard.bus.event import EventBridge
+from mainboard.bus.telemetry import TelemetryBus, TelemetryConfig
+from mainboard.bus.llm import LLMBridge, LLMBridgeConfig
+from mainboard.bus.tool import ToolBridge, ToolBridgeConfig, ToolMetadata
+from mainboard.orchestrate.harness import Harness
 
 
 class AdapterWrapper:

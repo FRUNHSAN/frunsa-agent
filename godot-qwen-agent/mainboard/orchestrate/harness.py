@@ -34,8 +34,8 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 
 from protocol.v9_types import KernelInput, KernelState, NextAction
-from harness.telemetry_bus import TraceRecord
-from harness.track_c import RealTrackC
+from mainboard.bus.telemetry import TraceRecord
+from mainboard.track.track_c import RealTrackC
 
 logger = logging.getLogger(__name__)
 

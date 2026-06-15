@@ -24,7 +24,7 @@ from mpc_kernel.route_controller import (
 from mpc_kernel.safety_arbiter import safety_arbiter, _hoyer_sparsity
 from mpc_kernel.kernel import kernel_step, _clamp_state_vector, _sanitize_nan_and_inf
 from observer.observer import SemanticTrustObserver, ObservationResult, ObservedEvent
-from harness.adapter import adapter_step, AdapterState
+from mainboard.cpu.adapter import adapter_step, AdapterState
 
 
 # ═══════════════════════════════════════════════════════════════
