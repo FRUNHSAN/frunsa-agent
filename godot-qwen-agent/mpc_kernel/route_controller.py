@@ -149,25 +149,26 @@ def gate_p3_meta_relaxed(
 def gate_p4_cold_start(
     sv: StateVector, state: KernelState, signals: RouteSignals,
 ) -> Optional[GateResult]:
-    """P4: 冷启动 (round ≤ 2)。
+    """P4: 模糊意图 → 工具调用。
 
-    结构够 → TOOL。结构不够 → 返回 None (fallthrough)。
-    不抢占低优先级门 — 让 P5/P7 有机会在冷启动期介入。
+    context_depth > 0.40 → TOOL (LLM 不确定 → 需要外部信息)。
+    不再限制轮数 — Agent 终身具备工具调用能力。
+
+    安全网: P0(社交) + P1(信任衰减) + context_depth 阈值
+    防止工具滥用，无需额外的轮数限制。
     """
-    if state.round_count <= 2:
-        context_depth = sv[2]  # [PROXY: clarity]
-        if context_depth > 0.40:
-            return GateResult(
-                action=NextAction.EXECUTE_TOOL,
-                gate_id="P4_COLD_START",
-                reason=f"Round {state.round_count}: sufficient structure [PROXY]",
-                operands=MappingProxyType({
-                    "round": state.round_count, "context_depth": context_depth,
-                }),
-                next_mode=SystemMode.NORMAL,
-            )
-        # fallthrough — 让 P5/P6/P7 有机会
-        return None
+    context_depth = sv[2]  # [PROXY: clarity]
+    if context_depth > 0.40:
+        return GateResult(
+            action=NextAction.EXECUTE_TOOL,
+            gate_id="P4_COLD_START",
+            reason=f"Round {state.round_count}: sufficient structure [PROXY]",
+            operands=MappingProxyType({
+                "round": state.round_count, "context_depth": context_depth,
+            }),
+            next_mode=SystemMode.NORMAL,
+        )
+    # fallthrough — 让 P5/P6/P7 有机会
     return None
 
 
