@@ -185,3 +185,27 @@ class SemanticTrustObserver(Observer):
             "你好", "再见", "拜拜", "谢谢", "早上好", "晚安",
             "hello", "hi", "bye", "thanks", "good morning", "good night",
         ))
+
+
+# ═══════════════════════════════════════════════════════════════
+# V9.2b: PluginManifest + 工厂函数 — 接入 PluginRegistry
+# ═══════════════════════════════════════════════════════════════
+
+from mainboard.plugin_sdk.protocol import PluginManifest
+
+_SEMANTIC_TRUST_MANIFEST = PluginManifest(
+    name="semantic_trust",
+    slot_type="observer",
+    version="1.0.0",
+    protocol_version="9.2.0",
+    description="L4 Semantic Trust Observer — ML-based sheaf theory (V7.7)",
+)
+
+# 注入 manifest 到已有的类 (不改变类定义，避免破坏现有 import)
+SemanticTrustObserver.manifest = _SEMANTIC_TRUST_MANIFEST
+SemanticTrustObserver.observer_id = "semantic_trust"
+
+
+def get_instance() -> SemanticTrustObserver:
+    """工厂函数 — LazyPluginLoader 的无参构造入口。"""
+    return SemanticTrustObserver(semantic_engine=None)
