@@ -564,13 +564,18 @@ class HarnessToolRegistry:
 
     @staticmethod
     def _extract_params(execute_fn) -> tuple[str, ...]:
-        """从 execute 签名提取参数名 (排除 self 和 cancellation_token)。"""
+        """从 execute 签名提取必填参数名 — 仅无默认值的参数。
+
+        排除: self, cancellation_token, 以及有默认值的参数。
+        只有真正的必填参数才会在 ToolBridge._validate 中检查。
+        """
         import inspect
         try:
             sig = inspect.signature(execute_fn)
             return tuple(
-                p for p in sig.parameters
-                if p not in ("self", "cancellation_token")
+                p.name for p in sig.parameters.values()
+                if p.name not in ("self", "cancellation_token")
+                and p.default is inspect.Parameter.empty
             )
         except (ValueError, TypeError):
             return ()
