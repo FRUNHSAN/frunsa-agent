@@ -1,0 +1,12 @@
+{
+  "dangling_dag_count": 0,
+  "accumulated_e_t": 0.5,
+  "budget_remaining_ratio": 1.0,
+  "physical_failures": 0,
+  "physical_attempts": 0,
+  "mcp_failures": 0,
+  "mcp_attempts": 0,
+  "snapshot_age": 0,
+  "_session_count": 16,
+  "_timestamp": 1781156164.866748
+}

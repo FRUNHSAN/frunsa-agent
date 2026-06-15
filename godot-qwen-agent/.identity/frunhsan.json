@@ -1,0 +1,20 @@
+{
+  "cumulative_migration": 0.11661172561969294,
+  "interval_skew": 0.0,
+  "flags": [],
+  "drift_P95": 0.5921030943701391,
+  "session_count": 16,
+  "interval_sigma": 0.0,
+  "tool_risk_aversion": 0.5,
+  "interval_mu": 0.0,
+  "budget_exhaustion_rate": null,
+  "clarity_P50": 0.5,
+  "selection_pressure_count": 0,
+  "trust": 0.5340233819075353,
+  "retry_success_rate": 0.5,
+  "e_t_P50": 0.5,
+  "last_push_magnitude": 0.059664118212414415,
+  "last_active_at": 1781156164.8637435,
+  "drift_P50": 0.19736769812337968,
+  "physical_fail_rate": null
+}

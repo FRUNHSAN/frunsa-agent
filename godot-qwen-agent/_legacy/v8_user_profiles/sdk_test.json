@@ -1,0 +1,13 @@
+{
+  "user_id": "sdk_test",
+  "amendment_threshold": 3,
+  "outlier_field_count": 3,
+  "outlier_trust_delta": 0.25,
+  "current_session": 0,
+  "field_sessions": {},
+  "session_outlier": [],
+  "session_mod_count": {},
+  "session_trust_delta": {},
+  "last_blueprint": null,
+  "consent_history": []
+}
