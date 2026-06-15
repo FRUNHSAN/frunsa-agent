@@ -134,25 +134,3 @@ class _KernelWrapper:
                 current_mode=SystemMode.NORMAL, round_count=0,
             )
         return kernel_step(state, input, signals)
-
-
-def _make_mock_registry():
-    """V9.2a 过渡：PluginRegistry 未就绪前的临时工具注册表。"""
-    from mainboard.bus.tool import ToolMetadata
-
-    class _MockRegistry:
-        def get_metadata(self, name):
-            return ToolMetadata(name=name, timeout_ms=10000)
-
-        def get_executor(self, name):
-            class _WriteFile:
-                async def execute(self, params):
-                    path = params.get("path", "/tmp/out.txt")
-                    content = params.get("content", "")
-                    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-                    with open(path, "w", encoding="utf-8") as f:
-                        f.write(content)
-                    return f"写入: {path} ({len(content)} bytes)"
-            return _WriteFile()
-
-    return _MockRegistry()
