@@ -81,7 +81,7 @@ class TestODEIntegrator:
 
         for _ in range(100):
             events = (KernelEvent(
-                event_type="TOOL_EXECUTION_FAILURE",
+                event_type="TOOL_FAILURE",
                 priority=2, lamport_ts=0, count=1,
             ),)
             sv_prev = integrate_state(sv_prev, sv_raw, events, 1000, dynamics)
@@ -92,7 +92,7 @@ class TestODEIntegrator:
         dynamics = TrustDynamics()
         sv_prev = (0.30, 0.0, 0.0, 0.0, 0.0, 0.50, 0.0, 0.0, *[0.0]*8)
         events = (KernelEvent(
-            event_type="TOOL_EXECUTION_SUCCESS",
+            event_type="TOOL_SUCCESS",
             priority=3, lamport_ts=0, count=1,
         ),)
         result = integrate_state(sv_prev, sv_prev, events, 1000, dynamics)
@@ -104,11 +104,11 @@ class TestODEIntegrator:
         sv = (0.50, 0.0, 0.0, 0.0, 0.0, 0.50, 0.0, 0.0, *[0.0]*8)
 
         r1 = integrate_state(sv, sv, (
-            KernelEvent(event_type="TOOL_EXECUTION_FAILURE", priority=2, lamport_ts=0, count=1),
+            KernelEvent(event_type="TOOL_FAILURE", priority=2, lamport_ts=0, count=1),
         ), 1000, dynamics)
 
         r5 = integrate_state(sv, sv, (
-            KernelEvent(event_type="TOOL_EXECUTION_FAILURE", priority=2, lamport_ts=0, count=5),
+            KernelEvent(event_type="TOOL_FAILURE", priority=2, lamport_ts=0, count=5),
         ), 1000, dynamics)
 
         assert r5[0] < r1[0]  # 5 次失败 → trust 更低
@@ -121,11 +121,11 @@ class TestODEIntegrator:
 class TestRouteController:
     def test_default_fallthrough(self):
         """无信号 → DEFAULT_FALLTHROUGH → GENERATE。"""
-        sv = _make_state_vector()
+        sv = _make_state_vector(context_depth=0.30)  # < 0.40 → P4 不触发
         state = _default_kernel_state()
         state = KernelState(
             prev_state_vector=sv, prev_raw_state_vector=sv,
-            current_mode=SystemMode.NORMAL, round_count=5,  # 跳过 P4 冷启动
+            current_mode=SystemMode.NORMAL, round_count=5,
         )
         signals = _default_signals()
         action, trace, new_state = route_controller(sv, state, signals)
@@ -144,7 +144,7 @@ class TestRouteController:
 
     def test_p1_exits_via_preexit(self):
         """trust 回到 0.10+ → pre-exit 解除 TRUST_CRISIS。"""
-        sv = _make_state_vector(trust=0.12)
+        sv = _make_state_vector(trust=0.12, context_depth=0.30)  # < 0.40 → P4 不触发
         state = KernelState(
             prev_state_vector=sv,
             prev_raw_state_vector=sv,
@@ -335,8 +335,8 @@ class TestObserverAdapterKernel:
 
     def test_p5_triggers_at_route_level(self):
         """e_t 连续上升 → P5 → TOOL（路由控制器级别）。"""
-        sv_curr = _make_state_vector(e_t=0.60)
-        sv_prev = _make_state_vector(e_t=0.50)
+        sv_curr = _make_state_vector(e_t=0.60, context_depth=0.30)  # < 0.40 → P4 不触发
+        sv_prev = _make_state_vector(e_t=0.50, context_depth=0.30)
         state = KernelState(
             prev_state_vector=sv_prev, prev_raw_state_vector=sv_prev,
             current_mode=SystemMode.NORMAL, round_count=5,
