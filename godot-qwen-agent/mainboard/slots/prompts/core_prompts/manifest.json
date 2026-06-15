@@ -1,0 +1,9 @@
+{
+  "name": "core_prompts",
+  "slot_type": "prompt",
+  "version": "1.0.0",
+  "protocol_version": "9.2.0",
+  "description": "V9 核心提示词集合 — Planning, Synthesis, Critic, Tool Resolver",
+  "capabilities": ["bundle"],
+  "class": "CorePromptBundle"
+}
