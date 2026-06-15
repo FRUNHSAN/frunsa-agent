@@ -89,6 +89,8 @@ Layer 4 (observer):       slots/ — 观察器后端
 # 控制平面 (Control Plane) — 纯代码与协议
 # ═══════════════════════════════════════════════
 godot-qwen-agent/
+  app.py               # L0 Bootloader — 启动自检 + 依赖注入 + 移交控制权
+
   mpc_kernel/          # Layer 2: MPC 内核（纯函数决策）
     kernel.py / ode_integrator.py / route_controller.py / safety_arbiter.py
     slots/             # 🔴 L2 挂载点 — 策略插件
@@ -100,17 +102,15 @@ godot-qwen-agent/
     track/             #   Track 管道
     plugin_sdk/        #   插件 SDK (Protocol + Registry + Discovery + Validator)
     slots/             #   🔴 L3 挂载点 — 工具/提示词/Track/事件
-      tools/           #     ToolSlot 实例 (薄包装器 → 调用子系统)
-    config/            #   主板级配置 (总线参数、LLM provider)
+    config/            #   主板级配置
+    sensor.py          #   Sensor Hub — 系统级内部感知 (V9.3 实现)
+    power.py           #   Power MCU — 生命周期管理 (V9.3 实现)
 
-  observer/            # Layer 4: 语义观察器
+  observer/            # Layer 4: 语义观察器 (外部感知 — 用户)
     observer.py
     slots/             # 🔴 L4 挂载点 — 观察器后端
 
   rag/                 # 独立子系统: 检索增强生成引擎
-    chunker.py         #   分块逻辑
-    vector_store.py    #   向量库接口
-    retriever.py       #   检索逻辑
     # 非插件 — 被 mainboard/slots/tools/knowledge_search.py 薄包装调用
 
   protocol/            # 跨层冻结 ABI (v9_types.py)
@@ -123,14 +123,11 @@ godot-qwen-agent/
 # ═══════════════════════════════════════════════
 # 资产平面 (Asset Plane) — 数据与配置
 # ═══════════════════════════════════════════════
-  data/                # 纯数据 (大文件进 .gitignore)
-    knowledge/         #   知识库原始文件 (wiki, docs)
-    vector_db/         #   本地向量库持久化 (ChromaDB/FAISS)
+  data/
+    knowledge/         # 知识库原始文件 (gitignored)
+    vector_db/         # 向量库持久化 (gitignored)
 
-  tests/               # 测试
-  _legacy/             # V8 旧代码隔离区
-  .ai_reasoning/       # 推理链 + 计划归档
-  docs/                # 架构文档
+  tests/  _legacy/  .ai_reasoning/  docs/
 ```
 
 ## 关键不变量
