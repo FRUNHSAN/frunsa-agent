@@ -352,6 +352,47 @@ class PluginRegistry:
         lines.append(f"  frozen: {self._frozen}")
         return "\n".join(lines)
 
+    # ── ToolBridge 适配器 ──────────────────────────────
+
+    def get_tool_adapter(self) -> "HarnessToolRegistry":
+        """返回 HarnessToolRegistry — ToolBridge 兼容的接口。
+
+        ToolBridge 通过此适配器间接访问 COMPONENT_REGISTRY 中的旧工具。
+        不需要将旧工具注册为 ToolSlot 实例 — 适配器在调用时动态包装。
+        """
+        return HarnessToolRegistry()
+
+
+# ═══════════════════════════════════════════════════════════════
+# 工具发现 — 触发 COMPONENT_REGISTRY 的 @register_component 副作用
+# ═══════════════════════════════════════════════════════════════
+
+
+def discover_core_tools() -> int:
+    """触发 COMPONENT_REGISTRY.auto_discover() 导入旧工具模块。
+
+    旧工具 (WriteFile, ReadFile, RunPowershell 等) 通过
+    @register_component(\"tool\", \"write_file\") 装饰器注册到 COMPONENT_REGISTRY。
+    装饰器在模块首次 import 时触发。
+
+    此函数调用 auto_discover() 扫描 components/tools/*.py，
+    触发所有 @register_component 装饰器。
+    HarnessToolRegistry 随后可查询 COMPONENT_REGISTRY 获取工具。
+
+    Returns:
+        发现的工具数量。
+    """
+    try:
+        from core.contracts.registry import COMPONENT_REGISTRY, auto_discover
+    except ImportError:
+        logger.warning("core.contracts.registry 不可用，跳过旧工具发现")
+        return 0
+
+    auto_discover("components/tools")
+    names = COMPONENT_REGISTRY.list_strategies("tool")
+    logger.info(f"Core tools discovered: {len(names)} ({', '.join(names)})")
+    return len(names)
+
 
 # ═══════════════════════════════════════════════════════════════
 # HarnessToolRegistry — COMPONENT_REGISTRY → ToolBridge 适配器
@@ -448,14 +489,16 @@ class _ToolWrapper:
         self._name = name
         manifest = getattr(instance, "PLUGIN_MANIFEST", None)
         self._cancellable = getattr(manifest, "cancellable", True) if manifest else True
+        # 检测旧工具的 execute 是否接受 cancellation_token 参数
+        self._accepts_token = _exec_accepts_cancellation_token(instance)
 
     async def execute(self, params: dict[str, Any]) -> str:
-        """执行工具。注入取消令牌，序列化结果为 JSON。"""
+        """执行工具。注入取消令牌（若工具支持），序列化结果为 JSON。"""
         token = threading.Event()
 
         def _run():
             params_with_token = params
-            if self._cancellable:
+            if self._cancellable and self._accepts_token:
                 params_with_token = {**params, "cancellation_token": token}
             try:
                 return self._inst.execute(**params_with_token)
@@ -474,6 +517,16 @@ class _ToolWrapper:
             raise
 
         return _serialize_tool_result(result, self._name)
+
+
+def _exec_accepts_cancellation_token(instance: Any) -> bool:
+    """检测旧工具的 execute 方法是否接受 cancellation_token 参数。"""
+    import inspect
+    try:
+        sig = inspect.signature(instance.execute)
+        return "cancellation_token" in sig.parameters
+    except (ValueError, TypeError):
+        return False
 
 
 class _ToolResultStub:

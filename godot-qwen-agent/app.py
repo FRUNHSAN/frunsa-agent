@@ -61,13 +61,19 @@ def boot():
 
     registry = PluginRegistry()
 
-    # ── 阶段 2: 扫描三层 slots/ ──
+    # ── 阶段 2a: 发现原生 V9 插件 ──
+    from mainboard.plugin_sdk.registry import discover_core_tools
+
     base_dir = Path(os.path.dirname(__file__))
     results = discover_and_register(registry, base_dir)
-    print(f"[BOOT] Discovery: {len(results['success'])} loaded, "
+    print(f"[BOOT] V9 plugins: {len(results['success'])} loaded, "
           f"{len(results['failed'])} failed")
     for err in results["failed"]:
         print(f"[BOOT]   FAIL: {err}")
+
+    # ── 阶段 2b: 发现旧工具 (触发 @register_component 装饰器) ──
+    tool_count = discover_core_tools()
+    print(f"[BOOT] Core tools: {tool_count} discovered")
 
     # ── 阶段 3: 锁死舱门 (Freeze) ──
     registry.freeze()
@@ -77,8 +83,8 @@ def boot():
     telemetry = TelemetryBus(TelemetryConfig(storage_path="./v9_telemetry.jsonl"))
 
     llm_bridge = LLMBridge(provider, event_bridge, registry=registry)
-    tool_bridge = ToolBridge(_make_mock_registry(), event_bridge)
-    # V9.2a: PluginRegistry 替换 MockToolRegistry 后将自动桥接 COMPONENT_REGISTRY
+    tool_bridge = ToolBridge(registry.get_tool_adapter(), event_bridge)
+    # HarnessToolRegistry 桥接 COMPONENT_REGISTRY → ToolBridge 兼容接口
 
     # ── Observer + Adapter + Kernel ──
     observer = SemanticTrustObserver(semantic_engine=None)
