@@ -58,6 +58,19 @@ decisions:
     why: "安全仲裁器应该检测真正的危险波动，不是自然的 ODE 松弛。"
     impact: "mpc_kernel/kernel.py Step 3"
 
+  - id: d8_rule_engine_coverage
+    title: "规则引擎 100% 测试覆盖 + 沙盒防御"
+    problem: "新骨架零测试覆盖。文件系统工具缺路径校验。"
+    solution: "14 个规则引擎测试 (hit/miss/conflict/legacy)。沙盒用 Path.relative_to() 替代 str.startswith() 免疫前缀欺骗。"
+    why: "安全修复不能用字符串 startswith 判断路径包含。测试不依赖注册顺序避免 flaky。"
+    impact: "tests/v9_integration/test_rule_engine.py, components/tools/filesystem_tools.py"
+
+  - id: d9_deferred_reward
+    title: "冻结方向 3 — 隐式奖励推迟到 V10"
+    problem: "CLI 环境无法捕获编辑距离/代码复制。没有 RL 训练循环消费 reward 数据。"
+    decision: "V9.2 封版不做。_compute_reward 保持返回 0.0。V10 配合 RL 基础设施一起做。"
+    why: "收集噪音伪信号比没信号更糟糕。YAGNI。"
+
 bugs_fixed:
   - "KernelEvent 重复定义 — protocol.v9_types vs event.py (event_type vs type)"
   - "_extract_params 把所有参数当必填 — timeout=15 有默认值却被当作 required"
