@@ -1,0 +1,68 @@
+# Reasoning Chain: V9.1 — RealTrackC Pipeline (Tool Execution + Critic with Retry)
+chain_id: v9_1_realtrackc_pipeline
+title: "V9.1 RealTrackC 管道 — 旧 track_c.py 执行逻辑迁移到 V9 Harness"
+created_at: "2026-06-14T15:00:00Z"
+status: active
+tags: [v9.1, track_c, pipeline, tool_execution, critic, retry, data_policy,
+       safety_threshold, fault_isolation, structured_errors, no_planning]
+related_chains: [v9_0_harness_architecture, v5_3_dual_sensor_fusion,
+                  v6_engine_landing]
+
+context: |
+  V9.0 CLI ran full pipeline but `_DefaultTrackC` was a simplified stub:
+  Planning → Tool → Critic without retry, without Critic scoring,
+  without DataPolicy-driven thresholds.
+
+  Old `core/track_c.py` (~1200 lines) had complete pipeline logic —
+  DAG topology, multi-layer retry, streaming buffer, physical verification,
+  dual-track critic. But it was tightly coupled to the REPL monolith.
+
+  V9.1 migrates the CORE execution logic (Tool → Critic → retry)
+  while DELIBERATELY leaving out Planning, DAG, and physical verification
+  for later versions.
+
+decision: |
+  RealTrackC = Tool Execution + Critic. No Planning LLM call.
+
+  Rationale: In V9, the kernel already decides EXECUTE_TOOL and provides
+  tool_calls through 8-gate arbitration and safety arbiter. Adding a
+  Planning LLM call inside Track C would create DUAL DECISION AUTHORITY —
+  two parallel centers making conflicting decisions.
+
+  Critic pass/fail threshold = policy.safety_threshold (kernel dynamic,
+  range [0.50, 0.75]) — NOT a hardcoded 0.70. This eliminates semantic
+  drift between kernel's safety posture and Track C's quality bar.
+
+  Tool failures → structured error objects {"tool", "result", "error"}
+  — not raw string concatenation. TOOL_FAILURE events emitted to
+  EventBridge. TRACK_C_LATENCY telemetry for audit.
+
+rationale: |
+  - Preserves kernel as sole decision authority
+  - policy.safety_threshold dynamically drives retry (tight when trust
+    low, loose when trust high)
+  - Structured errors are parseable by Critic (vs. NL noise)
+  - Fault isolation prevents single tool crash from killing pipeline
+  - Planning deferred to V9.2+ — can be an Observer plugin or RL slot
+
+future_guidance: |
+  - V9.2: DAG topology (Kahn, BFS, semaphore) for parallel tool dispatch
+  - V9.2: DualTrackCritic streaming buffer gate
+  - V9.3: Physical verification (sandbox, AST) for code generation
+  - V10: Planning as RL-learned policy slot (not LLM call)
+
+anti_patterns:
+  - "Call llm://planning inside Track C" — dual authority conflict.
+    Kernel already decided EXECUTE_TOOL.
+  - "Hardcode 0.70 as Critic threshold" — ignores kernel's dynamic θ.
+    Use policy.safety_threshold.
+  - "String-concatenate tool errors" — NL noise for Critic.
+    Use structured dicts.
+  - "Let tool exception crash the pipeline" — fault isolation required.
+    Each tool in try/except.
+
+evidence:
+  - 30/30 integration tests passing (v9_integration)
+  - CLI smoke test: "今天星期几" no longer returns empty string
+  - 2 files changed: harness/track_c.py (+130), harness/harness.py (+2)
+  - RealTrackC injectable via Harness constructor (1 line swap)

@@ -13,7 +13,7 @@
 # Schema: schemas/reasoning_chain.schema.json
 
 library_version: 1
-last_updated: "2026-06-14T18:00:00Z"
+last_updated: "2026-06-14T20:00:00Z"
 
 # ── Chains by architectural layer ────────────────────────────────────
 
@@ -482,6 +482,14 @@ chains:
     title: "Real LLM Orchestration + Critic Engines: 全链路真枪实弹"
     layer: engine
     tags: [real_engine, orchestration, critic, factory_di, contract_locking, metadata_slot, engine_isolation, deterministic_mock, adapter_reuse, stub_reference, sufficiency_report, multi_agent]
+    status: active
+
+  # ── V9.1: RealTrackC Pipeline ──
+  - chain_id: v9_1_realtrackc_pipeline
+    file: chains/v9_1_realtrackc_pipeline.yaml
+    title: "V9.1 RealTrackC 管道 — 旧 track_c.py 执行逻辑迁移到 V9 Harness"
+    layer: harness
+    tags: [v9.1, track_c, pipeline, tool_execution, critic, retry, data_policy, safety_threshold]
     status: active
 
   # ── V9.0: Harness Architecture ──
