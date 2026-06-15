@@ -78,13 +78,20 @@ def boot():
     # ── 阶段 3: 锁死舱门 (Freeze) ──
     registry.freeze()
 
-    # ── 四条总线 (注入 registry) ──
+    # ── 四条总线 ──
     event_bridge = EventBridge()
     telemetry = TelemetryBus(TelemetryConfig(storage_path="./v9_telemetry.jsonl"))
 
     llm_bridge = LLMBridge(provider, event_bridge, registry=registry)
     tool_bridge = ToolBridge(registry.get_tool_adapter(), event_bridge)
-    # HarnessToolRegistry 桥接 COMPONENT_REGISTRY → ToolBridge 兼容接口
+
+    # ── 阶段 4: 两阶段点火 — 给饥饿插件喂依赖 ──
+    injected = registry.inject_context({
+        "llm_bridge": llm_bridge,
+        "tool_bridge": tool_bridge,
+        "event_bridge": event_bridge,
+    })
+    print(f"[BOOT] Dependency injection: {injected} plugin(s) fed")
 
     # ── Observer + Adapter + Kernel ──
     observer = SemanticTrustObserver(semantic_engine=None)
@@ -97,10 +104,11 @@ def boot():
     print(f"[BOOT] Sensor Hub: {sensor.read_metrics()}")
     print(f"[BOOT] Power MCU: healthy={power.is_healthy()}")
 
-    # ── Harness ──
+    # ── Harness (接收已注入依赖的 Registry) ──
     harness = Harness(
         observer, adapter, kernel,
         llm_bridge, tool_bridge, event_bridge, telemetry,
+        registry=registry,
     )
     print("[BOOT] V9.2 Harness 就绪")
 

@@ -1,0 +1,8 @@
+{
+  "name": "real_track_c",
+  "slot_type": "track",
+  "version": "1.0.0",
+  "protocol_version": "9.2.0",
+  "description": "V9 Track C — Tool Execution → Critic pipeline with retry loop",
+  "capabilities": ["critic_retry"]
+}

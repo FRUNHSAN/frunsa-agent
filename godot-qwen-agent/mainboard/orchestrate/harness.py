@@ -35,7 +35,6 @@ from types import MappingProxyType
 
 from protocol.v9_types import KernelInput, KernelState, NextAction
 from mainboard.bus.telemetry import TraceRecord
-from mainboard.track.track_c import RealTrackC
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +76,7 @@ class Harness:
         tool_bridge,
         event_bridge,
         telemetry,
-        track_c=None,
+        registry=None,
         config: HarnessConfig = HarnessConfig(),
     ):
         self.observer = observer
@@ -87,8 +86,20 @@ class Harness:
         self.tool = tool_bridge
         self.event = event_bridge
         self.telemetry = telemetry
-        self.track_c = track_c or RealTrackC(llm_bridge, tool_bridge, event_bridge)
         self.cfg = config
+
+        # 从 PluginRegistry 获取已注入依赖的 Track C 单例
+        if registry is not None:
+            self.track_c = registry.get("track", "real_track_c")
+            if self.track_c is None:
+                raise RuntimeError(
+                    "Track C not found in PluginRegistry. "
+                    "Bootloader must register Track C before creating Harness."
+                )
+        else:
+            # 向后兼容: 没有 registry 时保留硬编码 fallback (V9.2a 过渡)
+            from mainboard.track.track_c import RealTrackC
+            self.track_c = RealTrackC(llm_bridge, tool_bridge, event_bridge)
 
         # 运行时状态
         self._kernel_state = None

@@ -12,10 +12,10 @@
       }
     },
     "track": {
-      "C": {
-        "module": "mainboard.track.track_c",
-        "class": "RealTrackC",
-        "description": "Tool Execution → Critic pipeline (no planning)"
+      "real_track_c": {
+        "module": "mainboard.slots.tracks.real_track_c.main",
+        "class": "RealTrackCPlugin",
+        "description": "V9 Track C — 两阶段点火: inject() 接收总线依赖"
       }
     },
     "observer": {

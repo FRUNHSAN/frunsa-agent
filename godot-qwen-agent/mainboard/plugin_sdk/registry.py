@@ -335,6 +335,61 @@ class PluginRegistry:
                     f"Loaded: {total}, Unresolved lazy: {lazy_remaining}"
                 )
 
+    # ── 依赖注入 (两阶段点火: 阶段 2) ────────────────
+
+    def inject_context(self, context: dict[str, Any]) -> int:
+        """向所有声明了 requires 的插件注入依赖。
+
+        必须在 freeze() 之后调用。
+        遍历所有已注册插件，若插件声明了 requires 属性，
+        则调用 inject(context) 喂食。
+
+        Args:
+            context: {"llm_bridge": ..., "tool_bridge": ..., "event_bridge": ...}
+
+        Returns:
+            成功注入的插件数量。
+
+        Raises:
+            RuntimeError: Registry 尚未冻结。
+            ValueError: 某个插件的依赖在 context 中缺失。
+        """
+        if not self._frozen:
+            raise RuntimeError(
+                "Cannot inject context before freezing the Registry."
+            )
+
+        injected_count = 0
+        for stype, plugins in self._store.items():
+            for name, plugin in plugins.items():
+                requires = getattr(plugin, "requires", None)
+                if requires is None:
+                    continue
+
+                # 检查 context 是否满足依赖
+                missing = requires - frozenset(context.keys())
+                if missing:
+                    raise ValueError(
+                        f"Plugin '{stype}/{name}' requires {missing}, "
+                        f"but context is missing these keys."
+                    )
+
+                # 喂食
+                if hasattr(plugin, "inject"):
+                    plugin.inject(context)
+                    injected_count += 1
+                    logger.info(
+                        f"Injected dependencies into {stype}/{name}: "
+                        f"{', '.join(sorted(requires))}"
+                    )
+
+        if injected_count > 0:
+            logger.info(
+                f"Dependency injection complete. "
+                f"Fed {injected_count} stateful plugin(s)."
+            )
+        return injected_count
+
     # ── 调试 ──────────────────────────────────────────
 
     def summary(self) -> str:
