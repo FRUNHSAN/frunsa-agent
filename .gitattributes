@@ -1,0 +1,8 @@
+# Documentation language detection for GitHub linguist
+*.md linguist-detectable=true
+*.py linguist-language=Python
+*.yaml linguist-language=YAML
+*.json linguist-language=JSON
+
+# Auto-detect line endings
+* text=auto

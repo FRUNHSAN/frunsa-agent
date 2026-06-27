@@ -1,0 +1,34 @@
+Godot-Qwen-Agent — Embodied AI Microkernel (MPC Decision Microkernel)
+Copyright 2026 李政远 (FRUNHSAN)
+
+This product includes software developed by 李政远 (FRUNHSAN).
+
+The MPC microkernel architecture (mpc_kernel/) and the Seven Iron Laws
+are original contributions by 李政远 (FRUNHSAN).
+
+Patent claims covering the following contributions are licensed under
+the Apache 2.0 Patent Grant (Section 3 of the Apache License, Version 2.0):
+
+- Continuous state vector ODE integration with frame-rate-independent
+  EMA relaxation (mpc_kernel/ode_integrator.py)
+
+- Eight-gate priority-chain routing with Schmitt trigger thresholds
+  (mpc_kernel/route_controller.py)
+
+- Hoyer sparsity + Lipschitz gradient safety arbitration with
+  three-tier degradation matrix (mpc_kernel/safety_arbiter.py)
+
+- Boundary/Cost/Value policy slot protocol for pluggable learned
+  decision modules (mpc_kernel/slots/policy_slots.py)
+
+- Pure-function kernel_step() with zero-natural-language I/O and
+  DecisionTrace formal replay (mpc_kernel/kernel.py)
+
+---
+
+Documentation (docs/embodied-microkernel-plan/, docs/V5-V6-*.md,
+.ai_reasoning/, and all .md files under docs/) is licensed under
+Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0).
+
+To view a copy of this license, visit:
+https://creativecommons.org/licenses/by-sa/4.0/
