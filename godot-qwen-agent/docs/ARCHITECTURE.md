@@ -137,3 +137,16 @@ godot-qwen-agent/
 - 总线状态保全：管道中断时 checkpoints 不丢弃
 - 事件合并：drain() 按 `(type, tool_name)` 分组
 - 所有公共类型 `@dataclass(frozen=True)` + `MappingProxyType`
+
+## 部署域
+
+MPC 内核通过 `mainboard/bus/` 总线矩阵与外部系统对接。同一内核可部署于两个域，内核代码零改动——仅替换总线实现和 Observer：
+
+| 域 | Observer | 总线 | 动作空间 | 控制频率 |
+|----|----------|------|---------|---------|
+| 语义 Agent | NL文本解析 | LLMBus, ToolBus | GENERATE / TOOL / WAIT / CLARIFY | 秒级（对话轮次） |
+| 具身智能 | 传感器融合 | ROS2 Bus, ActuationBus | MOVE / YIELD / STOP / OBSERVE / ENGAGE | 毫秒级（1000Hz 控制环路） |
+
+内核代码零改动——仅替换总线实现和 Observer。这是铁律 #3（零自然语言 I/O）的直接工程后果：16 个 float 不关心它们来自对话文本还是激光雷达。
+
+> 参见：[embodied-microkernel-plan/08-architecture-diagram.md](embodied-microkernel-plan/08-architecture-diagram.md) — 完整架构图、时序预算与双域部署细节

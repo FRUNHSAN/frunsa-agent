@@ -124,3 +124,11 @@ Python 3.12+ / pytest / llama.cpp (GBNF) / DeepSeek API / sentence-transformers 
 - [CLAUDE.md](CLAUDE.md) — 45 条架构不变式
 - [AUDIT.md](AUDIT.md) — 全栈架构审计
 - [.ai_reasoning/](.ai_reasoning/) — 10 条推理链
+
+---
+
+## 具身智能方向（新建）
+
+本项目的 MPC 内核设计为**领域无关**——16 维状态向量和 8 门路由控制器不关心驱动的是对话 Agent 还是机器人。同一内核可部署于两个域（语义 Agent / 具身智能），内核代码零改动。
+
+> 详见 [docs/embodied-microkernel-plan/](docs/embodied-microkernel-plan/) — 面向具身智能领域的协作入口、面试材料与 7 个可独立成文的研究方向。

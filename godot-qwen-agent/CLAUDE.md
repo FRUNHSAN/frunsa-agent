@@ -4,15 +4,19 @@
 
 This project is a **contract-driven, three-platform agent system**. Every architectural decision is recorded in `.ai_reasoning/`. Before writing any code, you MUST consult the reasoning chain library. After completing complex work, you MUST archive new decisions.
 
-**Current: V7.4 已交付 / V7.5 规划中 — 内核的时间与自我跃迁。** See [PLAN8.md](PLAN8.md) for V5 foundation.
+**Current: V9.2c (MPC Microkernel)** — 5 layers, 4 buses, 7 iron laws, 63 invariants.
+See [docs/embodied-microkernel-plan/](docs/embodied-microkernel-plan/) for external-facing documentation.
+V7-V8 history: Contract engine → Mathematical adaptive contract → Physical critic + Identity manifold → V9 MPC kernel.
 
 **Active PLANs:**
-- [V7.4+V7.5 Plan](C:\Users\1\.claude\plans\agent-rag-prompt-temporal-petal.md) — **V7.4 Identity Manifold (delivered)** + **V7.5 Entropy Monitor (planned)**: cross-session identity continuity via M_id ⊂ ℝ¹² + active concern via sublevel set filtration
-- [PLAN8.md](PLAN8.md) — **V5 Mathematical Adaptive Contract**: Wasserstein-Schrödinger gradient flow + meta-adapt trigger (foundation)
+- [V7.4](.ai_reasoning/chains/v7_4_identity_manifold.yaml) — **V7.4 Identity Manifold (delivered)**: 12-dim M_id ⊂ ℝ¹², OU process, Betti detection
+- [V7.5](.ai_reasoning/chains/v7_5_entropy_monitor.yaml) — **V7.5 Entropy Monitor (delivered)**: sublevel set filtration, information theory
+- [V9.0](.ai_reasoning/plans/v9.0_harness_architecture.md) — **V9.0 MPC Kernel (delivered)**: 16-dim StateVector, 9-step pure-function kernel, 8-gate route controller
+- [V9.2c](.ai_reasoning/plans/v9.2c_finalization.md) — **V9.2c Finalization (current)**: rule engine test coverage + sandbox defense
 
 **Latest Reasoning Chains:**
-- `.ai_reasoning/chains/v7_4_identity_manifold.yaml` — V7.4: 12-dim identity flow, OU process, Betti detection, 10 patches
-- `.ai_reasoning/chains/v7_5_entropy_monitor.yaml` — V7.5: entropy monitor, information theory, natural transformation, 6 fixes
+- `.ai_reasoning/chains/v9_0_harness_architecture.yaml` — V9.0: MPC kernel, 7 iron laws, pure function boundary
+- `.ai_reasoning/chains/v7_9_planning_contract_injection.yaml` — V7.9: topological homomorphism audit, quantization debt register
 
 **Archived PLANS** (DEPRECATED_BY_V5, see `.ai_reasoning/archive/`):
 - PLAN1-7 — Historical phases from contract kernel through environmental physics. Superseded by the variation-selection-retention Darwinian triad. Retained for reference; do not use as implementation guide.
@@ -217,7 +221,7 @@ These invariants govern the four control surfaces that drive the adaptive contra
 | # | Invariant | Source |
 |---|----------|--------|
 | 46 | **Multiplicative Gating, Never Additive**: penalty from two independent risk sources MUST be multiplied. `penalty = α·f(σ²)·g(e_t)`. Either factor at 0 → entire penalty 0. Additive coupling causes single-factor leakage — high σ² alone lowers Critic standards even when output quality is fine. | V6 Critic Design (Session 66-70) |
-| 47 | **HardTanh, Never Sigmoid**: all control signals MUST use deadzone+ramp+saturation. `g(e_t) = clamp((e_t - 0.55)/0.15, 0, 1)`. Deadzone must be trully "dead" — sigmoid's asymptotic residual (~0.01) leaks noise into the control loop, causing limit-cycle oscillation and integrator windup. | V6 Activation Function Debate |
+| 47 | **HardTanh, Never Sigmoid**: all control signals MUST use deadzone+ramp+saturation. `g(e_t) = clamp((e_t - 0.55)/0.15, 0, 1)`. Deadzone must be truly "dead" — sigmoid's asymptotic residual (~0.01) leaks noise into the control loop, causing limit-cycle oscillation and integrator windup. | V6 Activation Function Debate |
 | 48 | **Critic Uses Drift-Only f, Not Fused f**: `θ = θ₀ - α·f_drift(d)·g(e)`. Critic MUST NOT use the dual-sensor fused factor `Φ(d,c)`. Lucid suppression (clarity>0.80→min) would blind Critic to semantic-space instability during topic switches. Critic's sensitivity to drift is a feature — the quality bar from round N-1 may not apply to round N's new topic. | V5.3 Planning/Critic Signal Split |
 | 49 | **Planning Uses Dual-Sensor Fused f**: `n = branch_count(Φ(d,c))`. Planning branch count MUST use fused drift⊕clarity. Search width is determined by intent uncertainty — a lucid user (high clarity) doesn't need exploration even during topic switches. | V5.3 Scene 4 Calibration |
 | 50 | **Signal over Schedule**: static heuristics (time-of-day, round count, session length) MUST NOT drive control decisions. All control signals must derive from behavioral data (drift, clarity, e(t), trust). Principle #4. | V5.2 Observer Downgrade |

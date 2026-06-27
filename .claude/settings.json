@@ -78,7 +78,8 @@
       "WebFetch(domain:iclr.cc)",
       "Bash(python -m pytest tests/v9_integration/ -q --tb=short)",
       "Bash(timeout 60 python v9_cli.py)",
-      "Bash(python -m pytest tests/v9_integration/ -q)"
+      "Bash(python -m pytest tests/v9_integration/ -q)",
+      "Bash(git -C d:/agent log --oneline -30)"
     ],
     "additionalDirectories": [
       "\\tmp"
