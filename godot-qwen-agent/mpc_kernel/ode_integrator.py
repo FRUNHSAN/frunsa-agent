@@ -118,7 +118,7 @@ def integrate_state(
         t = ((trust - dynamics.crisis_threshold) /
              (dynamics.recovery_threshold - dynamics.crisis_threshold))
         baseline = _lerp(dynamics.crisis_baseline, dynamics.recovery_baseline, t)
-        tau = dynamics.tau_decay
+        tau = dynamics.tau_recovery  # B2: 恢复区独立 τ（原与 tau_decay 耦合）
     else:
         # 健康区: baseline → 1.0，慢建立
         baseline = dynamics.healthy_baseline

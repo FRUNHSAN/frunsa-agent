@@ -263,6 +263,7 @@ class TrustDynamics:
     tau_build: float = 600.0
     tau_error: float = 30.0
     tau_tsr: float = 300.0
+    tau_recovery: float = 200.0   # B2: 恢复区独立时间常数（原与 tau_decay 耦合）
 
     eta_trust_fail: float = -0.30
     eta_trust_adopt: float = 0.10
@@ -276,3 +277,26 @@ class TrustDynamics:
     recovery_threshold: float = 0.50
     recovery_baseline: float = 0.50
     healthy_baseline: float = 1.0
+
+    def __post_init__(self) -> None:
+        """B1: τ_eff 安全守卫 — 防止恢复区隐式时间常数爆炸。
+
+        ode_integrator 恢复区: baseline 从 crisis_baseline 线性滑到
+        recovery_baseline。有效时间常数 τ_eff = tau_recovery / (1-a)，
+        其中 a = (recovery_baseline - crisis_baseline) / denom。
+        要求 τ_eff < 10 × tau_recovery → a < 0.9。
+        """
+        denom = self.recovery_threshold - self.crisis_threshold
+        if denom <= 0:
+            raise ValueError(
+                f"recovery_threshold ({self.recovery_threshold}) must "
+                f"exceed crisis_threshold ({self.crisis_threshold})"
+            )
+        a = (self.recovery_baseline - self.crisis_baseline) / denom
+        if a >= 0.90:
+            raise ValueError(
+                f"Recovery zone too steep: a = ({self.recovery_baseline} - "
+                f"{self.crisis_baseline}) / {denom} = {a:.3f} ≥ 0.90. "
+                f"τ_eff would exceed 10× tau_recovery. "
+                f"Reduce recovery_baseline or increase crisis_baseline."
+            )

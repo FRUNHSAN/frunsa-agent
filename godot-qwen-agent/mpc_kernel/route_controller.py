@@ -175,17 +175,36 @@ def gate_p4_cold_start(
 def gate_p5_error_streak_up(
     sv: StateVector, state: KernelState, signals: RouteSignals,
 ) -> Optional[GateResult]:
-    """P5: e_t 连续上升 ≥ 2 且 e_t > 0.55 → TOOL (加资源)。"""
+    """P5: e_t 连续上升 ≥ 2 且 e_t > 0.55 → TOOL (加资源)。
+
+    RL BoundaryPolicy 影子模式接入 (E1): rl_rec 仅记录不改变硬阈值。
+    V10 → 完整影子模式（所有门求值 → 收集 RL 推荐 → 不限于触发门）。
+    """
+    # SHADOW_MODE_LIMITATION (V10): rl_rec is only recorded when P5 triggers.
+    # Non-trigger frames discard the RL recommendation — full shadow mode
+    # requires route_controller to collect RL evals from ALL gates, not just
+    # the first-triggered one. This is V10 gate-vector work.
+    rl_rec = None
+    boundary = state.slot_registry.get("boundary")
+    if boundary is not None:
+        try:
+            rl_rec = boundary.evaluate(tuple(sv))  # StateVector → tuple[float,...]
+        except Exception:
+            rl_rec = None  # RL 故障 → 静默降级，不影响硬阈值逻辑
+
     e_t = sv[1]
     if state.e_inc_streak >= 2 and e_t > 0.55:
+        operands = {
+            "e_t": e_t, "threshold": 0.55,
+            "inc_streak": state.e_inc_streak, "min_streak": 2,
+        }
+        if rl_rec is not None:
+            operands["rl_boundary"] = rl_rec
         return GateResult(
             action=NextAction.EXECUTE_TOOL,
             gate_id="P5_ERROR_STREAK_UP",
             reason=f"e_t rising ×{state.e_inc_streak} — {e_t:.3f} > 0.55",
-            operands=MappingProxyType({
-                "e_t": e_t, "threshold": 0.55,
-                "inc_streak": state.e_inc_streak, "min_streak": 2,
-            }),
+            operands=MappingProxyType(operands),
             next_mode=SystemMode.NORMAL,
         )
     return None
