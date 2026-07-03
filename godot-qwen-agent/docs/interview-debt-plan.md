@@ -48,8 +48,8 @@
 
 | ID | 债务项 | 严重度 | 当前状态 | 候选人是否识别 | 修复方向 | 预估工作量 |
 |---|---|---|---|---|---|---|
-| B1 | **恢复区 τ 参数耦合（静默炸弹）** — Lerp baseline 线性化使 `τ_eff = τ_decay/(1−a)`。若有人把 `crisis_baseline` 从 0.30 调到 0.20，`a` → 6/7 ≈ 0.857，`τ_eff` 暴涨到 ~840s | 🔴 | 代码无保护。调参者不会预期此连锁反应 | ✅ 完整分析 | ①立即加 `tau_recovery` 独立字段 ②在调参文档中记录 `τ_eff` 公式 ③加 assertion：`crisis_baseline < recovery_baseline * 0.85` | 1d |
-| B2 | **`TrustDynamics` 缺 `tau_recovery` 字段** — 只有 `tau_decay`(120s) 和 `tau_build`(600s)，恢复区速度与危机区绑死 | 🔴 | [v9_types.py:262-265] 可验证 | ✅ 识别并指出是"意外后果" | 在 `TrustDynamics` 中新增 `tau_recovery: float = 200.0`，在 `ode_integrator.py` 恢复区分支中引用 | 0.5d |
+| B1 | ✅ **恢复区 τ 参数耦合（静默炸弹）** — Lerp baseline 线性化使 `τ_eff = τ_decay/(1−a)`。若有人把 `crisis_baseline` 从 0.30 调到 0.20，`a` → 6/7 ≈ 0.857，`τ_eff` 暴涨到 ~840s | ~~🔴~~ ✅ | ✅ 已修复 (2026-07-03, bed3435): 新增 `tau_recovery=200.0` 独立字段，恢复区 τ 切换到 `tau_recovery`。`__post_init__` 加动态 assertion——`(recovery_baseline−crisis_baseline)/denom < 0.90`，物理条件守卫 τ_eff 不超过 10× 名义值 | ✅ 完整分析 | ~~①加 tau_recovery ②文档化 τ_eff ③加 assertion~~ → 已全部完成 | 1d ✅ |
+| B2 | ✅ **`TrustDynamics` 缺 `tau_recovery` 字段** — 只有 `tau_decay`(120s) 和 `tau_build`(600s)，恢复区速度与危机区绑死 | ~~🔴~~ ✅ | ✅ 已修复 (2026-07-03, bed3435): `tau_recovery: float = 200.0` 已新增，`ode_integrator.py` 恢复区分支已引用 | ✅ 识别 | ~~新增 tau_recovery 字段~~ → 已完成 | 0.5d ✅ |
 | B3 | **Event 脉冲 × Lerp baseline 双重惩罚** — 事件脉冲同时拉低 trust 和 baseline，在事件密集场景下产生 path-dependent slowdown | 🟡 | 代码逻辑可推导，无测试覆盖，无文档 | ✅ 完整分析 | 编写回归测试：模拟"连续 3 次 TOOL_FAILURE + trust 在恢复区"场景，记录恢复时间并文档化预期行为 | 1d |
 | B4 | **参数耦合关系未形式化文档化** — `τ_eff = τ/(1−a)` 的推导、`crisis_baseline` 调参影响分析，全未写入任何设计文档 | 🟡 | 仅存在于候选人头脑中 | ✅ 识别 | 在 `ode_integrator.py` 模块级 docstring 中写入"参数调优须知"一节，含 `τ_eff` 公式和参数联动表 | 0.5d |
 | B5 | **安全裕度 `safety_margin[7]` 未激活** — `sm = 1.0` 是占位符（[ode_integrator.py:130]），ODE 维度标注 RESERVED，动力学未设计 | 🟢→🔴 | 需要基于真实机器人数据的物理仿真标定 | ✅ 识别 | Phase 1: 在仿真中标定。Phase 2: 在真实机器人上验证 | 1-2w |
@@ -88,7 +88,7 @@
 
 | ID | 债务项 | 严重度 | 当前状态 | 候选人是否识别 | 修复方向 | 预估工作量 |
 |---|---|---|---|---|---|---|
-| E1 | **RL 策略槽位是旁观者，不参与决策** — `slot_registry` 传入整个调用链（kernel→route_controller→eval_state），8 个门函数零个调用 `slot_registry.get("boundary").evaluate()`。`safety_arbiter` 的 `SLOT_RL_ACTIVE` 只打标记不读取返回值 | 🔴 | 钩子就位，线路未接 | ✅ 通过代码审计发现 | ①先在 1 个门函数（建议 P5 error_streak）中接入 RL 推荐作为影子仲裁输入 ②验证 e2e 数据流 | 3-5d |
+| E1 | ✅ **RL 策略槽位是旁观者，不参与决策** — `slot_registry` 传入整个调用链（kernel→route_controller→eval_state），8 个门函数零个调用 `slot_registry.get("boundary").evaluate()`。`safety_arbiter` 的 `SLOT_RL_ACTIVE` 只打标记不读取返回值 | ~~🔴~~ 🟡 | ✅ 部分修复 (2026-07-03, bed3435): P5 门已接入 BoundaryPolicy 影子模式——`rl_rec` 写入 `GateResult.operands["rl_boundary"]`，RL 故障时静默降级。限制：非触发帧丢弃 RL 推荐（标注 `SHADOW_MODE_LIMITATION (V10)`）。完整影子模式待 V10 门向量升级 | ✅ 通过代码审计发现 | ~~①P5 门接入 RL 推荐 ②验证 e2e 数据流~~ → ①已完成，②数据流已打通 | ~~3-5d~~ → 2d ✅ |
 | E2 | **安全仲裁器对 Sim2Real 静默失效三重盲区** — (a) Lipschitz 只看 `‖ΔStateVector‖`，FORWARD 动作状态变化小不触发；(b) Hoyer 区分传感器故障不看决策错误；(c) 根本性缺失：无"该状态下 FORWARD 是否合理"的判断器 | 🔴 | 架构假设"危险来自状态跳变"在具身域不成立 | ✅ 精确诊断 | 新增行动语义验证器（Action Semantic Validator）：给定 (state, action, context) 三元组，返回合理性评分 | 2-3w（研究级） |
 | E3 | **RL 策略缺少不确定性量化（UQ）输出** — `BoundaryPolicy.evaluate()` 只返回 `float ∈ [0,1]`，不返回 epistemic uncertainty 或 KL divergence | 🔴 | Protocol 定义最小化，需扩展 | ✅ 识别 | 扩展 `PolicyOutput` 协议为 `(action_prob, epistemic_unc, kl_from_training)`。ensemble 3 个不同 seed 的模型即可起步 | 3-5d |
 | E4 | **缺少 OOD 检测门** — 门链之前无 RL 分布外检测器，RL 即使 KL 散度极大也会输出动作且不被拦截 | 🟡 | 设计思路已给出（`gate_p0_ood_guard`），零实现 | ✅ 识别 | 在门链最前端插入 OOD 门：`epistemic_unc > 0.70 → 禁用 RL slot，fallback 到确定性门` | 2d |
