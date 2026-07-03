@@ -10,7 +10,6 @@ build/
 *.docx
 .vs/
 .claude/settings.local.json
-.gitignore
 *.db-shm
 *.db-wal
 .archive/
@@ -18,3 +17,6 @@ build/
 # Binary artifacts
 *.dll
 *.gguf
+
+# Third-party repos cloned inside legacy
+godot-qwen-agent/_legacy/v8_llama/
