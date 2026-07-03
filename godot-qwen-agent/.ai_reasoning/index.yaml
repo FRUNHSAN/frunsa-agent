@@ -500,6 +500,14 @@ chains:
     tags: [v9.0, harness, kernel_isolation, bus_architecture, mpc_kernel, ode, route_controller, safety_arbiter, policy_slots, five_layers, four_buses, pure_function, frozen_protocol, control_data_separation]
     status: active
 
+  # ── V9.3: Kernel Debt Cleanup ──
+  - chain_id: v9_3_kernel_debt_cleanup
+    file: chains/v9_3_kernel_debt_cleanup.yaml
+    title: "V9.3 内核搬迁前技术债清理 — ODE τ 解耦 + RL 影子模式接入"
+    layer: kernel
+    tags: [v9.3, tech_debt, ode_integrator, tau_recovery, route_controller, rl_slot, boundary_policy, shadow_mode, game_engine, kernel_migration]
+    status: active
+
 # ── Tag index for quick lookup ───────────────────────────────────────
 
 tag_index:
@@ -769,7 +777,13 @@ tag_index:
   mcp: [v7_5_entropy_monitor]
   harness: [v9_0_harness_architecture, v9_1_realtrackc_pipeline, v9_2b_hardcoded_elimination]
   plugin: [v9_2b_hardcoded_elimination]
-  kernel: [v9_2b_hardcoded_elimination]
+  kernel: [v9_2b_hardcoded_elimination, v9_3_kernel_debt_cleanup]
   router: [v9_2b_hardcoded_elimination]
   tool_resolver: [v9_2b_hardcoded_elimination]
   lipschitz: [v9_2b_hardcoded_elimination]
+  tech_debt: [v9_3_kernel_debt_cleanup]
+  ode_integrator: [v9_3_kernel_debt_cleanup]
+  rl_slot: [v9_3_kernel_debt_cleanup]
+  boundary_policy: [v9_3_kernel_debt_cleanup]
+  game_engine: [v9_3_kernel_debt_cleanup]
+  kernel_migration: [v9_3_kernel_debt_cleanup]

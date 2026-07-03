@@ -1,0 +1,126 @@
+# Reasoning Chain: V9.3 — Pre-migration Kernel Debt Cleanup (B1 B2 E1)
+chain_id: v9_3_kernel_debt_cleanup
+title: "V9.3 内核搬迁前技术债清理 — ODE τ 解耦 + RL 影子模式接入"
+created_at: "2026-07-03T18:00:00Z"
+status: active
+tags: [v9.3, tech_debt, ode_integrator, tau_recovery, route_controller,
+       rl_slot, boundary_policy, shadow_mode, game_engine, kernel_migration]
+related_chains: [v9_0_harness_architecture, v9_1_realtrackc_pipeline]
+
+context: |
+  从 37 项面试暴露的技术债中筛选出 3 个会随 MPC 内核代码传染到新游戏引擎
+  项目的阻塞项。筛选规则：只有被新项目"直接导入"的资产中的债务才是阻塞项。
+  游戏引擎只 import mpc_kernel/ + protocol/，不 import core/repl.py 或
+  core/track_c.py 等 agent bridge 层。
+
+  B1+B2（ODE τ 参数耦合）:
+    ode_integrator.py 恢复区（crisis_threshold ≤ trust < recovery_threshold）
+    使用 tau_decay 作为时间常数，但 baseline 经由 _lerp(crisis_baseline,
+    recovery_baseline, t) 驱动。这产生隐式耦合 τ_eff = τ_decay / (1-a)，
+    其中 a = (recovery_baseline − crisis_baseline) / (recovery_threshold −
+    crisis_threshold)。若有人调 crisis_baseline，τ_eff 可能暴涨到 ~840s。
+
+  E1（RL 策略槽位是旁观者）:
+    slot_registry 传入 KernelState → route_controller → 8 个门函数，
+    但零个门函数调用 slot_registry.get("boundary").evaluate()。
+    SLOT_RL_ACTIVE 只打标记不读取返回值——RL 策略是空壳。
+
+  红队三轮审查确认：
+  - C2（response_verbose_level 枚举）和 C3（_lambda_hint if/elif bin）在
+    agent bridge 层，游戏引擎不使用 → 不阻塞搬迁，降级到 V10
+  - B1+B2 与 E1 无 import 依赖 → 可并行执行
+  - C2 爆炸半径 25 文件/134 引用，因降级而不受影响
+
+decision: |
+  1. B1+B2: 新增 tau_recovery 字段 + 解耦恢复区 ODE
+     - protocol/v9_types.py: TrustDynamics 新增 tau_recovery: float = 200.0
+     - __post_init__ 加动态 assertion:
+       denom = recovery_threshold - crisis_threshold
+       assert denom > 0
+       assert (recovery_baseline - crisis_baseline) / denom < 0.90
+     - mpc_kernel/ode_integrator.py: 恢复区 tau = dynamics.tau_decay 改为
+       tau = dynamics.tau_recovery
+
+  2. E1: P5 门（gate_p5_error_streak_up）接入 BoundaryPolicy 影子模式
+     - 调用 boundary.evaluate(tuple(sv)) 获取 rl_rec float
+     - RL 故障时静默降级（try/except → rl_rec = None）
+     - rl_rec 写入 GateResult.operands["rl_boundary"]
+     - 硬阈值逻辑不变（e_inc_streak ≥ 2 ∧ e_t > 0.55）
+     - SHADOW_MODE_LIMITATION (V10) 注释：非触发帧丢弃 RL 推荐，
+       完整影子模式需 V10 门向量升级
+
+  3. C2/C3 降级不修 —— agent bridge 层债务，不传染游戏引擎项目
+     C2: 25 文件 / 134 处 response_verbose_level 引用
+     C3: track_c.py _lambda_hint 5 分支
+     游戏引擎用自己的 Observer + Executor 直接消费 DataPolicy.verbosity_budget
+
+rationale: |
+  为什么选 P5 而非其他门作为 RL 接入点：
+    - P5 有明确的数值触发条件（e_inc_streak ≥ 2 ∧ e_t > 0.55），
+      RL 可以学"这个阈值该松还是该紧"
+    - P0/P1 涉及安全关键决策，不宜作为第一个 RL 实验
+    - P4 使用 PROXY 维度（context_depth），信号质量不足以支撑 RL
+
+  为什么用影子模式而非直接替代硬阈值：
+    - RL 策略未经过真实环境标定——无可靠性数据
+    - 影子模式让 RL 积累数据而不引入实控风险
+    - 硬阈值逻辑提供安全兜底
+
+  为什么 assertion 用动态分母而非硬编码 0.35：
+    - ode_integrator.py:118-119 的 t 计算公式动态使用 recovery_threshold
+      和 crisis_threshold
+    - 硬编码 0.35 会在有人修改阈值时断言守卫错误的 a 值
+    - 动态分母 + denom > 0 守卫覆盖了阈值被设反的边缘情况
+
+  为什么 C2 爆炸半径这么大却降级：
+    - 传染判定规则基于 import 路径，不是基于"感觉"
+    - 游戏引擎只 import mpc_kernel/ + protocol/，不 import core/
+    - response_verbose_level 的 25 个文件全部在 core/ 及 tests/ 下
+    - DataPolicy.verbosity_budget 在内核侧已是连续 float，游戏引擎直接用
+
+alternatives:
+  - alternative: "全部 5 项按原计划串行执行（~7.5 天）"
+    rejected: "红队审查发现 C2 爆炸半径 25 文件，C2/C3 的依赖关系是虚构的，
+              且 C2/C3 根本不传染游戏引擎项目"
+  - alternative: "C2 全量迁移——改 25 个文件"
+    rejected: "爆炸半径过大（20+ 测试会炸），ROI 不足以证明阻塞搬迁是必要的。
+              V10 统一迁移时再做"
+  - alternative: "E1 用 P1（trust crisis）作为接入点"
+    rejected: "P1 是安全关键门——trust < 0.10 时强制 WAIT。在安全路径上
+              做第一个 RL 实验风险太高。P5 是性能优化路径，失败后果可控"
+  - alternative: "影子模式记录所有帧（包括非触发帧）"
+    rejected: "当前 route_controller 在第一个触发门上 break，无法收集未触发
+              门的 RL 推荐。这是 V10 门向量升级的工作（for...break → 全门求值）"
+
+evidence:
+  - test_file: tests/v9_integration/test_kernel_pipeline.py
+    test_cases: 30 个 V9 内核测试全部通过
+  - manual_verification: TrustDynamics assertion 正确拦截危险参数组合
+    (recovery_baseline=1.0, crisis_baseline=0.30 → a=2.0 >= 0.90)
+  - manual_verification: P5 门触发时 operands["rl_boundary"] = 1.0
+    (trust=0.08 < boundary.threshold=0.10)
+  - manual_verification: P5 门非触发时返回 None
+    (e_inc_streak=1 < 2 → RL 推荐被丢弃，符合 SHADOW_MODE_LIMITATION 预期)
+
+future_guidance: |
+  游戏引擎项目（frunly gaming engine）搬迁清单：
+    直接导入: StateVector, ODE 积分器, 安全仲裁器, RL 策略槽位 Protocol
+    接口适配: 8 门路由（游戏专用门函数）, ControlFrame（动作枚举扩展）
+    仅作概念参考: Observer 接口, 63 条不变式, 量化债务表
+
+  搬迁后的第一步: 实现 game_observer.py（场景状态 → 16 维 StateVector），
+  再接入 raylib 渲染循环，验证 2D 上楼梯 demo（~700 行新代码）。
+
+  V10 路线图（两个项目共享）:
+    - 门向量升级: for...break → [g(...) for g in gates] + arbitration_matrix
+    - 完整影子模式: 所有门求值 → 收集 RL 推荐 → 不限于触发门
+    - C2 全量迁移: response_verbose_level 枚举 → 连续 float
+    - C3 去 bin: _lambda_hint 5 分支 → 2-3 zone 纯连续模板
+
+anti_patterns:
+  - "假设两个模块有依赖关系，仅仅因为它们在同一个 plan 中": B1+B2 和 E1
+    实际上互不依赖——改的是不同的文件，import 路径不相交
+  - "基于'感觉应该修'而非 import 路径判定传染性": C2 和 C3 在 agent bridge
+    层，被"感觉"判定为阻塞项——实际它们根本不传染游戏引擎
+  - "硬编码数学常数作为 assertion 阈值": 0.35 是 recovery_threshold -
+    crisis_threshold 的当前值——但设计意图是动态的，assertion 应与代码一致
