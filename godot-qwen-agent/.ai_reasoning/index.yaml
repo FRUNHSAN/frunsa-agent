@@ -13,7 +13,7 @@
 # Schema: schemas/reasoning_chain.schema.json
 
 library_version: 1
-last_updated: "2026-07-05T00:00:00Z"
+last_updated: "2026-07-05T12:00:00Z"
 
 # ── Chains by architectural layer ────────────────────────────────────
 
@@ -549,5 +549,12 @@ chains:
     title: "V7.9 拓扑同态审计 — H(ε) 度量 + 量化债务表 + 约束体系的自指闭环"
     layer: kernel
     tags: [v7.9, topological_homomorphism, semantic_domain_isolation, boolean_collapse, boundary_precomputation, quantization_debt, self_reference]
+    status: active
+
+  - chain_id: 2026-07-05-cell-constraint-derivation
+    file: chains/2026-07-05-cell-constraint-derivation.md
+    title: "细胞器档案约束推导注入 — 从验尸报告到解剖图谱：6块物理必然性推导"
+    layer: meta
+    tags: [constraint-engineering, cell-biology, methodology, derivation, first-principles, degeneracy, second-messenger, mitochondria, er, lysosome, interactome]
     status: active
 
