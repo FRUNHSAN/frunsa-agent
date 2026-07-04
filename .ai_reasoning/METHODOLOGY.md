@@ -53,6 +53,7 @@ created: 2026-07-03
 supersedes: []
 superseded_by: []
 related: []
+files: []
 produces_invariants: []
 red_flags:
   - "不要在 assertion 中硬编码数学常数作为阈值"
@@ -137,6 +138,11 @@ draft → active → stale → superseded → archived
 **关键规则**：废弃不等于删除。`superseded` 和 `archived` 的链移入 `archive/` 目录，保留完整元数据（废弃日期、取代者 ID、废弃原因）。禁止物理删除。这是假基因原则。
 
 **链审计**：每到大版本或 Protocol 7 触发时，检查所有 `active` 链的 `files` 字段——如果文件已不存在，将 status 改为 `archived`。如果链连续 3 次迭代未被触发 → 标记 `stale`。
+
+**related vs supersedes/superseded_by 的区分**：
+- `related`：平级关联——两条链涉及同一模块或同一约束体系的不同方面，但互不替代。例：kernel-migration 和 sdf-terrain 都涉及 safety_arbiter.py。
+- `supersedes`：纵向替代——新链**部分或全部取代**了旧链的决策。旧链 status → `superseded`，填写 `superseded_by`。新链填写 `supersedes`。
+- 判断标准：如果旧链的 Anti-Patterns 在新链生效后**不再适用**→ 用 supersedes。如果两条链的约束同时生效 → 用 related。
 
 ---
 
@@ -380,7 +386,7 @@ chains:
 ## 十二、新项目起步
 
 ```bash
-mkdir -p .ai_reasoning/chains .ai_reasoning/archive
+mkdir -p .ai_reasoning/chains .ai_reasoning/archive .ai_reasoning/plans
 ```
 
 1. 复制本文档到 `.ai_reasoning/METHODOLOGY.md`
