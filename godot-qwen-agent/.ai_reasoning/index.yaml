@@ -13,7 +13,7 @@
 # Schema: schemas/reasoning_chain.schema.json
 
 library_version: 1
-last_updated: "2026-07-05T12:00:00Z"
+last_updated: "2026-07-05T23:00:00Z"
 
 # ── Chains by architectural layer ────────────────────────────────────
 
@@ -556,5 +556,12 @@ chains:
     title: "细胞器档案约束推导注入 — 从验尸报告到解剖图谱：6块物理必然性推导"
     layer: meta
     tags: [constraint-engineering, cell-biology, methodology, derivation, first-principles, degeneracy, second-messenger, mitochondria, er, lysosome, interactome]
+    status: active
+
+  - chain_id: 2026-07-05-degeneracy-engineering-translation
+    file: chains/2026-07-05-degeneracy-engineering-translation.md
+    title: "简并性是 L1 基础设施 + 工程翻译层：从哲学命题到可 falsify 的工程判据"
+    layer: meta
+    tags: [degeneracy, engineering_translation, cell_framework, falsifiability, methodology]
     status: active
 
