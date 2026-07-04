@@ -21,6 +21,44 @@ V7-V8 history: Contract engine → Mathematical adaptive contract → Physical c
 **Archived PLANS** (DEPRECATED_BY_V5, see `.ai_reasoning/archive/`):
 - PLAN1-7 — Historical phases from contract kernel through environmental physics. Superseded by the variation-selection-retention Darwinian triad. Retained for reference; do not use as implementation guide.
 
+## Constraint System — AI Entry Point
+
+在改任何代码前，按此顺序检索约束体系。
+
+### 冷启动约束
+
+在完成必读（1-2）之前，AI 不得输出工程建议。
+输出可包含：问题澄清、文件检索、概念解释。
+输出不可包含：代码修改建议、架构决策建议、新约束提议。
+违反 → Protocol 0 WARNING。
+
+### 必读（首次会话，~5 分钟）
+
+1. `.ai_reasoning/METHODOLOGY.md` — 推理链的读写规则
+2. `docs/constraint-engineering-theory/16-AI协作者约束协议.md` — Protocol 0-7，你的行为约束
+
+### 按需检索（每次任务）
+
+1. `.ai_reasoning/index.yaml` — grep tags/layer 找相关链
+2. 匹配链的 Future Guidance + Anti-Patterns（这些是约束，不是建议）
+3. 匹配链的 `related:` 字段 → 横截面遍历相关约束
+
+### 深入理解（不改代码时读，每个标了阅读时间）
+
+- `docs/constraint-engineering-theory/00-范式宣言.md` (3 min) — 约束式工程是什么
+- `docs/constraint-engineering-theory/05-内核的约束拓扑.md` (15 min) — 7 铁律作为能量景观
+- `docs/constraint-engineering-theory/10-约束式工程实践方法论.md` (12 min) — 6 步检查清单
+- `docs/constraint-engineering-theory/12-反模式目录.md` (10 min) — Protocol 2 扫描的 10 项
+
+### 闭环链路
+
+```
+CLAUDE.md（地图） → METHODOLOGY.md（方法论） → index.yaml（索引）
+    → 具体链（约束） → related:/produces_invariants: → 更多链和不变量
+```
+
+每一步指向下一步。不需要反复决策"接下来看什么"。
+
 ## Project Identity: 契约关系体，不是指令执行器
 
 This is NOT an Agent framework. This is the first implementation of a **Contractual Relational Entity** — an intelligent system whose core primitive is not "executing instructions" but "maintaining and evolving relationships through verifiable contracts."
