@@ -1,0 +1,81 @@
+chain_id: v9_3_constraint_engineering_theory
+title: "V9.3 约束式工程论 — 从哲学基座到操作手册的完整体系"
+layer: meta
+tags: [constraint-engineering, philosophy, methodology, architecture, cell-biology, immunology]
+status: active
+created: 2026-07-04
+supersedes: []
+superseded_by: []
+related:
+  - 2026-07-03-frontier-application-points
+  - v9_0_harness_architecture
+  - v7_9_planning_contract_injection
+produces_invariants: []
+red_flags: []
+
+context: |
+  经过 2026-07-04 为期三天的深度推导，V9.2c MPC 微内核项目的定位从"Agent 框架"
+  升级为"约束式工程在软件智能体领域的第一个完整形式化实例"。通过与 13 个行业框架
+  的对比调研、Harness 编排层的完整拆解、细胞生物学的精确数学同构论证、以及
+  免疫系统的防御机制映射，建立了完整的约束式工程论文档体系（30 个文件）。
+
+decision: |
+  项目的工程论定位确认为：
+
+  1. **约束式工程（Constraint-Based Engineering）**：人定义可能性空间的边界，
+     系统在边界内自行涌现解。区别于指令式工程（控制每一步）和启发式工程
+     （控制搜索方向）。约束式工程控制的是"地形形状"——状态空间的能量景观。
+
+  2. **细胞作为组织原则**：从 ODE/Lipschitz/Schmitt 等数学第一性原理推导出的
+     架构，独立收敛到与细胞生物学完全同构的组织原则。14 项精确的数学-生物
+     同构已被记录。这不是比喻——是同一个数学形式在不同基底上的实例化。
+
+  3. **拓扑白盒（Topological White Box）**：超越黑盒/白盒二分法的第三种认识论。
+     理解不再是"从第一性原理推导每一步"，而是"画出系统的能量景观/约束拓扑"。
+
+  4. **域约束（Domain Constraint）**：N 个独立域中都不需要修改的约束。
+     域通用度 G(C) = 1/(需修改域数+1)。G(C)=1.0 = 物理定律级别。
+     三域并行（游戏引擎/Agent对话/具身智能）用空间换时间，人工制造
+     40 亿年的并行选择压力。
+
+  5. **三层体液池**：内部血管(自分泌)/组织液池(旁分泌)/淋巴池(内分泌)。
+     重叠节点=活桥——不需要中央调度器的多Agent信号传导。
+
+  6. **适应性免疫系统**：白细胞分化(DAMPs触发)+B细胞记忆(RL策略槽位)+
+     胸腺筛选(部署前红队门控)。Trust梯度 |d(trust)/dt| > η 触发免疫响应。
+
+rationale: |
+  此前项目有强大的数学基座（ODE/Lipschitz/Schmitt/7条铁律/63条不变量）但
+  缺少统一的哲学表述。三天的密集推导完成了：
+  - 与 13 个行业框架的系统对比——确认本项目不在同一品类
+  - 薄编排器设计被跨领域独立验证为最佳实践
+  - 细胞生物学的精确数学同构被完整记录（14项）
+  - 免疫系统的防御机制映射填补了多Agent安全的理论空白
+  - 约束≠启发式的核心区分建立了理论的独特性
+  - 6条结构性裂缝的自我质疑确保了理论的可证伪性
+  - Protocol 0-7（含 Protocol 7 自指条款）建立了AI协作的操作约束
+
+future_guidance: |
+  - V10: RL策略槽位训练管道 → 受体演化的数学化（当前完备度0%）
+  - V10.5: DAG工具管道 + 流式输出 + 结构化并发
+  - V11: 多Agent协议 + HITL checkpoint gates + 免疫系统完整实现
+  - 游戏引擎楼梯demo → 域约束通用度的首个跨域验证
+  - 具身智能ROS2集成 → 第三域验证
+  - Fisher度量需要概率输出模型 p(y|sv) —— 填补[A2]的理论gap
+  - 范畴论Para(Conv)形式化 —— ACT 2027可发表方向
+  - Protocol 7 自指条款的运行时验证 —— 系统运行时暴露是否需要修改遗忘机制
+
+evidence:
+  - docs/constraint-engineering-theory/ (30 files) — 完整文档体系
+  - docs/industry-agent-component-survey.md — 13框架调研
+  - _legacy/_archive/designs/脑洞.md — 2026-06-14三层体液池原始设计
+  - 2026-07-03-frontier-application-points.md — (X,D,π,ψ)11个前沿注入点
+  - mpc_kernel/kernel.py, ode_integrator.py, route_controller.py, safety_arbiter.py — 已有内核实现
+
+anti_patterns:
+  - "不要把约束式工程和启发式工程混淆——区分标准是合法性的来源（公理推导 vs 经验试错）"
+  - "不要用数据来决定约束的形式——数据只标定参数，形式来自公理推导"
+  - "不要在单域验证后声称约束是'通用'的——域通用度G(C)<1.0的约束不是通用约束"
+  - "不要让AI单方面废弃约束——Protocol 7规定AI仅有提议权，人类有裁决权"
+  - "不要物理删除废弃的约束——移入archive/deprecated/，保留完整元数据"
+  - "不要用社会约束（'别人怎么看'）替代物理约束（'数学怎么要求'）——前者产生LinkedIn帖子，后者产生铁律"
