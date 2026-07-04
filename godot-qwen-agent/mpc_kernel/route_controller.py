@@ -273,6 +273,10 @@ def route_controller(
 ) -> tuple[NextAction, DecisionTrace, KernelState]:
     """V9 路由控制器 — 纯函数。零副作用。
 
+    @chain:     2026-07-05-v9-kernel-architecture   — 8 门优先级链，Bang-bang 控制，Schmitt 触发器
+    @invariant: INV-007                     — 拓扑同态 H(ε) ≥ 0.50 守卫
+    @verified:  2026-07-05
+
     顺序:
       1. Streak 更新 — 比较本轮 e_t 与上轮 e_t（EPS=1e-4 防浮点抖动）
       2. Pre-exit — 模式退出，不参与门仲裁

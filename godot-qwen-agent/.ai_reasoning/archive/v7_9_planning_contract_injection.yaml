@@ -2,7 +2,8 @@
 chain_id: v7_9_planning_contract_injection
 title: "V7.9 Planning LLM 契约注入 — 语义域隔离 + 边界预计算 + 连续置信度"
 created_at: "2026-06-11T22:00:00Z"
-status: active
+status: superseded
+superseded_by: 2026-07-05-v7-topological-homomorphism
 tags: [v7.9, planning, contract_injection, semantic_domain_isolation, planning_hint,
        semantic_confidence, boolean_collapse, topological_homomorphism,
        boundary_precomputation, explicit_parameter]

@@ -1,7 +1,8 @@
 chain_id: v6_engine_landing
 title: "V6 引擎落地 — V5 控制面在引擎层的完全体：DAG拓扑 + Wasserstein校准 + 偏置张量裂变"
 created_at: "2026-06-09"
-status: active
+status: superseded
+superseded_by: 2026-07-05-v6-engine-constraint-topology
 context: |
   V5 建立了四条控制面（Path 1/2/3 + 路由），但执行层（Planning/Orch/Critic）
   的参数仍由硬编码或单一标量驱动。V5.3 将 Path 2 升级为 drift⊕clarity 双传感器

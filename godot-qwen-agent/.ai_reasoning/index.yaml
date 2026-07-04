@@ -13,7 +13,7 @@
 # Schema: schemas/reasoning_chain.schema.json
 
 library_version: 1
-last_updated: "2026-06-14T20:00:00Z"
+last_updated: "2026-07-05T00:00:00Z"
 
 # ── Chains by architectural layer ────────────────────────────────────
 
@@ -210,13 +210,14 @@ chains:
     tags: [hitl, human_in_the_loop, renegotiate, anti_corruption, protocol, hexagonal]
     status: active
 
-  # ── PLAN2: Relational OS ──
+  # ── PLAN2: Relational OS [superseded] ──
   - chain_id: plan2_relational_os
-    file: chains/plan2_relational_os.yaml
+    file: archive/plan2_relational_os.yaml
     title: "PLAN2 Relational OS: Intentional Violation + Blind Test + RelationalField + EmbodiedReflex + RenegotiationWatcher"
     layer: plan
     tags: [plan2, intentional_violation, blind_test, relational_field, embodied_reflex, renegotiation_watcher, golden_params]
-    status: active
+    status: superseded
+    superseded_by: 2026-07-05-plan2-blind-test
 
   # ── PLAN3: Prompt Seed ──
   - chain_id: plan3_prompt_seed
@@ -356,13 +357,14 @@ chains:
     tags: [v4, consent_learning, feedback_loop]
     status: active
 
-  # ── V5: Mathematical Adaptive Contract ──
+  # ── V5: Mathematical Adaptive Contract [superseded] ──
   - chain_id: v5_math_adaptive_contract
-    file: chains/v5_math_adaptive_contract.yaml
+    file: archive/v5_math_adaptive_contract.yaml
     title: "V5 数学自适应契约 — 从伪自适应到 Grothendieck 纤维化"
     layer: plan
     tags: [v5, adaptive_contract, wasserstein, information_geometry, lyapunov, schrödinger_bridge, structure_preserving_reduction]
-    status: active
+    status: superseded
+    superseded_by: 2026-07-05-v5-constraint-paradigm
 
   - chain_id: v5_path3_execution_reflex
     file: chains/v5_path3_execution_reflex.yaml
@@ -392,12 +394,14 @@ chains:
     tags: [v5.3, dual_sensor_fusion, clarity, semantic_drift, planning_branch, critic_threshold, keyword_gate_deletion, dual_engine_observer, lucid_suppression, observe_dont_inject]
     status: active
 
+  # ── V6: Engine Landing [superseded] ──
   - chain_id: v6_engine_landing
-    file: chains/v6_engine_landing.yaml
+    file: archive/v6_engine_landing.yaml
     title: "V6 引擎落地 — V5 控制面完全体：DAG拓扑 + Wasserstein校准 + 偏置张量裂变"
     layer: plan
     tags: [v6, engine_landing, dag_topology, kahn_algorithm, semaphore, wasserstein_calibration, bayesian_smoothing, bias_tensor, path1_interlock, code_block_aware]
-    status: active
+    status: superseded
+    superseded_by: 2026-07-05-v6-engine-constraint-topology
 
   - chain_id: v7_physical_critic_streaming
     file: chains/v7_physical_critic_streaming.yaml
@@ -448,12 +452,14 @@ chains:
     tags: [v7.7, semantic_translator, sheaf_theory, fiber_bundle, local_section, null_region, product_fiber, joint_distribution, radon_nikodym, angular_distance, geodesic, injectivity_radius, cohomology, adaptive_contract]
     status: active
 
+  # ── V7.9: Planning Contract Injection [superseded] ──
   - chain_id: v7_9_planning_contract_injection
-    file: chains/v7_9_planning_contract_injection.yaml
+    file: archive/v7_9_planning_contract_injection.yaml
     title: "V7.9 Planning LLM 契约注入 — 语义域隔离 + 边界预计算 + 连续置信度"
     layer: plan
     tags: [v7.9, planning, contract_injection, semantic_domain_isolation, planning_hint, semantic_confidence, boolean_collapse, topological_homomorphism, boundary_precomputation]
-    status: active
+    status: superseded
+    superseded_by: 2026-07-05-v7-topological-homomorphism
 
   - chain_id: v8_0_trust_attenuation
     file: chains/v8_0_trust_attenuation.yaml
@@ -492,13 +498,14 @@ chains:
     tags: [v9.1, track_c, pipeline, tool_execution, critic, retry, data_policy, safety_threshold]
     status: active
 
-  # ── V9.0: Harness Architecture ──
+  # ── V9.0: Harness Architecture [superseded] ──
   - chain_id: v9_0_harness_architecture
-    file: chains/v9_0_harness_architecture.yaml
+    file: archive/v9_0_harness_architecture.yaml
     title: "V9.0 Harness 架构 — MPC 内核隔离 + 五层架构 + 四条总线 + 七铁律"
     layer: architecture
     tags: [v9.0, harness, kernel_isolation, bus_architecture, mpc_kernel, ode, route_controller, safety_arbiter, policy_slots, five_layers, four_buses, pure_function, frozen_protocol, control_data_separation]
-    status: active
+    status: superseded
+    superseded_by: 2026-07-05-v9-kernel-architecture
 
   # ── V9.3: Kernel Debt Cleanup ──
   - chain_id: v9_3_kernel_debt_cleanup
@@ -508,282 +515,39 @@ chains:
     tags: [v9.3, tech_debt, ode_integrator, tau_recovery, route_controller, rl_slot, boundary_policy, shadow_mode, game_engine, kernel_migration]
     status: active
 
-# ── Tag index for quick lookup ───────────────────────────────────────
+  # ── 2026-07-05: Cold-start rewrites (METHODOLOGY.md format) ──
+  - chain_id: 2026-07-05-v9-kernel-architecture
+    file: chains/2026-07-05-v9-kernel-architecture.md
+    title: "V9.0 MPC 内核架构 — 七条铁律的形式推导"
+    layer: kernel
+    tags: [v9.0, kernel, iron_laws, five_layer_architecture, four_buses, mpc_kernel, pure_function, topological_homomorphism]
+    status: active
 
-tag_index:
-  architecture: [phase_01_three_platform]
-  data_model: [phase_01_data_integrity]
-  immutability: [phase_01_data_integrity]
-  pipeline: [phase_02_skip_propagation, phase_04_observability, phase_19_pipeline_composition]
-  skip: [phase_02_skip_propagation]
-  adapter: [phase_03_adapter_pattern, phase_05_external_io, phase_19_pipeline_composition]
-  protocol: [phase_03_adapter_pattern]
-  observability: [phase_04_observability]
-  health_check: [phase_04_observability, phase_05_external_io]
-  external_io: [phase_05_external_io, phase_07_llm_risks]
-  async: [phase_05_external_io, phase_08_async_native_evolution, phase_08_dag_streaming_semantics]
-  engine: [phase_08_async_native_evolution, phase_08_dag_streaming_semantics]
-  dag: [phase_08_async_native_evolution, phase_08_dag_streaming_semantics]
-  concurrency: [phase_08_async_native_evolution, phase_08_dag_streaming_semantics]
-  event_loop: [phase_08_async_native_evolution]
-  resource_lifecycle: [phase_08_async_native_evolution]
-  exception_handling: [phase_05_external_io]
-  llm: [phase_07_llm_risks, phase_07_implementation_reality]
-  reranker: [phase_07_llm_risks, phase_07_implementation_reality]
-  generation: [phase_07_llm_risks, phase_07_implementation_reality]
-  anti_patterns: [phase_07_llm_risks, phase_07_implementation_reality]
-  frozen_dataclass: [phase_07_implementation_reality]
-  budget: [phase_07_implementation_reality]
-  grammar_engine: [phase_19_pipeline_composition]
-  graceful_degradation: [phase_07_implementation_reality]
-  mock_backend: [phase_07_implementation_reality]
-  streaming: [phase_08_async_native_evolution, phase_08_dag_streaming_semantics]
-  merge: [phase_08_dag_streaming_semantics]
-  sentinel: [phase_02_skip_propagation, phase_08_dag_streaming_semantics]
-  backpressure: [phase_08_dag_streaming_semantics]
-  error_propagation: [phase_08_dag_streaming_semantics]
-  internal_stream: [phase_08_dag_streaming_semantics]
-  stream_isolation: [phase_08_dag_streaming_semantics]
-  user_facing_stream: [phase_08_dag_streaming_semantics]
-  auto_merge: [phase_08_dag_streaming_semantics]
-  thread_pool: [phase_08_async_native_evolution]
-  cloud_native: [phase_09_multi_engine_architecture_vision]
-  transport: [phase_09_multi_engine_architecture_vision]
-  pace_shaping: [phase_09_multi_engine_architecture_vision]
-  multi_engine: [phase_09_multi_engine_architecture_vision, phase_10_planning_engine_selection, phase_10_planning_engine_integration]
-  wire_format: [phase_09_multi_engine_architecture_vision]
-  planning: [phase_10_planning_engine_selection, phase_15_planning_engine]
-  agent_identity: [phase_15_planning_engine]
-  namespace: [phase_15_planning_engine]
-  sufficiency_report: [phase_15_planning_engine, phase_16_chaos_multi_agent, phase_18_real_orch_critic]
-  stress_test: [phase_15_planning_engine]
-  orchestration_contract: [phase_15_planning_engine]
-  auditability: [phase_19_pipeline_composition]
-  blueprint: [phase_19_pipeline_composition]
-  chaos: [phase_16_chaos_multi_agent]
-  retry: [phase_16_chaos_multi_agent]
-  multi_pool: [phase_16_chaos_multi_agent]
-  multi_agent: [phase_16_chaos_multi_agent, phase_18_real_orch_critic]
-  critic: [phase_16_chaos_multi_agent, phase_18_real_orch_critic]
-  engine_selection: [phase_10_planning_engine_selection]
-  adapter_validation: [phase_10_planning_engine_selection]
-  contract_testing: [phase_10_planning_engine_selection]
-  integration: [phase_10_planning_engine_integration]
-  trace_context: [phase_10_planning_engine_integration, phase_11_trace_contract_verification]
-  deadline: [phase_10_planning_engine_integration]
-  jitter: [phase_10_planning_engine_integration]
-  observability: [phase_04_observability, phase_05_external_io, phase_11_trace_contract_verification]
-  file_exporter: [phase_11_trace_contract_verification]
-  json_lines: [phase_11_trace_contract_verification]
-  registry: [phase_11_trace_contract_verification, phase_19_pipeline_composition]
-  component_candidate: [phase_11_trace_contract_verification, phase_12_observability_closed_loop]
-  streaming_trace: [phase_12_observability_closed_loop]
-  sqlite_sink: [phase_12_observability_closed_loop]
-  per_item: [phase_12_observability_closed_loop]
-  cost_boundary: [phase_12_observability_closed_loop]
-  schema_first: [phase_12_observability_closed_loop]
-  component_analysis: [phase_12_observability_closed_loop]
-  orchestration_pre_design: [phase_12_observability_closed_loop, phase_12_orchestration_trace_pre_design]
-  observability_closed_loop: [phase_12_observability_closed_loop, phase_12_orchestration_trace_pre_design]
-  orchestration: [phase_12_orchestration_trace_pre_design, phase_14_orchestration_engine, phase_16_chaos_multi_agent, phase_18_real_orch_critic]
-  trace_keys: [phase_12_orchestration_trace_pre_design, phase_13_component_trace_contracts]
-  traceability: [phase_19_pipeline_composition]
-  pre_design: [phase_12_orchestration_trace_pre_design]
-  schema_planning: [phase_12_orchestration_trace_pre_design]
-  component_trace: [phase_13_component_trace_contracts]
-  composition: [phase_19_pipeline_composition]
-  component_platform: [phase_13_component_trace_contracts]
-  engine_mapping: [phase_13_component_trace_contracts]
-  ast_scanning: [phase_14_orchestration_engine]
-  stub: [phase_14_orchestration_engine]
-  api_evolution: [phase_17_tech_debt_real_engine]
-  adapter_reuse: [phase_17_tech_debt_real_engine, phase_18_real_orch_critic]
-  deterministic_mock: [phase_17_tech_debt_real_engine, phase_18_real_orch_critic]
-  stub_reference: [phase_17_tech_debt_real_engine]
-  multi_engine_registry: [phase_17_tech_debt_real_engine]
-  real_engine: [phase_17_tech_debt_real_engine, phase_18_real_orch_critic]
-  backward_compat: [phase_17_tech_debt_real_engine]
-  agent_registry_refactor: [phase_17_tech_debt_real_engine]
-  factory_di: [phase_18_real_orch_critic]
-  contract_locking: [phase_18_real_orch_critic]
-  metadata_slot: [phase_18_real_orch_critic]
-  tool: [phase_22_muscle_layer]
-  repair: [phase_22_muscle_layer]
-  memory: [phase_22_muscle_layer]
-  mcp: [phase_22_muscle_layer]
-  battle: [phase_22_muscle_layer]
-  self_repair: [phase_22_muscle_layer]
-  kernel_service: [phase_23_kernel_service]
-  decorator: [phase_23_kernel_service]
-  hitl: [phase_24_hitl_renegotiate]
-  human_in_the_loop: [phase_24_hitl_renegotiate]
-  renegotiate: [phase_24_hitl_renegotiate]
-  anti_corruption: [phase_24_hitl_renegotiate]
-  protocol: [phase_03_adapter_pattern, phase_24_hitl_renegotiate]
-  hexagonal: [phase_24_hitl_renegotiate]
-  plan2: [plan2_relational_os]
-  intentional_violation: [plan2_relational_os]
-  blind_test: [plan2_relational_os]
-  relational_field: [plan2_relational_os]
-  embodied_reflex: [plan2_relational_os]
-  renegotiation_watcher: [plan2_relational_os]
-  golden_params: [plan2_relational_os]
-  plan3: [plan3_prompt_seed]
-  prompt_generator: [plan3_prompt_seed]
-  vibe_test: [plan3_prompt_seed]
-  inertia: [plan3_prompt_seed]
-  aggregator: [plan3_prompt_seed]
-  ports: [plan3_prompt_seed]
-  plan4: [plan4_bayesian_engine]
-  bayesian: [plan4_bayesian_engine]
-  surprise: [plan4_bayesian_engine]
-  telemetry: [plan4_bayesian_engine]
-  smart_decay: [plan4_bayesian_engine]
-  stage_directions: [plan4_bayesian_engine]
-  ab_test: [plan4_bayesian_engine]
-  llm_judge: [plan4_bayesian_engine]
-  plan5: [plan5_contract_lifecycle]
-  contract_lifecycle: [plan5_contract_lifecycle]
-  dynamic_blueprint: [plan5_contract_lifecycle]
-  system2: [plan5_contract_lifecycle]
-  constitution: [plan5_contract_lifecycle]
-  rollback: [plan5_contract_lifecycle]
-  plan6: [plan6_semantic_trust]
-  semantic_trust: [plan6_semantic_trust]
-  embedding: [plan6_semantic_trust]
-  sentence_transformers: [plan6_semantic_trust]
-  cosine_similarity: [plan6_semantic_trust]
-  plan7: [plan7_environmental_physics]
-  output_pipeline: [plan7_environmental_physics]
-  constrained_decoding: [plan7_environmental_physics]
-  environmental_physics: [plan7_environmental_physics]
-  post_processing: [plan7_environmental_physics]
-  v2: [v2_stream_interceptor]
-  stream_interceptor: [v2_stream_interceptor]
-  fsm: [v2_stream_interceptor]
-  online_learning: [v2_stream_interceptor]
-  ema: [v2_stream_interceptor]
-  v3: [v3_self_evolving_rag]
-  self_evolving: [v3_self_evolving_rag]
-  rag: [v3_self_evolving_rag]
-  chunking: [v3_self_evolving_rag]
-  instruction_gc: [v3_self_evolving_rag]
-  semantic: [v3_self_evolving_rag]
-  xray: [v3_self_evolving_rag]
-  v4: [v4_purge_and_harden]
-  purge: [v4_purge_and_harden]
-  registry_freeze: [v4_purge_and_harden]
-  repl_tests: [v4_purge_and_harden]
-  rag_tests: [v4_purge_and_harden]
-  dead_code: [v4_purge_and_harden]
-  engine_ignition: [v4_phase2_engine_ignition]
-  track_router: [v4_phase2_engine_ignition]
-  planning: [v4_phase2_engine_ignition]
-  orchestration: [v4_phase2_engine_ignition]
-  critic: [v4_phase2_engine_ignition]
-  rag_cache: [v4_phase2_engine_ignition]
-  track_c: [v4.1_phase3_track_c]
-  engine_deepening: [v4.1_phase3_track_c]
-  retry: [v4.1_phase3_track_c]
-  phase4: [v4.1_phase4_polish]
-  plan_granularity: [v4.1_phase4_polish]
-  output_truncation: [v4.1_phase4_polish]
-  semantic_char_cap: [v4.1_phase4_polish]
-  decoupling: [v4.3_decoupling_cleanup]
-  tool_format_registry: [v4.3_decoupling_cleanup]
-  invariant_fix: [v4.3_decoupling_cleanup]
-  tool_engine: [v4.3_tool_engine]
-  engine_pattern: [v4.3_tool_engine]
-  async_generator: [v4.3_tool_engine]
-  v5: [v5_math_adaptive_contract, v5_path3_execution_reflex, v5_binary_bangbang_router, v5.2_observer_downgrade, v5_3_dual_sensor_fusion]
-  adaptive_contract: [v5_math_adaptive_contract]
-  wasserstein: [v5_math_adaptive_contract]
-  information_geometry: [v5_math_adaptive_contract]
-  schrödinger_bridge: [v5_math_adaptive_contract]
-  structure_preserving_reduction: [v5_math_adaptive_contract]
-  path3: [v5_path3_execution_reflex]
-  execution_reflex: [v5_path3_execution_reflex]
-  spinal_reflex: [v5_path3_execution_reflex]
-  output_pipeline: [plan7_environmental_physics, v5_path3_execution_reflex]
-  truncation: [v5_path3_execution_reflex]
-  feedback_loop: [v5_path3_execution_reflex]
-  control_surface: [v5_path3_execution_reflex]
-  layered_adaptation: [v5_path3_execution_reflex]
-  binary_routing: [v5_binary_bangbang_router]
-  bang_bang_control: [v5_binary_bangbang_router]
-  pontryagin: [v5_binary_bangbang_router]
-  schmitt_trigger: [v5_binary_bangbang_router]
-  track_excision: [v5_binary_bangbang_router]
-  cost_cliff: [v5_binary_bangbang_router]
-  v5.3: [v5_3_dual_sensor_fusion]
-  dual_sensor_fusion: [v5_3_dual_sensor_fusion]
-  clarity: [v5_3_dual_sensor_fusion]
-  semantic_drift: [v5_3_dual_sensor_fusion]
-  planning_branch: [v5_3_dual_sensor_fusion]
-  critic_threshold: [v5_3_dual_sensor_fusion]
-  keyword_gate_deletion: [v5_3_dual_sensor_fusion]
-  dual_engine_observer: [v5_3_dual_sensor_fusion]
-  lucid_suppression: [v5_3_dual_sensor_fusion]
-  observe_dont_inject: [v5.2_observer_downgrade, v5_3_dual_sensor_fusion]
-  v6: [v6_engine_landing]
-  engine_landing: [v6_engine_landing]
-  dag_topology: [v6_engine_landing]
-  kahn_algorithm: [v6_engine_landing]
-  semaphore: [v6_engine_landing]
-  wasserstein_calibration: [v6_engine_landing]
-  bayesian_smoothing: [v6_engine_landing]
-  bias_tensor: [v6_engine_landing]
-  path1_interlock: [v6_engine_landing]
-  code_block_aware: [v6_engine_landing]
-  v7: [v7_physical_critic_streaming]
-  physical_critic: [v7_physical_critic_streaming]
-  sandbox_executor: [v7_physical_critic_streaming]
-  dual_track_critic: [v7_physical_critic_streaming]
-  error_mapper: [v7_physical_critic_streaming]
-  physical_budget: [v7_physical_critic_streaming]
-  streaming_synthesis: [v7_physical_critic_streaming]
-  track_a_fir: [v7_physical_critic_streaming]
-  hybrid_automaton: [v7_physical_critic_streaming]
-  loop_topology: [v7_physical_critic_streaming]
-  v7.4: [v7_4_identity_manifold]
-  identity: [v7_4_identity_manifold]
-  memory: [v7_4_identity_manifold]
-  manifold: [v7_4_identity_manifold]
-  ou_process: [v7_4_identity_manifold]
-  betti: [v7_4_identity_manifold]
-  percentile: [v7_4_identity_manifold]
-  sufficient_statistic: [v7_4_identity_manifold]
-  fisher_neyman: [v7_4_identity_manifold]
-  temporal_fingerprint: [v7_4_identity_manifold]
-  cold_start: [v7_4_identity_manifold]
-  red_team: [v7_4_identity_manifold]
-  self_calibration: [v7_4_identity_manifold, v5_3_dual_sensor_fusion]
-  dimensional_analysis: [v7_4_identity_manifold]
-  v7.5: [v7_5_entropy_monitor]
-  entropy: [v7_5_entropy_monitor]
-  watcher: [v7_5_entropy_monitor]
-  active: [v7_5_entropy_monitor]
-  concern: [v7_5_entropy_monitor]
-  tension: [v7_5_entropy_monitor]
-  sublevel_set: [v7_5_entropy_monitor]
-  filtration: [v7_5_entropy_monitor]
-  information_theory: [v7_5_entropy_monitor]
-  control_theory: [v7_5_entropy_monitor]
-  natural_transformation: [v7_5_entropy_monitor]
-  sigmoid: [v7_5_entropy_monitor]
-  normalization: [v7_5_entropy_monitor]
-  compatibility: [v7_5_entropy_monitor]
-  rag: [v3_self_evolving_rag, v7_5_entropy_monitor]
-  mcp: [v7_5_entropy_monitor]
-  harness: [v9_0_harness_architecture, v9_1_realtrackc_pipeline, v9_2b_hardcoded_elimination]
-  plugin: [v9_2b_hardcoded_elimination]
-  kernel: [v9_2b_hardcoded_elimination, v9_3_kernel_debt_cleanup]
-  router: [v9_2b_hardcoded_elimination]
-  tool_resolver: [v9_2b_hardcoded_elimination]
-  lipschitz: [v9_2b_hardcoded_elimination]
-  tech_debt: [v9_3_kernel_debt_cleanup]
-  ode_integrator: [v9_3_kernel_debt_cleanup]
-  rl_slot: [v9_3_kernel_debt_cleanup]
-  boundary_policy: [v9_3_kernel_debt_cleanup]
-  game_engine: [v9_3_kernel_debt_cleanup]
-  kernel_migration: [v9_3_kernel_debt_cleanup]
+  - chain_id: 2026-07-05-v5-constraint-paradigm
+    file: chains/2026-07-05-v5-constraint-paradigm.md
+    title: "V5 约束范式转折 — 从指令式到约束式的创世纪"
+    layer: kernel
+    tags: [v5, paradigm_shift, adaptive_contract, wasserstein, information_geometry, grothendieck_fibration, heuristic_vs_constraint]
+    status: active
+
+  - chain_id: 2026-07-05-v6-engine-constraint-topology
+    file: chains/2026-07-05-v6-engine-constraint-topology.md
+    title: "V6 引擎约束拓扑 — 梯度流在四引擎之间的路由与校准"
+    layer: harness
+    tags: [v6, engine_landing, constraint_topology, dag, wasserstein_calibration, bias_tensor, multiplicative_gating, hardtanh]
+    status: active
+
+  - chain_id: 2026-07-05-plan2-blind-test
+    file: chains/2026-07-05-plan2-blind-test.md
+    title: "PLAN2 盲测 — trust 非对称 EMA 的参数标定范例"
+    layer: kernel
+    tags: [plan2, blind_test, parameter_calibration, trust_ema, asymmetric_decay, golden_params, form_parameter_separation]
+    status: active
+
+  - chain_id: 2026-07-05-v7-topological-homomorphism
+    file: chains/2026-07-05-v7-topological-homomorphism.md
+    title: "V7.9 拓扑同态审计 — H(ε) 度量 + 量化债务表 + 约束体系的自指闭环"
+    layer: kernel
+    tags: [v7.9, topological_homomorphism, semantic_domain_isolation, boolean_collapse, boundary_precomputation, quantization_debt, self_reference]
+    status: active
+

@@ -49,6 +49,10 @@ def integrate_state(
 ) -> tuple[float, ...]:
     """ODE 积分器 — 纯函数。零副作用。
 
+    @chain:     v9_3_kernel_debt_cleanup    — ODE τ 解耦，tau_recovery 独立参数
+    @invariant: INV-064                     — τ_eff < 10× τ_recovery 守卫
+    @verified:  2026-07-05
+
     Args:
         prev_state_vector: 上轮裁剪后的 16 维 — ODE 维从此起步
         input_raw_vector:  当前 16 维观测 — INSTANT 维直传

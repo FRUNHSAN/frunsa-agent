@@ -1,7 +1,8 @@
 chain_id: v5_math_adaptive_contract
 title: "V5 数学自适应契约 — 从伪自适应到 Grothendieck 纤维化"
 created_at: "2026-06-07"
-status: active
+status: superseded
+superseded_by: 2026-07-05-v5-constraint-paradigm
 context: |
   用户指出 300 个 commit 构建的"自适应契约"本质是伪自适应——
   所有适应都是 `if score > threshold: field = new_value` 的确定性状态机。

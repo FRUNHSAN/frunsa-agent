@@ -129,7 +129,12 @@ def kernel_step(
     gates=DEFAULT_GATES,
     dynamics: TrustDynamics = TrustDynamics(),
 ) -> tuple[ControlFrame, KernelState]:
-    """V9 MPC 内核 — 单步决策。纯函数。零副作用。"""
+    """V9 MPC 内核 — 单步决策。纯函数。零副作用。
+
+    @chain:     2026-07-05-v9-kernel-architecture  — 五层架构 + 七铁律的形式推导
+    @invariant: INV-006                    — ‖Δsv‖₂ ≤ MAX_GRADIENT_NORM (0.30)
+    @verified:  2026-07-05
+    """
 
     # Step 0: NaN 入口 + Lamport 排序
     sv_raw = _sanitize_nan_and_inf(input.state_vector.data)

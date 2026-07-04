@@ -2,7 +2,8 @@
 chain_id: plan2_relational_os
 title: "Relational OS: Intentional Violation + Blind Test + Golden Params + RelationalField + EmbodiedReflex + RenegotiationWatcher"
 created_at: "2026-06-03T00:00:00Z"
-status: active
+status: superseded
+superseded_by: 2026-07-05-plan2-blind-test
 tags: [plan2, intentional_violation, blind_test, relational_field, embodied_reflex, renegotiation_watcher, golden_params]
 related_chains: [phase_24_hitl_renegotiate, phase_23_kernel_service]
 

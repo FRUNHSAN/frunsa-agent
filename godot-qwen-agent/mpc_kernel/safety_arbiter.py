@@ -111,6 +111,10 @@ def safety_arbiter(
 ) -> tuple[NextAction, DecisionTrace]:
     """V9 安全仲裁器 — 纯函数。零副作用。
 
+    @chain:     2026-07-05-v9-kernel-architecture   — Lipschitz 梯度有界 + 三级降级矩阵
+    @invariant: INV-006                     — ‖Δsv‖₂ ≤ MAX_GRADIENT_NORM (0.30)
+    @verified:  2026-07-05
+
     Returns:
         (动作, 填充了 shield_flags 和 slot_source 的 DecisionTrace)
     """

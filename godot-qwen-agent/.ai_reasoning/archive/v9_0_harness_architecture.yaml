@@ -2,7 +2,8 @@
 chain_id: v9_0_harness_architecture
 title: "V9.0 Harness 架构 — MPC 内核隔离 + 五层架构 + 四条总线"
 created_at: "2026-06-14T12:00:00Z"
-status: active
+status: superseded
+superseded_by: 2026-07-05-v9-kernel-architecture
 tags: [v9.0, harness, kernel_isolation, bus_architecture, mpc_kernel,
        llm_bridge, tool_bridge, event_bridge, telemetry_bus,
        control_data_separation, pure_function, frozen_protocol,
